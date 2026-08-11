@@ -1,0 +1,588 @@
+# =====================================================================
+# TFLN extended-DBR Pockels laser  (TOOLCHAIN VALIDATION)
+#
+# Replication target:
+#   A. Siddharth et al., "Ultrafast tunable photonic integrated Pockels
+#   extended-DBR laser", arXiv:2408.01743v1 (2024); published as
+#   Nature Photonics 19, 709-717 (2025).
+#
+# Purpose: this design exists to prove the design chain reproduces a
+# published, measured device before any of it is trusted on the TFLT radar
+# PICs.  Nothing here is a new design decision - every geometric number is
+# taken from the paper and cited inline.
+# =====================================================================
+
+meta:
+  name: edbr_tfln_baseline
+  title: "TFLN extended-DBR Pockels laser - replication baseline"
+  description: >
+    7.25 mm 3rd-order slab-coupled Bragg post grating on 400 nm X-cut thin-film
+    lithium niobate, butt-coupled to an InP RSOA, with coplanar gold electrodes
+    for Pockels tuning of the mirror.
+  reference: "arXiv:2408.01743v1 (Siddharth et al.); Nat. Photon. 19, 709 (2025)"
+  deliverable: "toolchain validation baseline"
+  status: baselined
+
+platform:
+  cut: x                              # X-cut: crystal c-axis in plane, across the ridge
+  film_material: LiNbO3
+  film_thickness_um: 0.400            # paper: 400 nm X-cut TFLN
+  etch_depth_um: 0.200                # paper: 200 nm etch, 200 nm slab remains
+  # ASSUMPTION, but a sourced one, and it replaces a value that was not
+  # physically attainable.  The paper does not quote a sidewall angle and 90 deg
+  # was carried here until 2026-08-04.  An ion-beam-etched thin-film lithium
+  # niobate ridge does not have a vertical wall.  The open Luxtelligence
+  # `lnoi400` kit declares `sidewall_angle = 13 deg` from the normal for the
+  # same 400 nm film, 200 nm etch, 4.7 um oxide stack, which is 77 deg in the
+  # convention used here.  That kit describes a different fabricator from the
+  # one that made the replicated device, so this remains an assumption about
+  # this device; it is now traceable to a process document for the same stack
+  # rather than to nothing.
+  #
+  # The change is first order: kappa rises by 35 % and lambda_B by 4.3 nm.  See
+  # sweep_pdk_sidewall.json and TOOLCHAIN_VALIDATION.md.
+  sidewall_deg: 77.0
+  box_material: SiO2
+  box_thickness_um: 4.7               # paper: 4.7 um buried oxide
+  clad_material: SiO2
+  clad_thickness_um: 2.0              # paper: 2 um high-density ICP-CVD SiO2
+  substrate_material: Si
+  propagation_loss_dB_per_cm: 0.2     # ASSUMPTION: typical for this process
+
+mesh:
+  d_fine_um: 0.010
+  d_coarse_um: 0.060
+  fine_margin_um: 0.6
+  subsample: 3
+  num_modes: 3
+  polarisation: TE                    # quasi-TE sees n_e and is modulated via r33
+
+waveguide:
+  top_width_um: 1.0                   # paper: 1 um wide ridge
+  wavelength_um: 1.5459               # paper: measured reflection at 1545.9 nm
+
+grating:
+  enabled: true
+  order: 3                            # paper: 3rd-order grating
+  period_um: 1.27979                  # paper: 1.27979 um period
+  length_um: 7250.0                   # paper: 7.25 mm long
+  post_width_um: 0.30                 # paper: 300 nm wide posts
+  post_gap_um: 0.63                   # paper: 630 nm from the waveguide top edge
+  post_length_um: 0.30                # square posts -> duty cycle 0.30/1.27979
+  # MEASURED, by the MPB band structure on the identical two-dimensional
+  # structure, 2026-08-07.  The closed-form Fourier coefficient assumes a
+  # perfectly rectangular longitudinal index profile.  The band gap, which
+  # assumes nothing about the profile, gives kappa = 0.702 of the coupled-mode
+  # value, so the rectangular assumption overstates the third harmonic by 1.424.
+  # The smoothing length that reproduces that ratio is 57.1 nm, a full width of
+  # 135 nm against a post 300 nm long, which is an ordinary degree of corner
+  # rounding.  The suppression carries the order squared, so the same length
+  # costs the first harmonic only 4 %.
+  #
+  # The comparison is converged: the mesh moves kappa by 0.170 /cm between
+  # resolutions 14 and 20 against a difference of 1.099 /cm, so the effect stands
+  # clear of the mesh error by a factor of 6.5, and `fdtd.convergence.resolved`
+  # is true.  Three earlier attempts were not converged and were withdrawn.
+  #
+  # Adopting this value does NOT make any target pass.  Peak reflectivity moves
+  # from 0.975 to 0.913 against a bound of 0.90, and bandwidth from 21.4 to
+  # 16.5 GHz against a bound of 14.  A residual factor of 1.51 against the
+  # published device remains unexplained.  The value is adopted because an
+  # instrument measured it, and not to close a disagreement.
+  profile_sigma_um: 0.0571
+  apodisation: uniform                # paper: "designed with uniform coupling ... without apodization"
+  span_GHz: 200.0
+  points: 6001
+
+electrodes:
+  enabled: true
+  gap_um: 7.0                         # paper: 3 um from a 1 um ridge each side -> 7 um total gap
+  width_um: 20.0                      # ASSUMPTION: not quoted
+  thickness_um: 0.9                   # paper: 900 nm thick Au
+  material: Au
+  eo_coefficient: r33
+  test_voltage_V: 1.0
+  drive_impedance_ohm: 50.0
+  # paper Sec.III: the device is driven over 0 to 19 V DC and at 17.5 Vpp for
+  # the chirp, so 20 V is the ceiling the electronics deliver.  Without it the
+  # cavity stage swept to 69.3 V while searching for the mode hop, which is
+  # 3.5x the reachable drive, and reported a tuning range no supply on the
+  # bench could produce.  The sweep is now clamped and reports whether the
+  # range it found was ended by the hop or by this limit.
+  max_drive_voltage_V: 20.0
+
+cavity:
+  enabled: true
+  # ASSUMPTION: taper + straight run from the facet to the grating.  This is the
+  # length the round-trip delay is computed from, so it is also the length the
+  # mask must draw between those two points.  Raising layout.taper_length_um
+  # consumes it: at 450 um the straight run is 550 um and the Pockels lever is
+  # unchanged, the cavity path being fixed by this figure rather than by the
+  # split between taper and straight.
+  feed_length_um: 1000.0
+  rsoa:
+    length_um: 1000.0                 # ASSUMPTION: typical InP RSOA; paper does not quote it
+    group_index: 3.6                  # ASSUMPTION: typical InP
+    back_facet_R: 0.90                # paper: high-reflectivity backside facet
+    front_facet_R: 1.0e-4             # paper: low-reflectivity angled front facet
+    internal_loss_per_cm: 10.0        # ASSUMPTION
+    coupling_loss_dB_per_facet: 1.5   # paper: "coupling loss below 1.5 dB per facet"
+    linewidth_enhancement_alpha: 3.0  # ASSUMPTION
+    spontaneous_emission_factor_nsp: 2.0
+    output_power_mW: 15.0             # paper: >15 mW in-fibre
+    # Carrier dynamics of the gain chip.  None of these is obtainable from the
+    # photonic design; each is a property of the semiconductor and of the active
+    # waveguide, and a chip is bought against a datasheet.  Every value below is
+    # an ASSUMPTION, ordinary for a 1550 nm InP multiple-quantum-well ridge, and
+    # is to be replaced by the figures of the part actually selected.  Only the
+    # `dynamics` stage reads them.
+    gain:
+      differential_gain_cm2: 2.5e-16        # ASSUMPTION
+      transparency_density_per_cm3: 1.0e18  # ASSUMPTION
+      carrier_lifetime_ns: 1.0              # ASSUMPTION
+      gain_compression_cm3: 1.5e-17         # ASSUMPTION
+      spontaneous_coupling_beta: 1.0e-4     # ASSUMPTION
+      injection_efficiency: 0.80            # ASSUMPTION
+      active_width_um: 2.0                  # ASSUMPTION
+      active_thickness_um: 0.10             # ASSUMPTION
+
+dynamics:
+  # The rate equations.  Until 2026-08-07 the chain treated the optical power as
+  # given, so it could state neither the current required, nor the power that
+  # results, nor the intensity noise, nor whether the laser is stable against the
+  # feedback that defines it.  The last is the one this architecture turns on: an
+  # extended-cavity laser is operated deliberately under strong optical feedback,
+  # and it is stable there only because the chip facet has been suppressed.
+  #
+  # Enabled here.  It introduces no solver and costs milliseconds, and the figures
+  # it produces are consistent with the paper: 11.98 mW at 150 mA against the
+  # >15 mW quoted, and a feedback margin of 36.8 dB placing the laser in the
+  # stable strong-feedback regime.  Note that `cavity.rsoa.output_power_mW` above
+  # remains the figure the linewidth is computed from; the two agree to 20 %, and
+  # reconciling them exactly would require the cavity stage to read this one.
+  enabled: true
+  operating_current_mA: 150.0
+  current_sweep_mA: [0, 20, 40, 60, 80, 100, 120, 150, 175, 200]
+  rin_span_GHz: 20.0
+  rin_quote_offset_GHz: 1.0
+
+chirp:
+  enabled: true
+  bandwidth_GHz: 10.0                 # paper: >10 GHz mode-hop-free
+  chirp_duration_us: 5.0              # paper: 100 kHz triangle -> 5 us per ramp
+  waveform: triangle
+
+taper:
+  # Off by default: one mode solve per slice costs ~3 min against the ~50 s of
+  # the rest of the chain.  Enable with --set taper.enabled=true; the result is
+  # recorded in TOOLCHAIN_VALIDATION.md.  Length and tip width are taken from
+  # layout below, so the figure describes the taper actually drawn.
+  enabled: false
+  profile: linear                     # paper does not state the profile
+  n_slices: 12
+  num_modes: 3
+
+fdtd:
+  # Time-domain solve of the same taper, by meep in its own environment.  Off by
+  # default: minutes in 2D, an offline job in 3D.  This is what supplies the
+  # radiation figure that the guided-mode expansion above cannot reach.
+  enabled: false
+  dimensions: 2                       # effective index; 3 builds the layer stack
+  resolution: 20                      # pixels per um
+  processes: 8
+
+fem:
+  # The same cross-section re-solved by finite elements on a conforming mesh,
+  # full-vectorially.  Off by default: the extras are optional and four solves
+  # cost about a minute.  Nothing downstream reads its output; it exists so that
+  # the index difference driving kappa rests on two instruments and not on one.
+  # The outcome is recorded in TOOLCHAIN_VALIDATION.md.
+  enabled: false
+  resolution_max_um: 0.35
+  resolution_fine_um: 0.020
+  element_order: 2
+
+corners:
+  # The process window, as three excursions that a fabrication run will actually
+  # deliver.  The post gap dominates: the baseline measured d(ln dn_eff)/d(gap)
+  # = -5.45 /um, so 20 nm of lithographic error is 11 % of kappa.
+  enabled: true
+  mode: onefactor
+  parameters:
+    grating.post_gap_um: 0.020        # DUV CD control plus etch bias
+    platform.film_thickness_um: 0.010 # wafer-to-wafer film thickness
+    platform.etch_depth_um: 0.010     # etch depth control
+    # Added 2026-08-04 with the sidewall correction above.  The angle carries
+    # about 2.7 % of kappa per degree on this cross-section, so a window that
+    # omitted it was understating the spread; +-2 deg is comparable to the
+    # +-20 nm gap excursion already listed.
+    platform.sidewall_deg: 2.0
+  metrics:
+    - grating.kappa_per_cm
+    - grating.peak_reflectivity
+    - grating.bragg_wavelength_nm
+    - grating.fwhm_GHz
+    - eo.tuning_MHz_per_V
+    - cavity.mode_hop_free_range_GHz
+    - cavity.smsr_dB
+
+process:
+  # The displacement between what is drawn and what is printed.  Zero here, and
+  # the drawn, printed and nominal geometries therefore coincide: the paper
+  # quotes fabricated dimensions, so no bias is to be inferred on top of them.
+  #
+  # The block is present rather than omitted because it is the mechanism by
+  # which a characterised process enters the chain.  Setting `bias_um: {WG: 0.04}`
+  # draws the mask 40 nm inward so that the printed feature lands on the nominal
+  # dimension, and solves the physics on the printed geometry.  The recorded
+  # decay of d(ln dn_eff)/d(gap) = -5.45 /um makes that displacement an 11 %
+  # change in kappa, so it is not a detail.  The `cd_vernier` monitor drawn by
+  # the reticle stage is what turns this from an assumption into a measurement.
+  bias_um: {}
+  depth_bias_um: 0.0
+  precompensate: true
+  simulate: printed
+  # The manufacturing grid.  1 nm is the GDS database unit and is therefore the
+  # identity; a foundry stating 5 or 10 nm is entered here and the mask is
+  # snapped to it before writing.  The chain reports what the snap costs.  Note
+  # that the period of 1279.79 nm is not an integer number of nanometres, so
+  # even at the finest grid each post lands up to 0.5 nm from its nominal
+  # position and the grating carries a 0.29 nm RMS dither.  No model in the
+  # chain carries that dither.
+  grid_nm: 1.0
+  max_snap_displacement_nm: 0.0
+
+layout:
+  enabled: true
+  # The whole device.  A count here was carried until 2026-08-06 on the belief
+  # that emitting 5665 periods was slow; it was measured at 1.5 s against the
+  # 35 s the mode solve costs, so the saving never justified a mask that every
+  # geometric figure then described wrongly.  A count remains worth setting for
+  # die-level work, where a split ladder and the fill placer scale with it.
+  draw_periods: null
+  require_complete: false
+  compare_backends: true              # klayout against gdsfactory, by exclusive-or
+  # ASSUMPTION: 150 um.  arXiv:2408.01743 states that a bi-layer taper is used
+  # and quotes no length for it; the 150 um formerly annotated "paper:" here was
+  # misread from a scale bar in its Figure 1a.  The design it cites,
+  # arXiv:1902.08969, gives a two-section taper of L1 = 120 um in the rib and
+  # L2 = 450 um in the slab, so 450 um is the better-supported figure for the
+  # slab section that sets the facet-to-grating distance.  It is not adopted
+  # here because the length is a mask dimension and the change is not yet
+  # verified against the cavity budget; see the note on feed_length_um.
+  taper_length_um: 150.0
+  taper_tip_width_um: 0.4             # paper: 400 nm tapering tip
+  # UNMODELLED STRUCTURE.  The taper the paper describes is bi-layer: the rib
+  # narrows while a second, wider slab layer carries the mode out to the facet.
+  # One layer is drawn here and one is modelled, so the tip width above is the
+  # rib tip and the slab section is absent from both the mask and the facet
+  # calculation.  The facet stage consequently reports 3.12 dB against the
+  # 1.5 dB per facet the paper quotes, and the difference is the measure of
+  # what the omitted slab buys.  Closing it requires a second layer in the
+  # cross-section and an eigenmode expansion across the layer transition.
+  input_facet_angle_deg: 8.0
+  # The facet angle is now DRAWN.  Until 2026-08-04 it fed the coupling
+  # calculation and reached no polygon, so the emitted guide had square ends and
+  # the angle suppressed nothing.  The end face is sheared by the angle and the
+  # die edge is marked on the FACET layer with the band the cleave removes.
+  draw_facets: true
+  facet_recess_um: 5.0
+  facet_keepout_um: 30.0
+  # The cut selects the permittivity tensor and hence every electro-optic
+  # figure.  Nothing on the mask stated the axis the die must be aligned to, so
+  # a die diced or mounted rotated would have satisfied every check.
+  crystal_misalignment_deg: 0.0
+  draw_orientation_key: true
+  # Geometry a rule deck does not examine, and the two data formats.
+  check_geometry: true
+  min_angle_deg: 30.0
+  max_vertices: 200
+  write_oasis: true
+  write_layer_table: true
+  cell_name: EDBR_TFLN
+
+reticle:
+  # Die assembly.  Off by default: a die floor plan is a decision rather than a
+  # default, and the baseline exists to validate physics rather than to be
+  # fabricated.  Enable with --set reticle.enabled=true; the die that results is
+  # DRC clean against the rules below when drc.target is set to `die`.
+  enabled: false
+  # paper Sec.II: 35 waveguide grating devices on a chip of 5 x 10 mm.  The
+  # paper does not state which edge carries the array, but the device drawn
+  # here is 8.4 mm long, so the propagation axis must be the 10 mm one.  Thirty
+  # five devices across the remaining 5 mm gives a pitch of 143 um, which the
+  # 20 um electrodes on a 7 um gap clear with margin.  The figure is recorded
+  # rather than acted upon: this stage assembles one die and performs no step
+  # and repeat, so the array is not drawn.
+  die_width_um: 10000.0
+  die_height_um: 5000.0
+  margin_um: 40.0
+  dicing_lane_um: 80.0
+  revision: A
+  seal_ring:
+    enabled: true
+    width_um: 20.0
+    clearance_um: 60.0
+  marks:
+    enabled: true
+    size_um: 40.0
+    arm_width_um: 4.0
+    clearance_um: 3.0                 # must clear METAL_to_WG_sep below
+    layers: [WG, METAL]
+    corners: [SW, SE, NW, NE]
+  split:
+    # Copies of the device stepped across the post gap.  The monitors below
+    # measure the process; this ladder is what survives it.  kappa presently
+    # disagrees with the published device by a factor of 2.15 and the
+    # mode-hop-free range moves by 189 % across the corner window, so a reticle
+    # carrying one copy gambles the run on the model being right about a
+    # dimension the model is known to be wrong about.
+    #
+    # Note the coupled constraint: opening the post gap moves the posts toward
+    # the electrodes, so the widest copy needs its electrode gap widened to meet
+    # METAL_to_WG_sep.  The stage does that and reports it, and that copy then
+    # differs from the primary device in two parameters rather than one.
+    enabled: false
+    parameter: grating.post_gap_um
+    values: [0.60, 0.63, 0.66, 0.70, 0.76]
+    label_each: true
+
+  monitors:
+    # Each structure isolates one cause of a disagreement between the returned
+    # wafer and the prediction.  The case for them here is quantitative: kappa
+    # decays at 5.45 /um with the post gap, so 20 nm is 11 % of it, and the
+    # mode-hop-free range moves by a factor of five across the corners.
+    enabled: true
+    kappa_ladder: true
+    kappa_gaps_um: [0.53, 0.58, 0.63, 0.68, 0.73]   # +-100 nm about the design
+    kappa_periods: 300
+    loss_cutback: true
+    loss_lengths_um: [500.0, 1500.0, 3000.0]
+    cd_vernier: true
+    cd_widths_um: [0.20, 0.25, 0.30, 0.40, 0.60]
+    cd_repeats: 10
+    electrode_ladder: true
+    electrode_gaps_um: [4.0, 7.0, 12.0]  # 4.0 is raised to the separation rule
+
+mask:
+  # Checks a rule deck does not make.  The expected counts encode the intent, and
+  # getting them right is part of stating what the device is: the guide is one
+  # region, but each Bragg post is deliberately a separate island, so WG merges
+  # into 1 + 2*draw_periods regions.  A count above that is a break in the guide;
+  # below it is a post touching the ridge, which would destroy the grating.
+  enabled: true
+  target: device                      # `die` checks the assembled reticle instead
+  connected_layers: [WG, METAL, PAD]
+  # 1 guide + 2 posts per period x 5665 periods = 11331 regions on WG
+  expected_regions: {WG: 11331, METAL: 2, PAD: 2}
+  expectations_describe: device       # these counts are the device, not the die
+  # Nets rather than islands per layer.  Merging one layer answers whether that
+  # layer is broken; it cannot answer whether a pad reaches the electrode it
+  # drives, those being two shapes on two layers that touch.  With METAL joined
+  # to PAD the device is 801 guide nets plus one net per electrode.
+  extract_netlist: true
+  joined_layers: [[METAL, PAD]]
+  expected_nets: 11333
+  # Layout versus schematic, without device recognition.  Text on the LABEL
+  # layer names the net it sits on, and each electrode carries two labels: one
+  # on its bond pad and one on the conductor.  A net holding both is a pad that
+  # reaches what it drives.  A net holding one is a break, and a count of
+  # connected regions cannot distinguish the two.
+  label_layer: LABEL
+  schematic:
+    - {name: ELECTRODE_LEFT,  labels: [E_L_PAD, E_L_ELEC]}
+    - {name: ELECTRODE_RIGHT, labels: [E_R_PAD, E_R_ELEC]}
+  fill:
+    # Placement of the fill the density windows require.  Off by default: the
+    # pattern, its pitch and its stand-off are figures a foundry states, and the
+    # values below are placeholders until it does.  With it enabled every tile
+    # on this device reaches its window minimum.
+    enabled: false
+    size_um: 2.0
+    pitch_um: 4.0
+    exclusion_um: {WG: 5.0, METAL: 5.0, PAD: 10.0}
+    layer: FILL
+  must_not_touch: [[WG, METAL]]
+  density_tile_um: 200.0
+  density_windows:
+    - [WG, 0.02, 0.80]
+    - [METAL, 0.01, 0.90]
+
+drc:
+  enabled: true
+  # `device` checks the cell the layout stage emitted. `die` checks the
+  # assembled reticle, which is the object actually submitted; a frame drawn
+  # and never checked is a frame assumed.
+  target: device
+  rules:
+    # ignore_angle_deg: every convex corner brings two edges arbitrarily close
+    # together, so a width check reports the corner itself unless a threshold
+    # is set.  The engine default of 90 deg is wrong wherever a feature is
+    # drawn at an angle: the 8 deg facet above necessarily produces an 82 deg
+    # corner at the taper tip, which is manufacturable and was reported.
+    - {name: WG_min_width,        kind: min_width,      layer: WG,    value_um: 0.20, severity: error, ignore_angle_deg: 80.0}
+    - {name: WG_min_space,        kind: min_space,      layer: WG,    value_um: 0.30, severity: error}
+    - {name: METAL_min_width,     kind: min_width,      layer: METAL, value_um: 2.00, severity: error}
+    # The binding metal-to-guide constraint on this device is the post outer
+    # edge, not the ridge: 0.5 + 0.63 + 0.30 = 1.43 um from centre, against an
+    # electrode inner edge at 3.5 um -> 2.07 um.  A 2.5 um rule would fail the
+    # published geometry, so the deck records the constraint that the device
+    # actually meets.  The real limit is optical, and stage 3 checks it.
+    - {name: METAL_to_WG_sep,     kind: min_separation, layer: METAL, other_layer: WG, value_um: 2.00, severity: error}
+    - {name: WG_min_area,         kind: min_area,       layer: WG,    value_um: 0.04, severity: warning}
+
+# ---------------------------------------------------------------------
+# Acceptance targets - taken from the PAPER, not from our own output.
+# `must`   : the chain is wrong if these miss
+# `should` : model-dependent, a miss is a finding to investigate
+# `info`   : recorded for the record only
+# ---------------------------------------------------------------------
+search:
+  # Directed search for a configuration meeting the declared targets.  Off by
+  # default: it re-runs the chain tens of times, and the parameters it is free
+  # to move are a decision rather than a default.
+  #
+  # The bounds are what the design may become, not what it is.  The post gap is
+  # allowed to open to 1.0 um, which weakens the mirror; the gain chip and the
+  # feed are allowed to shorten, which raises the Pockels lever.  The constraint
+  # records that the taper is drawn inside the feed and cannot exceed it.
+  enabled: false
+  parameters:
+    - {path: grating.post_gap_um,    min: 0.50, max: 1.00, probe: 0.05}
+    - {path: cavity.rsoa.length_um,  min: 250.0, max: 1500.0, probe: 0.10}
+    - {path: cavity.feed_length_um,  min: 200.0, max: 1500.0, probe: 0.10}
+    # Added 2026-08-07.  Opening the post gap moves the posts outward toward the
+    # electrodes, and at a 740 nm gap the outer post edge stands 1.96 um from the
+    # electrode against a 2.00 um rule, which the mask fails at 11330 places.
+    # The electrode gap must therefore be free to widen with the post gap.  It is
+    # not a free choice: widening it lowers the electro-optic overlap, which
+    # lowers the tuning rate, which lowers the tuning range.  A search that
+    # cannot move it will find configurations that no mask can carry.
+    - {path: electrodes.gap_um,      min: 6.0, max: 12.0, probe: 0.05}
+  constraints:
+    - "cavity.feed_length_um >= layout.taper_length_um"
+  # `layout` and `drc` are included despite costing seconds per evaluation.
+  # Without them the rule check is absent from the search, and the coupling
+  # above is invisible: a candidate at a 740 nm post gap passed every physical
+  # target and carried 11330 rule violations.  The constraint cannot be written
+  # in the `constraints` list because it is an arithmetic combination of four
+  # dimensions rather than a comparison of two fields.
+  stages: [mode, grating, eo, cavity, dynamics, layout, drc]
+  severities: [must, should]
+  max_evaluations: 60
+
+targets:
+  - metric: mode.n_guided_modes
+    max: 1
+    severity: must
+    source: "paper: thin film + shallow etch chosen to ensure single-mode operation"
+
+  - metric: grating.bragg_wavelength_nm
+    value: 1545.9
+    rel_tol: 0.02
+    unit: nm
+    severity: must
+    source: "paper Sec.II: measured 1545.9 nm, 1.2% from design"
+
+  - metric: grating.peak_reflectivity
+    value: 0.75
+    rel_tol: 0.20
+    severity: must
+    source: "paper Fig.1d: estimated peak reflectivity around 75%"
+
+  - metric: grating.fwhm_GHz
+    min: 5.0
+    max: 14.0
+    unit: GHz
+    severity: should
+    source: "paper: 6.5 GHz simulated, 8 GHz measured off-chip"
+
+  - metric: eo.tuning_MHz_per_V
+    value: 550.0
+    rel_tol: 0.30
+    unit: MHz/V
+    severity: must
+    source: "paper Fig.2a: 550 MHz/V; 10 GHz over 20 V"
+
+  - metric: eo.VpiL_ideal_V_cm
+    value: 4.0
+    rel_tol: 0.25
+    unit: V.cm
+    severity: should
+    source: "paper Sec.II: simulated VpiL of 4 V.cm (quoted without overlap derating)"
+
+  - metric: eo.mode_overlap_with_metal
+    max: 1.0e-5
+    severity: must
+    source: "paper: electrodes placed conservatively to avoid optical loss"
+
+  - metric: cavity.mode_hop_free_range_GHz
+    min: 8.0
+    unit: GHz
+    severity: should
+    source: "paper abstract: continuous mode-hop-free tuning range over 10 GHz"
+
+  - metric: cavity.schawlow_townes_henry_linewidth_kHz
+    value: 2.8
+    rel_tol: 1.0
+    unit: kHz
+    severity: should
+    source: "paper Sec.III: 800 Hz^2/Hz at 2 MHz offset -> 2.8 kHz intrinsic linewidth"
+
+  - metric: cavity.smsr_dB
+    min: 40.0
+    unit: dB
+    severity: should
+    source: "paper Fig.3e: SMSR 63 dB at 0.02 nm RBW"
+
+  - metric: drc.error_violations
+    max: 0
+    severity: must
+    source: "mask must be DRC clean"
+
+  # The extracted net count is checked by the `mask` stage against
+  # `mask.expected_nets` above, which is scoped to the layout being checked. It
+  # is deliberately not duplicated as a target here: a run that legitimately
+  # reconfigures the target layout would then fail a row describing the other
+  # one, and the verdict would carry no information.
+
+  # A submittable mask carries every grating period. The default configuration
+  # draws a 400-period window, so this row reads unmet, which is the correct
+  # statement about that mask. It is recorded at severity `info` because the
+  # baseline exists to validate physics rather than to be fabricated; it becomes
+  # a `must` on any design that will be submitted.
+  - metric: layout.mask_is_complete
+    min: 1
+    severity: info
+    source: "a submitted mask carries the whole device; the default draws a window of it"
+
+allow_unconfirmed_materials: true
+
+# `mask` is included so that connectivity, isolation and density are evaluated
+# on every run rather than only when asked for. `reticle` is resolved as a
+# dependency wherever it is enabled.
+release:
+  # The submission manifest.  Off by default: producing one asserts that a set
+  # of files is ready to be sent, and this design exists to validate physics.
+  # Enable it and the stage refuses, which is correct: the mask is a window of
+  # the device, no foundry deck has been run, and the acceptance targets are not
+  # met.  Each condition may be waived by name, and the waiver is recorded.
+  enabled: false
+  revision: A
+  strict: true
+  waive: []
+
+circuit:
+  # The passive circuit assembled from scattering matrices by SAX.  Off by
+  # default: the extras are optional.  It is anchored to the closed-form
+  # two-mirror result and agrees with it to 6e-14, and it reports the ripple the
+  # residual facet reflection imposes on the mirror the laser sees, which the
+  # cavity stage applies at a single plane and therefore cannot express.
+  enabled: false
+  facet_transmission: 0.7
+  taper_transmission: 0.99
+
+# `circuit`, `reticle` and `release` are listed so that enabling one is a
+# single flag rather than a flag and a stage list. Each is a no-op while
+# its own `enabled` is false.
+stages: [mode, grating, eo, cavity, dynamics, circuit, layout, reticle, drc, mask, verify, release]

@@ -1,0 +1,53 @@
+MIT License
+
+Copyright (c) 2026 Leow Kwang Siong Jeremy / Republic of Singapore
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---------------------------------------------------------------------------
+THIRD-PARTY SOFTWARE
+
+This licence covers the contents of this repository. It does not cover the
+tools the chain invokes, each of which carries its own terms. Nothing here is a
+derivative work of them: they are called as separate processes or imported as
+declared dependencies, and no code from them is copied into this repository.
+
+  KLayout          GPL-3.0-or-later   invoked as an external application to
+                                      execute a foundry rule deck
+  MEEP and MPB     GPL-2.0-or-later   invoked as external processes for the
+                                      time-domain and band-structure solves
+  gdsfactory       MIT
+  femwell          GPL-3.0
+  scikit-fem       BSD-3-Clause
+  gmsh             GPL-2.0-or-later
+  SAX              Apache-2.0
+  KLayout Python   GPL-3.0-or-later   imported as the `klayout` module
+  numpy, scipy     BSD-3-Clause
+  matplotlib       PSF-based
+  pydantic, typer  MIT
+
+Two consequences follow and both are stated so that a user is not surprised.
+
+The `klayout` Python module is imported directly rather than invoked, and it is
+GPL-3.0-or-later. **A distributor combining this repository with that module
+into a single distributed work should take advice on the resulting obligations.**
+Using it locally, which is what this repository does, raises no such question.
+
+The `fem` and `fdtd` extras pull GPL-licensed tools. They are optional, the
+chain runs without them, and each reports its absence rather than failing.

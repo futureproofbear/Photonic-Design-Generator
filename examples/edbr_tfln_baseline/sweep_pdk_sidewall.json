@@ -1,0 +1,28 @@
+{
+  "design": "..\\examples\\edbr_tfln_baseline\\design.yaml",
+  "param": "platform.sidewall_deg",
+  "rows": [
+    {
+      "param": "platform.sidewall_deg",
+      "value": "90",
+      "mode.n_eff_bare": 1.788867214095995,
+      "mode.dn_eff_posts": 0.0008277104420475467,
+      "grating.kappa_per_cm": 2.902856018650355,
+      "grating.kappa_L": 2.104570613521507,
+      "grating.peak_reflectivity": 0.9569183353917297,
+      "grating.bragg_wavelength_nm": 1526.415123373685,
+      "grating.fwhm_GHz": 17.4275071946875
+    },
+    {
+      "param": "platform.sidewall_deg",
+      "value": "77",
+      "mode.n_eff_bare": 1.7938798444906408,
+      "mode.dn_eff_posts": 0.0011186993837679626,
+      "grating.kappa_per_cm": 3.9122701329694576,
+      "grating.kappa_L": 2.8363958464028567,
+      "grating.peak_reflectivity": 0.9979401529925549,
+      "grating.bragg_wavelength_nm": 1530.750063997205,
+      "grating.fwhm_GHz": 21.602946799375
+    }
+  ]
+}

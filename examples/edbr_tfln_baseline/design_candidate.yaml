@@ -1,0 +1,1023 @@
+# =====================================================================
+# A CONFIGURATION MEETING EVERY DECLARED TARGET
+#
+# Derived from design.yaml, which holds the dimensions arXiv:2408.01743 reports.
+# THIS FILE IS NOT THAT DEVICE. Four quantities differ:
+#
+#   grating.post_gap_um          0.63 -> 0.76   sets kappa without moving the mode count
+#   waveguide.top_width_um       1.00 -> 0.90   moves the multimode wall to deeper etch
+#   platform.etch_depth_um       0.20 -> 0.21   centres the acceptable band
+#   electrodes.gap_um            7.0  -> 7.6    clears the post-to-metal rule; centres tuning
+#   cavity.rsoa.length_um        1000 -> 300    raises the Pockels lever to 0.76
+#   cavity.feed_length_um        1000 -> 300    as above
+#   cavity.rsoa.output_power_mW  15   -> see below, the rate-equation power at 150 mA
+#
+# Arrived at by mapping the film-etch plane on a 10 nm grid. The first candidate
+# met every target at its nominal point and had NO robust point: the acceptable
+# region was one grid step wide against a one-step process window. The cause is
+# that both walls bounding it are the same physics. Deep etch and a narrow ridge
+# both raise lateral confinement, shallow etch and a wide ridge both lower it, so
+# the multimode wall and the bandwidth wall slide together and no single
+# geometric change widens the band.
+#
+# The post gap decouples them, the posts lying outside the ridge: their spacing
+# sets kappa while the guide's own dimensions set how many modes it holds. Ridge
+# 0.90 um with post gap 0.76 um opens three consecutive etch depths where none
+# passed before.
+#
+# Twelve of twelve targets are met at the nominal point. Three cautions attach and
+# none is resolved here.
+#
+#   The 700 nm post gap is also the residual factor on kappa that the validation
+#   study could not otherwise account for. Whether this is a design change or a
+#   correction to the published dimension is not established.
+#
+#   The gain chip is halved. Every carrier parameter under cavity.rsoa.gain
+#   remains an assumption, so the 48 mA threshold and the 31 mW are consistent
+#   rather than predicted.
+#
+#   A nominal pass is not a result. Run `picchain corners` against this file
+#   before drawing any conclusion about manufacturability.
+# =====================================================================
+
+# =====================================================================
+# TFLN extended-DBR Pockels laser  (TOOLCHAIN VALIDATION)
+#
+# Replication target:
+#   A. Siddharth et al., "Ultrafast tunable photonic integrated Pockels
+#   extended-DBR laser", arXiv:2408.01743v1 (2024); published as
+#   Nature Photonics 19, 709-717 (2025).
+#
+# Purpose: this design exists to prove the design chain reproduces a
+# published, measured device before any of it is trusted on the TFLT radar
+# PICs.  Nothing here is a new design decision - every geometric number is
+# taken from the paper and cited inline.
+# =====================================================================
+#
+# THE GAIN CHIP IS NOW A REAL PART: LD-PD HP-GC-1550-1, AlGaInAs MQW reflective
+# SOA, https://www.ld-pd.com/?a=cp3&id=653
+#   1000 +-20 um long, R1 = 0.01 %, R2 = 90 %, 40 mW at 200 mA, threshold 20-40 mA
+#
+# Its facet reflectivities matched the assumptions exactly. Its LENGTH did not:
+# 300 um had been assumed and the part is 1000 um, which collapsed the tuning
+# range to 5.4 GHz. The range is recovered from the grating rather than from the
+# cavity, by lengthening it to 11 mm and opening the post gap to 820 nm. That
+# deepens the penetration and raises the Pockels lever to 0.659.
+#
+# The assumed active thickness of 100 nm was wrong by a factor of four, a
+# three-well stack being 24 nm. Correcting it brings the threshold from 82 mA to
+# 27 mA against the datasheet's 20 to 40, and the power at 200 mA to 37 mW
+# against its 40. The slope efficiency needed no adjustment, agreeing to 9 %.
+#
+# =====================================================================
+
+meta:
+  name: edbr_tfln_candidate
+  title: "TFLN extended-DBR Pockels laser - replication baseline"
+  description: >
+    7.25 mm 3rd-order slab-coupled Bragg post grating on 400 nm X-cut thin-film
+    lithium niobate, butt-coupled to an InP RSOA, with coplanar gold electrodes
+    for Pockels tuning of the mirror.
+  reference: "arXiv:2408.01743v1 (Siddharth et al.); Nat. Photon. 19, 709 (2025)"
+  deliverable: "toolchain validation baseline"
+  status: baselined
+
+platform:
+  cut: x                              # X-cut: crystal c-axis in plane, across the ridge
+  film_material: LiNbO3
+  film_thickness_um: 0.400            # paper: 400 nm X-cut TFLN
+  etch_depth_um: 0.210                # CHANGED from 200 nm; centres the acceptable band
+  # ASSUMPTION, but a sourced one, and it replaces a value that was not
+  # physically attainable.  The paper does not quote a sidewall angle and 90 deg
+  # was carried here until 2026-08-04.  An ion-beam-etched thin-film lithium
+  # niobate ridge does not have a vertical wall.  The open Luxtelligence
+  # `lnoi400` kit declares `sidewall_angle = 13 deg` from the normal for the
+  # same 400 nm film, 200 nm etch, 4.7 um oxide stack, which is 77 deg in the
+  # convention used here.  That kit describes a different fabricator from the
+  # one that made the replicated device, so this remains an assumption about
+  # this device; it is now traceable to a process document for the same stack
+  # rather than to nothing.
+  #
+  # The change is first order: kappa rises by 35 % and lambda_B by 4.3 nm.  See
+  # sweep_pdk_sidewall.json and TOOLCHAIN_VALIDATION.md.
+  sidewall_deg: 77.0
+  box_material: SiO2
+  box_thickness_um: 4.7               # paper: 4.7 um buried oxide
+  clad_material: SiO2
+  clad_thickness_um: 2.0              # paper: 2 um high-density ICP-CVD SiO2
+  substrate_material: Si
+  propagation_loss_dB_per_cm: 0.2     # ASSUMPTION: typical for this process
+
+mesh:
+  d_fine_um: 0.010
+  d_coarse_um: 0.060
+  fine_margin_um: 0.6
+  subsample: 3
+  num_modes: 3
+  polarisation: TE                    # quasi-TE sees n_e and is modulated via r33
+
+waveguide:
+  top_width_um: 0.90                  # CHANGED from 1.0 um; moves the multimode wall outward
+  wavelength_um: 1.5459               # paper: measured reflection at 1545.9 nm
+
+grating:
+  enabled: true
+  order: 3                            # paper: 3rd-order grating
+  # SOLVED, not fixed.  The period the paper quotes is correct for a 1.00 um
+  # ridge on a 200 nm etch.  This design has a 0.90 um ridge on a 210 nm etch,
+  # which moves n_eff and hence lambda_B = 2 n_bar Lambda / m.  Carrying the
+  # published period drifted the Bragg wavelength to about 1520 nm and spent
+  # half the +-2 % tolerance before the process moved at all.  The chain now
+  # solves the period that lands on the intended wavelength.
+  # FIXED rather than solved, as of 2026-08-11, and snapped to the manufacturing
+  # grid.  The solver returned 1301.559 nm, which is not an integer number of
+  # 1 nm grid steps, so every post landed on the nearest grid point and the
+  # period acquired a dither of 0.289 nm RMS over 8451 periods.  That is a
+  # distortion of the Bragg condition rather than a rounding of a dimension, and
+  # no model in this chain carries it.
+  #
+  # 1302 nm is an exact multiple of the grid and costs +0.524 nm of Bragg
+  # wavelength, which is 0.034 % against a tolerance of 2 %.
+  #
+  # Fixing it also corrects something the solved period concealed.  A MASK
+  # CARRIES ONE PERIOD.  Re-solving it at every process corner is not something a
+  # wafer can do, and the corner sweep consequently reported zero spread in Bragg
+  # wavelength, which was an artefact of the sweep rather than a property of the
+  # design.  With the period fixed the sweep reports the drift that process
+  # variation actually produces.
+  period_um: 1.302
+  # target_wavelength_um: 1.5459        # paper: 1545.9 nm measured; see above
+  length_um: 11000.0                  # CHANGED from 7250 um; deepens penetration to recover the lever
+  post_width_um: 0.30                 # paper: 300 nm wide posts
+  # CHANGED from 630 nm, and again on 2026-08-10 from 820 to 855 nm.
+  #
+  # The 820 nm value decoupled kappa from the mode count, the posts lying outside
+  # the ridge so that their spacing sets the coupling while the guide's own
+  # dimensions set how many modes it holds.  That reasoning stands.
+  #
+  # The further 35 nm is the correction of an error rather than a new trade.  A
+  # profile smoothing of 57.1 nm had been carried since 2026-08-07 to reconcile
+  # coupled-mode theory with a band-structure measurement, and that
+  # reconciliation rested on a comparison that was not like for like: the
+  # two-dimensional reduction in the `fdtd` stage applied no smoothing while the
+  # `grating` stage applied this one.  With the comparison corrected the
+  # smoothing has no support and is withdrawn, which raises kappa from 1.276 to
+  # 1.796 /cm and puts peak reflectivity at 0.903 against a bound of 0.90.
+  #
+  # Opening the gap by 35 nm returns kappa to 1.479 /cm.  The coupling is
+  # exponential in this dimension at about 5.45 /um, so 35 nm is 16 % of kappa,
+  # and the figure was computed from that decay rate before it was simulated.
+  # Peak reflectivity 0.833, bandwidth 9.49 GHz, tuning range 12.01 GHz and
+  # linewidth 4.945 kHz all sit inside their bounds with margin.
+  #
+  # THE DEPARTURE FROM THE PUBLISHED DEVICE IS NOW LARGE.  The paper states
+  # 630 nm and this design carries 855 nm, a difference of 36 %.  The chain
+  # asserts that this geometry works.  It does not assert that this geometry is
+  # the paper's, and no claim of replication attaches to the grating.
+  post_gap_um: 0.855
+  post_length_um: 0.30                # square posts -> duty cycle 0.30/1.27979
+  # WITHDRAWN 2026-08-10.  This value is zero because no measurement supports a
+  # non-zero one, and not because the profile is believed to be rectangular.
+  #
+  # A smoothing of 57.1 nm was carried from 2026-08-07 and a value of 42.86 nm
+  # briefly replaced it on 2026-08-09.  Both rested on a comparison that was not
+  # like for like.  The two-dimensional reduction inside the `fdtd` stage called
+  # the Fourier coefficient WITHOUT the period and the smoothing, so it applied
+  # none, while the `grating` stage applied whatever this field declared.  The
+  # band gap was therefore set against an unsmoothed coupled-mode figure and
+  # reported as though it were set against the design's own.  The stage was
+  # corrected on 2026-08-10.
+  #
+  # With the comparison made correctly, on the converged resolution-40 band
+  # structure of run 20260809-193521-BANDS40:
+  #
+  #     sigma = 0      chain 2D kappa 1.6195 /cm   band gap / coupled mode 1.161
+  #     sigma = 42.9   chain 2D kappa 1.3357 /cm   band gap / coupled mode 1.408
+  #     sigma = 57.1   chain 2D kappa 1.1505 /cm   band gap / coupled mode 1.634
+  #
+  # The band gap lies ABOVE the coupled-mode value, and smoothing lowers the
+  # coupled-mode value, so every non-zero sigma makes the disagreement worse.
+  # The original calibration assumed the band gap lay below.  It does not.
+  #
+  # THE CONSEQUENCE IS NOT FAVOURABLE AND IS RECORDED RATHER THAN AVOIDED.  At
+  # sigma = 0 the coupling rises to 1.796 /cm and kappa.L to 1.976, which puts
+  # peak reflectivity at 0.903 against a bound of 0.90 and the linewidth at
+  # 5.572 kHz against a bound of 5.6.  The design does not meet its targets on
+  # the best-supported physics.  Every earlier pass was obtained with a
+  # correction factor that the measurement does not support.
+  #
+  # A residual disagreement of 1.161 between the band gap and coupled-mode
+  # theory on the same two-dimensional structure remains unexplained.  There is
+  # no radiation channel in the band structure, so it is not radiation.  It is
+  # not to be absorbed into this field.
+  profile_sigma_um: 0.0
+  apodisation: uniform                # paper: "designed with uniform coupling ... without apodization"
+  span_GHz: 200.0
+  points: 6001
+
+electrodes:
+  enabled: true
+  gap_um: 7.6                         # CHANGED from 7.0; clears the post-to-metal rule, centres tuning
+  width_um: 20.0                      # ASSUMPTION: not quoted
+  thickness_um: 0.9                   # paper: 900 nm thick Au
+  material: Au
+  eo_coefficient: r33
+  test_voltage_V: 1.0
+  drive_impedance_ohm: 50.0
+  # The ceiling the electronics deliver.  Without it the cavity stage swept to
+  # 69.3 V while searching for the mode hop, which is 3.5x any reachable drive,
+  # and reported a tuning range no supply on the bench could produce.  The sweep
+  # is clamped and reports whether the range it found was ended by the hop or by
+  # this limit.
+  #
+  # RAISED from 20 V on 2026-08-09.  The paper drives 0 to 19 V DC and 17.5 Vpp
+  # for the chirp, and 20 V was carried here to match it.  At 20 V the reported
+  # tuning range was 8.20 GHz and NO MODE HOP OCCURRED ANYWHERE IN THE SWEEP:
+  # the figure was the drive limit multiplied by the 408.2 MHz/V laser tuning
+  # rate, and it was mistaken for a cavity result for several iterations.  The
+  # cavity's own mode-hop bound is 12.15 GHz, and the 10 GHz chirp this design
+  # is asked for demands 24.9 Vpp.  A 20 V supply cannot deliver that chirp for
+  # reasons that have nothing to do with the grating.
+  #
+  # At 30 V the range is 12.39 GHz and the 10 GHz chirp is reached, the drive it
+  # demands being 24.9 Vpp.
+  #
+  # The limit did NOT pass from the driver to the cavity, which is what had been
+  # expected of this change.  The sweep still ends on the drive limit and still
+  # encounters no mode hop, so 12.39 GHz remains a statement about the supply.
+  # The closed-form estimate r/(1-r) x FSR/2 gives 12.15 GHz and the sweep
+  # cleared that without hopping, so the estimate is conservative here and is not
+  # the boundary.  Run 20260809-...-HOPHUNT searches for the true hop with the
+  # clamp opened to 120 V and is the figure to cite for the cavity's own bound.
+  max_drive_voltage_V: 30.0
+
+
+
+
+bend:
+  # The routed lead-in turns through 8 degrees at a 250 um radius, so the radii
+  # here bracket that value.  A radius at which the radiation caustic falls
+  # inside the window is refused rather than answered, the conformal
+  # transformation returning a state bound to the wall rather than a mode.
+  enabled: true
+  radii_um: [1000.0, 500.0, 250.0, 150.0, 100.0]
+
+facet:
+  # The butt joint to the gain chip.  The partner is DECLARED and not solved:
+  # 3.0 um mode-field diameters are the datasheet figure for the LD-PD part.
+  #
+  # This stage computes 3.13 dB against the 1.50 dB per facet the cavity block
+  # assumes, and the dominant term is the mode overlap at 0.486.  The
+  # disagreement is stated rather than reconciled: closing it requires the
+  # two-stage inverse taper with a slab removal that the mask does not carry.
+  # See DESIGN_REPORT.md.
+  enabled: true
+  partner_mfd_x_um: 3.0
+  partner_mfd_y_um: 3.0
+  partner_index: 3.2
+  tolerance_dB: 1.0
+
+
+cavity:
+  enabled: true
+  # ASSUMPTION: taper + straight run from the facet to the grating.  This is the
+  # length the round-trip delay is computed from, so it is also the length the
+  # mask must draw between those two points.  Raising layout.taper_length_um
+  # consumes it: at 450 um the straight run is 550 um and the Pockels lever is
+  # unchanged, the cavity path being fixed by this figure rather than by the
+  # split between taper and straight.
+  feed_length_um: 200.0
+  rsoa:
+    length_um: 1000.0                 # SOURCED: LD-PD HP-GC-1550-1, 1000 +-20 um long
+    group_index: 3.6                  # ASSUMPTION: typical InP
+    back_facet_R: 0.90                # SOURCED: LD-PD HP-GC-1550-1, rear facet R2 = 90 %
+    front_facet_R: 1.0e-4             # SOURCED: LD-PD HP-GC-1550-1, front facet R1 = 0.01 %
+    confinement_factor: 0.035         # CALIBRATED against the HP-GC-1550-1 datasheet
+    internal_loss_per_cm: 10.0        # ASSUMPTION
+    # COMPUTED, not assumed, as of 2026-08-09.  The paper states "coupling loss
+    # below 1.5 dB per facet" and 1.5 was carried here on that authority for the
+    # whole of development.  The `facet` stage was not in `stages:` during that
+    # time, so nothing ever checked it.
+    #
+    # With the stage enabled it computes 3.13 dB against the same 3.0 um partner
+    # mode-field diameter the gain chip datasheet gives.  The dominant term is
+    # the mode overlap at 0.486, and the cause is geometric: a 0.40 um inverse
+    # taper tip does not expand a 1.55 um mode to 3.0 um.  The Fresnel term is
+    # 0.0004 dB and the angle penalty is nil, so neither accounts for any of it.
+    #
+    # The paper's 1.5 dB is not disputed.  It describes a facet this mask does
+    # not draw.  The open lnoi400 kit ships `double_linear_inverse_taper` for
+    # exactly this transition: a 0.25 um tip, a 120 um lower taper, a 240 um
+    # upper taper and a 20 um slab removal, being 360 um and TWO layers against
+    # the 150 um and one layer drawn here.  Reproducing that needs a second
+    # lithographic layer in the cross-section, which the chain does not carry.
+    #
+    # The computed figure is used because a design is to be evaluated on the
+    # geometry it draws.  Carrying 1.5 would have flattered the threshold, the
+    # output power and the linewidth by 1.63 dB per facet, twice per round trip.
+    coupling_loss_dB_per_facet: 3.13
+    linewidth_enhancement_alpha: 3.0  # ASSUMPTION
+    spontaneous_emission_factor_nsp: 2.0
+    output_power_mW: 24.93            # DERIVED: the rate-equation power at 150 mA
+    # Carrier dynamics of the gain chip.  None of these is obtainable from the
+    # photonic design; each is a property of the semiconductor and of the active
+    # waveguide, and a chip is bought against a datasheet.  Every value below is
+    # an ASSUMPTION, ordinary for a 1550 nm InP multiple-quantum-well ridge, and
+    # is to be replaced by the figures of the part actually selected.  Only the
+    # `dynamics` stage reads them.
+    gain:
+      differential_gain_cm2: 2.5e-16        # ASSUMPTION
+      transparency_density_per_cm3: 1.0e18  # ASSUMPTION
+      carrier_lifetime_ns: 1.0              # ASSUMPTION
+      gain_compression_cm3: 1.5e-17         # ASSUMPTION
+      spontaneous_coupling_beta: 1.0e-4     # ASSUMPTION
+      injection_efficiency: 0.80            # ASSUMPTION
+      active_width_um: 2.0                  # ASSUMPTION
+      active_thickness_um: 0.024            # SOURCED: 3 strained quantum wells of 8 nm
+
+dynamics:
+  # The rate equations.  Until 2026-08-07 the chain treated the optical power as
+  # given, so it could state neither the current required, nor the power that
+  # results, nor the intensity noise, nor whether the laser is stable against the
+  # feedback that defines it.  The last is the one this architecture turns on: an
+  # extended-cavity laser is operated deliberately under strong optical feedback,
+  # and it is stable there only because the chip facet has been suppressed.
+  #
+  # Enabled here.  It introduces no solver and costs milliseconds, and the figures
+  # it produces are consistent with the paper: 11.98 mW at 150 mA against the
+  # >15 mW quoted, and a feedback margin of 36.8 dB placing the laser in the
+  # stable strong-feedback regime.  Note that `cavity.rsoa.output_power_mW` above
+  # remains the figure the linewidth is computed from; the two agree to 20 %, and
+  # reconciling them exactly would require the cavity stage to read this one.
+  enabled: true
+  operating_current_mA: 150.0
+  current_sweep_mA: [0, 20, 40, 60, 80, 100, 120, 150, 175, 200]
+  rin_span_GHz: 20.0
+  rin_quote_offset_GHz: 1.0
+
+chirp:
+  enabled: true
+  bandwidth_GHz: 10.0                 # paper: >10 GHz mode-hop-free
+  chirp_duration_us: 5.0              # paper: 100 kHz triangle -> 5 us per ramp
+  waveform: triangle
+
+taper:
+  # ON as of 2026-08-09.  One mode solve per slice costs about 3 min against the
+  # 50 s of the rest of the chain, and it was off for that reason.  The cost is
+  # not a reason to leave a cross-check unperformed; it is a reason to run the
+  # chain less often.  Length and tip width are taken from layout below, so the
+  # figure describes the taper actually drawn.
+  #
+  # The taper is single-moded along its whole length, so the conversion loss is
+  # zero BY CONSTRUCTION and says nothing.  The adiabaticity margin is the
+  # figure: 4.52 at a width of 0.421 um, against the floor of 3.0.
+  enabled: true
+  profile: linear                     # paper does not state the profile
+  n_slices: 12
+  num_modes: 3
+
+fdtd:
+  # ON as of 2026-08-09, as the band structure rather than the taper.  kappa from
+  # the photonic band gap carries no radiation channel and is the sounder of the
+  # two routes; the gap is a difference of nearly degenerate eigenvalues and
+  # converges slowly, so the convergence guard is what makes it worth reading.
+  # A verdict was published from this route unguarded on 2026-08-06 and had to be
+  # withdrawn.  See LESSONS.md T018.
+  enabled: true
+  structure: bandstructure
+  # THIS STAGE COSTS ABOUT THREE HOURS AND IS NOT A DEFECT WHEN IT APPEARS TO
+  # HANG.  Measured on 2026-08-06: the primary solve took 6760 s and the coarse
+  # solve the convergence guard requires took a further 3407 s, so the stage is
+  # about 2 h 50 m and the whole chain with it is longer still.  A run killed
+  # after ten minutes has not failed; it has been interrupted.
+  #
+  # The guard is what makes the result worth reading, so the coarse solve is not
+  # to be removed to save the time.  See LESSONS.md T018.
+  timeout_s: 21600
+  dimensions: 2                       # effective index; 3 builds the layer stack
+  # RAISED from 20 on 2026-08-09 because the guard refused the comparison at 20.
+  # Between resolutions 10 and 20 the mesh moved kappa by 0.220 /cm against a
+  # disagreement with the coupled-mode value of 0.346 /cm, so the mesh error was
+  # 64 % of the effect and the comparison distinguished nothing.  The band gap is
+  # a difference of two nearly degenerate eigenvalues and converges slowly.
+  #
+  # The guard wants the shift below a third of the difference, so below
+  # 0.115 /cm.  Convergence appears second order in this structure, so 20 to 40
+  # should give about 0.055 /cm.  Cost scaled as the first power of resolution
+  # between 10 and 20, at 3407 s and 6760 s, so resolution 40 is expected near
+  # 13500 s for the primary solve and about 5.6 h for the stage with its guard.
+  # The timeout below is set clear of that.
+  resolution: 40                      # pixels per um
+  processes: 8
+
+fem:
+  # ON as of 2026-08-09.  The same cross-section re-solved by finite elements on
+  # a conforming mesh, full-vectorially.  Nothing downstream reads its output; it
+  # exists so that the index difference driving kappa rests on two instruments
+  # and not on one, which is a class of error no refinement of the first
+  # instrument would reveal.
+  enabled: true
+  resolution_max_um: 0.35
+  resolution_fine_um: 0.020
+  element_order: 2
+
+corners:
+  # The process window, as three excursions that a fabrication run will actually
+  # deliver.  The post gap dominates: the baseline measured d(ln dn_eff)/d(gap)
+  # = -5.45 /um, so 20 nm of lithographic error is 11 % of kappa.
+  enabled: true
+  mode: onefactor
+  parameters:
+    grating.post_gap_um: 0.020        # DUV CD control plus etch bias
+    platform.film_thickness_um: 0.010 # wafer-to-wafer film thickness
+    platform.etch_depth_um: 0.010     # etch depth control
+    # Added 2026-08-04 with the sidewall correction above.  The angle carries
+    # about 2.7 % of kappa per degree on this cross-section, so a window that
+    # omitted it was understating the spread; +-2 deg is comparable to the
+    # +-20 nm gap excursion already listed.
+    platform.sidewall_deg: 2.0
+  metrics:
+    - grating.kappa_per_cm
+    - grating.peak_reflectivity
+    - grating.bragg_wavelength_nm
+    - grating.fwhm_GHz
+    - eo.tuning_MHz_per_V
+    - cavity.mode_hop_free_range_GHz
+    - cavity.smsr_dB
+    # Added 2026-08-09.  With the facet loss corrected to 3.13 dB and the grating
+    # smoothing re-measured, this is the tightest metric in the design at 12 % of
+    # its bound, and it was the one quantity the sweep did not measure.
+    - cavity.schawlow_townes_henry_linewidth_kHz
+
+process:
+  # The displacement between what is drawn and what is printed.  Zero here, and
+  # the drawn, printed and nominal geometries therefore coincide: the paper
+  # quotes fabricated dimensions, so no bias is to be inferred on top of them.
+  #
+  # The block is present rather than omitted because it is the mechanism by
+  # which a characterised process enters the chain.  Setting `bias_um: {WG: 0.04}`
+  # draws the mask 40 nm inward so that the printed feature lands on the nominal
+  # dimension, and solves the physics on the printed geometry.  The recorded
+  # decay of d(ln dn_eff)/d(gap) = -5.45 /um makes that displacement an 11 %
+  # change in kappa, so it is not a detail.  The `cd_vernier` monitor drawn by
+  # the reticle stage is what turns this from an assumption into a measurement.
+  bias_um: {}
+  depth_bias_um: 0.0
+  precompensate: true
+  simulate: printed
+  # The manufacturing grid.  1 nm is the GDS database unit and is therefore the
+  # identity; a foundry stating 5 or 10 nm is entered here and the mask is
+  # snapped to it before writing.  The chain reports what the snap costs.  Note
+  # that the period of 1279.79 nm is not an integer number of nanometres, so
+  # even at the finest grid each post lands up to 0.5 nm from its nominal
+  # position and the grating carries a 0.29 nm RMS dither.  No model in the
+  # chain carries that dither.
+  grid_nm: 1.0
+  max_snap_displacement_nm: 0.0
+
+layout:
+  enabled: true
+  # The whole device.  A count here was carried until 2026-08-06 on the belief
+  # that emitting 5665 periods was slow; it was measured at 1.5 s against the
+  # 35 s the mode solve costs, so the saving never justified a mask that every
+  # geometric figure then described wrongly.  A count remains worth setting for
+  # die-level work, where a split ladder and the fill placer scale with it.
+  draw_periods: null
+  # A partial mask is refused rather than reported, the design now emitting a die
+  # for submission rather than a specimen for a physics check.
+  require_complete: true
+  compare_backends: true              # klayout against gdsfactory, by exclusive-or
+  # ASSUMPTION: 150 um.  arXiv:2408.01743 states that a bi-layer taper is used
+  # and quotes no length for it; the 150 um formerly annotated "paper:" here was
+  # misread from a scale bar in its Figure 1a.  The design it cites,
+  # arXiv:1902.08969, gives a two-section taper of L1 = 120 um in the rib and
+  # L2 = 450 um in the slab, so 450 um is the better-supported figure for the
+  # slab section that sets the facet-to-grating distance.  It is not adopted
+  # here because the length is a mask dimension and the change is not yet
+  # verified against the cavity budget; see the note on feed_length_um.
+  taper_length_um: 150.0
+  taper_tip_width_um: 0.4             # paper: 400 nm tapering tip
+  # UNMODELLED STRUCTURE.  The taper the paper describes is bi-layer: the rib
+  # narrows while a second, wider slab layer carries the mode out to the facet.
+  # One layer is drawn here and one is modelled, so the tip width above is the
+  # rib tip and the slab section is absent from both the mask and the facet
+  # calculation.  The facet stage consequently reports 3.12 dB against the
+  # 1.5 dB per facet the paper quotes, and the difference is the measure of
+  # what the omitted slab buys.  Closing it requires a second layer in the
+  # cross-section and an eigenmode expansion across the layer transition.
+  input_facet_angle_deg: 8.0
+  # The facet angle is now DRAWN.  Until 2026-08-04 it fed the coupling
+  # calculation and reached no polygon, so the emitted guide had square ends and
+  # the angle suppressed nothing.  The end face is sheared by the angle and the
+  # die edge is marked on the FACET layer with the band the cleave removes.
+  draw_facets: true
+  facet_recess_um: 5.0
+  facet_keepout_um: 30.0
+  # How the guide reaches the end face.  `sheared` leaves the guides parallel and
+  # dices the whole array at the angle, which costs no bend and no lateral
+  # excursion.  `angled` keeps the die edge perpendicular and routes each guide
+  # to meet it at the angle, by a straight run at that angle carrying the taper
+  # followed by an arc back to the die axis.  The taper is spent on the straight
+  # so the mode is expanded before it is bent, a narrow guide being the one that
+  # radiates in a bend.
+  facet_route: angled
+  # 250 um, and the choice is bounded from both sides.  Below, the `bend` stage
+  # solves to 70 um on this cross-section and refuses at 50 um, the radiation
+  # caustic falling inside the window; 250 um is 3.6 times the tightest radius
+  # solved.  Above, the arc is spent out of `cavity.feed_length_um`, and at 200
+  # um of feed and a 150 um taper a radius beyond about 286 um leaves no straight
+  # run at all.  The lateral excursion is 23.3 um, which the device pitch must
+  # carry.
+  facet_bend_radius_um: 250.0
+  # ---------------------------------------------------------------------
+  # The foundry layer numbers, taken from the LN-CORE lnoi400 runset in
+  # pdk/LXT_KLayout_DRC_Runsets and from lnoi400/tech.py in the installed kit.
+  #
+  # Until 2026-08-08 this design carried the chain's placeholder numbers, and
+  # they COLLIDED with the foundry's.  Our SLAB sat on (2,0), which the deck
+  # reads as LN_RIDGE, and our MARK sat on (21,0), which the deck reads as the
+  # metal transmission line.  Our WG sat on (1,0), where the deck reads nothing
+  # at all.  Executing the runset against that mask would have checked the slab
+  # rectangle as though it were the ridge, checked the alignment marks as though
+  # they were metal, and never examined a waveguide, a Bragg post or an
+  # electrode.  A clean report from that arrangement would have been a false
+  # pass, which is worse than no check.
+  #
+  # PAD shares (21,0) with METAL because a bond pad and the conductor it feeds
+  # are one metal on a real mask.  `mask.joined_layers` already treats them as
+  # one net, so this agrees with what the netlist check assumed.
+  #
+  # SEAL, DICE, FACET, ORIENT, FILL and LABEL have no equivalent in the runset
+  # and are left on numbers it does not read, so they raise nothing.
+  layer_map:
+    WG:        [2, 0]        # LN_RIDGE      - LN etch (ridge)
+    SLAB:      [3, 0]        # LN_SLAB       - LN etch (full)
+    METAL:     [21, 0]       # M1            - metal transmission lines
+    PAD:       [21, 0]       # M1            - as above; one metal
+    MARK:      [4, 0]        # RIB_MARKERS   - labels and alignment marks
+    CHIP_INNER: [6, 0]       # CHIP_INNER    - usable floorplan area, die level
+    CHIP_OUTER: [6, 1]       # CHIP_OUTER    - final chip boundary, die level
+    # The device floor plan is NOT the chip frame and must not share its layer.
+    # It sat on (6,0) between 2026-08-08 morning and afternoon, which was right
+    # at device level and wrong at die level: a die spreads the device, the
+    # ladder copies and the monitors across 20.2 mm, and every one of them lies
+    # outside the single device bounding box that FLOORPLAN describes, so the
+    # runset reported 3139 enclosure violations that meant nothing.  The frame
+    # is now drawn by the reticle stage and this layer is read by no rule.  The
+    # device-level check it used to provide, that the bond pads lie inside the
+    # plan, is held by a test instead.
+    FLOORPLAN: [99, 0]       # not read by the runset
+    SEAL:      [20, 0]       # not read by the runset
+    DICE:      [22, 0]       # not read by the runset
+    FACET:     [23, 0]       # not read by the runset
+    ORIENT:    [24, 0]       # not read by the runset
+    FILL:      [25, 0]       # not read by the runset
+    LABEL:     [66, 0]       # not read by the runset
+  # The cut selects the permittivity tensor and hence every electro-optic
+  # figure.  Nothing on the mask stated the axis the die must be aligned to, so
+  # a die diced or mounted rotated would have satisfied every check.
+  crystal_misalignment_deg: 0.0
+  draw_orientation_key: true
+  # Geometry a rule deck does not examine, and the two data formats.
+  check_geometry: true
+  min_angle_deg: 30.0
+  max_vertices: 200
+  write_oasis: true
+  write_layer_table: true
+  cell_name: EDBR_TFLN
+
+reticle:
+  # Die assembly.
+  #
+  # ON as of 2026-08-09.  It was off, on the grounds that a die floor plan is a
+  # decision rather than a default and that this baseline existed to validate
+  # physics rather than to be fabricated.  That reasoning is now stale: the
+  # decision has been taken and is recorded below at length.  The die is
+  # 20200 x 5050 um, which is one of the three footprints the process offers; the
+  # chip frame is drawn and centred; the foundry runset reports zero violations
+  # against the assembled die; and the fill the density windows require is
+  # placed.  Leaving the stage off would have meant every default run reporting
+  # `switched off` for a die that exists, is checked and is clean.
+  #
+  # The cost is real and is not a reason to leave it off.  A die-level run with
+  # every grating period drawn is about 16 minutes against about 9 for the device
+  # alone.  Iterate on the physics with `--stages mode,grating,eo,cavity`, which
+  # is about a minute, and let the default run be the one that assembles what
+  # would actually be submitted.
+  enabled: true
+  # The die is DELIBERATELY LARGER than the 5 x 10 mm the paper reports.  The
+  # grating was lengthened to 11 mm to recover the Pockels lever against a
+  # 1000 um gain chip, so the device is 11.35 mm long and does not fit a 10 mm
+  # edge.  A working design that can be fabricated is preferred to one that
+  # fits the published outline, and the die is sized to the device accordingly.
+  #
+  # The size is NOT free.  The process offers three dimensions and refuses the
+  # rest: _utils/chip_floorplan.py in the installed kit snaps each edge to a
+  # usable 4950, 10000 or 20100 um and adds a 50 um exclusion ring, giving outer
+  # edges of 5050, 10100 and 20200 um.  Those are the three values the LN-CORE
+  # runset checks.  At least one edge must exceed 5050 um.  The 12500 x 5000
+  # carried here until 2026-08-08 matched none of them and would have been
+  # refused by the frame builder before any rule was reached.
+  #
+  # The 10.1 mm edge was tried first and does not work.  Fitting the 10000 um
+  # usable dimension requires the grating to come down from 11000 to about
+  # 9450 um, and the mode-hop-free range then reads 8.00075 GHz against a
+  # requirement of 8.0, a margin of 0.09 %.  The corner sweep moves that metric
+  # between 4.66 and 8.86 GHz about a nominal of 8.203, so a nominal of 8.0008
+  # fails at nearly every corner.  Shortening further to leave room for the seal
+  # ring and the dicing lane takes it below 8 outright.  The run is
+  # 20260808-...-FIT10.
+  #
+  # 20.2 x 5.05 mm therefore.  The 5.05 mm edge still carries the array: the
+  # paper places 35 devices on a 5 mm edge at a 143 um pitch, which the 20 um
+  # electrodes on a 7.6 um gap still clear, and the 23.3 um lateral excursion of
+  # the angled lead-in consumes a sixth of that pitch.  This stage assembles one
+  # die and performs no step and repeat, so the array is not drawn.
+  # The final chip boundary and the usable area inside it, which are what the
+  # runset checks the footprint, the centring and the exclusion ring against.
+  # Neither existed until 2026-08-08, so all three rules were silent on every
+  # die the chain emitted.  Enabling this centres the die on the origin, which
+  # the runset requires.
+  chip_frame:
+    enabled: true
+    exclusion_zone_um: 50.0
+    # The three outer edges the process offers.  A die edge matching none of
+    # them is refused by the frame builder in the kit before any rule is
+    # reached, so the set is recorded here rather than discovered at submission.
+    allowed_edges_um: [5050.0, 10100.0, 20200.0]
+  die_width_um: 20200.0
+  die_height_um: 5050.0
+  margin_um: 40.0
+  dicing_lane_um: 80.0
+  revision: A
+  seal_ring:
+    enabled: true
+    width_um: 20.0
+    clearance_um: 60.0
+  marks:
+    enabled: true
+    size_um: 40.0
+    arm_width_um: 4.0
+    clearance_um: 3.0                 # must clear METAL_to_WG_sep below
+    # The LN-etch level of the mark belongs on RIB_MARKERS and NOT on the ridge.
+    # It sat on WG until 2026-08-09, and since the composite below was drawn on
+    # MARK the two stood 3 um apart on layers the runset requires to be 15 um
+    # apart, giving 16 violations at the four corners.  The process reads
+    # RIB_MARKERS as the LN-etch layer for labels and markers, so the level is
+    # placed there and the composite is suppressed.
+    layers: [MARK, METAL]
+    composite_layer: null
+    corners: [SW, SE, NW, NE]
+  split:
+    # Copies of the device stepped across the post gap.  The monitors below
+    # measure the process; this ladder is what survives it.  kappa presently
+    # disagrees with the published device by a factor of 2.15 and the
+    # mode-hop-free range moves by 189 % across the corner window, so a reticle
+    # carrying one copy gambles the run on the model being right about a
+    # dimension the model is known to be wrong about.
+    #
+    # Note the coupled constraint: opening the post gap moves the posts toward
+    # the electrodes, so the widest copy needs its electrode gap widened to meet
+    # METAL_to_WG_sep.  The stage does that and reports it, and that copy then
+    # differs from the primary device in two parameters rather than one.
+    enabled: false
+    parameter: grating.post_gap_um
+    values: [0.60, 0.63, 0.66, 0.70, 0.76]
+    label_each: true
+
+  monitors:
+    # Each structure isolates one cause of a disagreement between the returned
+    # wafer and the prediction.  The case for them here is quantitative: kappa
+    # decays at 5.45 /um with the post gap, so 20 nm is 11 % of it, and the
+    # mode-hop-free range moves by a factor of five across the corners.
+    enabled: true
+    kappa_ladder: true
+    kappa_gaps_um: [0.53, 0.58, 0.63, 0.68, 0.73]   # +-100 nm about the design
+    kappa_periods: 300
+    loss_cutback: true
+    loss_lengths_um: [500.0, 1500.0, 3000.0]
+    cd_vernier: true
+    # 0.20 um was drawn until 2026-08-09 and the process floor is 0.25 um, so
+    # the narrowest rung of the monitor that measures the process would itself
+    # have been refused with the mask.  The design's own rule declared 0.20 and
+    # is the more permissive of the two.
+    cd_widths_um: [0.25, 0.30, 0.40, 0.60]
+    cd_repeats: 10
+    electrode_ladder: true
+    # The ladder is to bracket the gap the design actually uses, which is 7.6 um.
+    # It requested 4.0 um until 2026-08-11 and that rung could not be drawn, the
+    # design's own METAL_to_WG rule of 2.0 um raising it to 4.90, so the monitor
+    # measured a ladder it had not asked for and said so on every run.  4.9 um is
+    # the tightest rung that rule admits and it is now requested directly.
+    #
+    # The 2.0 um rule is this design's and not the process's: the LN-CORE runset
+    # carries no metal-to-waveguide separation rule at all, and the optical limit
+    # is four orders away, the mode overlap with metal being 1.6e-9 against a
+    # bound of 1e-5.  The rule is left as it is, being conservative rather than
+    # wrong, and the ladder is fitted to it.
+    electrode_gaps_um: [4.9, 7.6, 12.0]
+
+mask:
+  # Checks a rule deck does not make.  The expected counts encode the intent, and
+  # getting them right is part of stating what the device is: the guide is one
+  # region, but each Bragg post is deliberately a separate island, so WG merges
+  # into 1 + 2*draw_periods regions.  A count above that is a break in the guide;
+  # below it is a post touching the ridge, which would destroy the grating.
+  enabled: true
+  # `die` checks the assembled reticle instead of the device cell.  Set to `die`
+  # on 2026-08-09, the reticle stage now being enabled: a frame drawn and never
+  # checked is a frame assumed, and the runset's footprint, centring and
+  # exclusion rules exist only at this scale.
+  target: die
+  connected_layers: [WG, METAL, PAD]
+  # 1 guide + 2 posts per period x 8452 periods = 16905 regions on WG
+  expected_regions: {WG: 16905, METAL: 2, PAD: 2}
+  expectations_describe: device       # these counts are the device, not the die
+  # The same counts for the assembled die, measured off run 20260809-113858.
+  # The die carries the frame, the four overlay marks, the die label, the split
+  # ladder and the monitor field in addition to the device, so it is a different
+  # layout and needs its own figures.  Until 2026-08-09 only the device set was
+  # declared, so a die-level run compared 19992 extracted nets against a device
+  # expectation of 16907 and reported a discrepancy that was not a defect.
+  #
+  # METAL and PAD share layer (21,0), so both read the same merged count.
+  # Updated 2026-08-10 with the post gap at 855 nm.  The solved period moved from
+  # 1301.51 to 1301.56 nm, so 8451 periods fit the 11 mm grating where 8452 fitted
+  # before, which is two fewer post polygons and hence two fewer regions and two
+  # fewer nets.  The cause was established before the figures were changed: a
+  # count below the expectation reads as a short, and it is not to be adjusted
+  # away until it is understood.
+  expected_regions_die: {WG: 19954, METAL: 36, PAD: 36}
+  expected_nets_die: 19990
+  # Nets rather than islands per layer.  Merging one layer answers whether that
+  # layer is broken; it cannot answer whether a pad reaches the electrode it
+  # drives, those being two shapes on two layers that touch.  With METAL joined
+  # to PAD the device is 801 guide nets plus one net per electrode.
+  extract_netlist: true
+  joined_layers: [[METAL, PAD]]
+  expected_nets: 16907
+  # Layout versus schematic, without device recognition.  Text on the LABEL
+  # layer names the net it sits on, and each electrode carries two labels: one
+  # on its bond pad and one on the conductor.  A net holding both is a pad that
+  # reaches what it drives.  A net holding one is a break, and a count of
+  # connected regions cannot distinguish the two.
+  label_layer: LABEL
+  schematic:
+    - {name: ELECTRODE_LEFT,  labels: [E_L_PAD, E_L_ELEC]}
+    - {name: ELECTRODE_RIGHT, labels: [E_R_PAD, E_R_ELEC]}
+  fill:
+    # Placement of the fill the density windows require.
+    #
+    # ON as of 2026-08-09.  Every figure below is an ASSUMPTION and is marked as
+    # one: the LN-CORE lnoi400 runset carries width, space, separation and
+    # enclosure rules and states NO density window and NO fill pattern, so there
+    # is no foundry figure to adopt.  The values are ordinary for a
+    # thin-film process and the stand-offs are set well clear of the optical
+    # mode, the 5 um lateral stand-off being about seven mode widths.
+    #
+    # It is enabled because sizing a shortfall and never placing it leaves the
+    # density windows failing on every run with the remedy known and untaken.
+    # A placeholder pattern that meets the window is a better statement of the
+    # design's intent than an empty layer, and the assumption is visible here.
+    # It is to be replaced with the foundry's own pattern before submission.
+    enabled: true
+    size_um: 2.0
+    pitch_um: 4.0
+    exclusion_um: {WG: 5.0, METAL: 5.0, PAD: 10.0}
+    layer: FILL
+  must_not_touch: [[WG, METAL]]
+  density_tile_um: 200.0
+  density_windows:
+    - [WG, 0.02, 0.80]
+    - [METAL, 0.01, 0.90]
+
+drc:
+  enabled: true
+  # The foundry runset for this platform, obtained 2026-08-08.  Until then no
+  # foundry deck had been executed and the five rules below were the only check,
+  # which is why they are described as a smoke test throughout the documents.
+  #
+  # The rules the runset actually enforces differ from the five declared here in
+  # three ways worth recording.  It requires 0.25 um of ridge width where this
+  # file declares 0.20, so the declared rule was the more permissive of the two.
+  # It requires 0.8 um of metal width and 1.0 um of metal space where this file
+  # declares 2.0 um, so the declared rule was the stricter.  It carries no
+  # metal-to-waveguide separation rule at all, so `METAL_to_WG_sep` below is a
+  # constraint of this design rather than of the process.  The real limit there
+  # is optical, and stage 3 checks it.
+  #
+  # The runset also checks the die footprint and the exclusion ring, and those
+  # checks are silent on a device cell because CHIP_OUTER is drawn only at die
+  # level.  Silence there is not a pass.  See DESIGN_REPORT.md section 6.10.
+  deck: ../../design-chain/pdk/LXT_KLayout_DRC_Runsets/LN_CORE_lnoi400.lydrc
+  # `device` checks the cell the layout stage emitted. `die` checks the
+  # assembled reticle, which is the object actually submitted; a frame drawn
+  # and never checked is a frame assumed.
+  # As above: the die is the layout this design emits, so it is the layout whose
+  # connectivity, density and fill are checked.  The die-scale expectations are
+  # declared alongside the device ones.
+  target: die
+  rules:
+    # ignore_angle_deg: every convex corner brings two edges arbitrarily close
+    # together, so a width check reports the corner itself unless a threshold
+    # is set.  The engine default of 90 deg is wrong wherever a feature is
+    # drawn at an angle: the 8 deg facet above necessarily produces an 82 deg
+    # corner at the taper tip, which is manufacturable and was reported.
+    - {name: WG_min_width,        kind: min_width,      layer: WG,    value_um: 0.20, severity: error, ignore_angle_deg: 80.0}
+    - {name: WG_min_space,        kind: min_space,      layer: WG,    value_um: 0.30, severity: error}
+    - {name: METAL_min_width,     kind: min_width,      layer: METAL, value_um: 2.00, severity: error}
+    # The binding metal-to-guide constraint on this device is the post outer
+    # edge, not the ridge: 0.5 + 0.63 + 0.30 = 1.43 um from centre, against an
+    # electrode inner edge at 3.5 um -> 2.07 um.  A 2.5 um rule would fail the
+    # published geometry, so the deck records the constraint that the device
+    # actually meets.  The real limit is optical, and stage 3 checks it.
+    - {name: METAL_to_WG_sep,     kind: min_separation, layer: METAL, other_layer: WG, value_um: 2.00, severity: error}
+    - {name: WG_min_area,         kind: min_area,       layer: WG,    value_um: 0.04, severity: warning}
+
+# ---------------------------------------------------------------------
+# Acceptance targets - taken from the PAPER, not from our own output.
+# `must`   : the chain is wrong if these miss
+# `should` : model-dependent, a miss is a finding to investigate
+# `info`   : recorded for the record only
+# ---------------------------------------------------------------------
+search:
+  # Directed search for a configuration meeting the declared targets.  Off by
+  # default: it re-runs the chain tens of times, and the parameters it is free
+  # to move are a decision rather than a default.
+  #
+  # The bounds are what the design may become, not what it is.  The post gap is
+  # allowed to open to 1.0 um, which weakens the mirror; the gain chip and the
+  # feed are allowed to shorten, which raises the Pockels lever.  The constraint
+  # records that the taper is drawn inside the feed and cannot exceed it.
+  enabled: false
+  parameters:
+    - {path: grating.post_gap_um,    min: 0.50, max: 1.00, probe: 0.05}
+    - {path: cavity.rsoa.length_um,  min: 250.0, max: 1500.0, probe: 0.10}
+    - {path: cavity.feed_length_um,  min: 200.0, max: 1500.0, probe: 0.10}
+    # Added 2026-08-07.  Opening the post gap moves the posts outward toward the
+    # electrodes, and at a 740 nm gap the outer post edge stands 1.96 um from the
+    # electrode against a 2.00 um rule, which the mask fails at 11330 places.
+    # The electrode gap must therefore be free to widen with the post gap.  It is
+    # not a free choice: widening it lowers the electro-optic overlap, which
+    # lowers the tuning rate, which lowers the tuning range.  A search that
+    # cannot move it will find configurations that no mask can carry.
+    - {path: electrodes.gap_um,      min: 6.0, max: 12.0, probe: 0.05}
+  constraints:
+    - "cavity.feed_length_um >= layout.taper_length_um"
+  # `layout` and `drc` are included despite costing seconds per evaluation.
+  # Without them the rule check is absent from the search, and the coupling
+  # above is invisible: a candidate at a 740 nm post gap passed every physical
+  # target and carried 11330 rule violations.  The constraint cannot be written
+  # in the `constraints` list because it is an arithmetic combination of four
+  # dimensions rather than a comparison of two fields.
+  stages: [mode, grating, eo, cavity, dynamics, layout, drc]
+  severities: [must, should]
+  max_evaluations: 60
+
+targets:
+  - metric: mode.n_guided_modes
+    max: 1
+    severity: must
+    source: "paper: thin film + shallow etch chosen to ensure single-mode operation"
+
+  - metric: grating.bragg_wavelength_nm
+    value: 1545.9
+    rel_tol: 0.02
+    unit: nm
+    severity: must
+    source: "paper Sec.II: measured 1545.9 nm, 1.2% from design"
+
+  - metric: grating.peak_reflectivity
+    value: 0.75
+    rel_tol: 0.20
+    severity: must
+    source: "paper Fig.1d: estimated peak reflectivity around 75%"
+
+  - metric: grating.fwhm_GHz
+    min: 5.0
+    max: 14.0
+    unit: GHz
+    severity: should
+    source: "paper: 6.5 GHz simulated, 8 GHz measured off-chip"
+
+  - metric: eo.tuning_MHz_per_V
+    value: 550.0
+    rel_tol: 0.30
+    unit: MHz/V
+    severity: must
+    source: "paper Fig.2a: 550 MHz/V; 10 GHz over 20 V"
+
+  - metric: eo.VpiL_ideal_V_cm
+    value: 4.0
+    rel_tol: 0.25
+    unit: V.cm
+    severity: should
+    source: "paper Sec.II: simulated VpiL of 4 V.cm (quoted without overlap derating)"
+
+  - metric: eo.mode_overlap_with_metal
+    max: 1.0e-5
+    severity: must
+    source: "paper: electrodes placed conservatively to avoid optical loss"
+
+  - metric: cavity.mode_hop_free_range_GHz
+    min: 8.0
+    unit: GHz
+    severity: should
+    source: "paper abstract: continuous mode-hop-free tuning range over 10 GHz"
+
+  - metric: cavity.schawlow_townes_henry_linewidth_kHz
+    value: 2.8
+    rel_tol: 1.0
+    unit: kHz
+    severity: should
+    source: "paper Sec.III: 800 Hz^2/Hz at 2 MHz offset -> 2.8 kHz intrinsic linewidth"
+
+  - metric: cavity.smsr_dB
+    min: 40.0
+    unit: dB
+    severity: should
+    source: "paper Fig.3e: SMSR 63 dB at 0.02 nm RBW"
+
+  - metric: drc.error_violations
+    max: 0
+    severity: must
+    source: "mask must be DRC clean"
+
+  # The extracted net count is checked by the `mask` stage against
+  # `mask.expected_nets` above, which is scoped to the layout being checked. It
+  # is deliberately not duplicated as a target here: a run that legitimately
+  # reconfigures the target layout would then fail a row describing the other
+  # one, and the verdict would carry no information.
+
+  # A submittable mask carries every grating period. The default configuration
+  # draws a 400-period window, so this row reads unmet, which is the correct
+  # statement about that mask. It is recorded at severity `info` because the
+  # baseline exists to validate physics rather than to be fabricated; it becomes
+  # a `must` on any design that will be submitted.
+  - metric: layout.mask_is_complete
+    min: 1
+    severity: info
+    source: "a submitted mask carries the whole device; the default draws a window of it"
+
+allow_unconfirmed_materials: true
+
+# `mask` is included so that connectivity, isolation and density are evaluated
+# on every run rather than only when asked for. `reticle` is resolved as a
+# dependency wherever it is enabled.
+release:
+  # The submission manifest.
+  #
+  # ON as of 2026-08-10.  It was off because the stage would have refused, and
+  # the reasons it gave were accurate at the time: the mask was a window of the
+  # device rather than the whole of it, no foundry deck had been executed, and
+  # the acceptance targets were unmet.  All three have since been closed, along
+  # with the two that replaced them.  Every grating period is now drawn, the
+  # LN-CORE runset reports zero violations against the assembled die, the twelve
+  # targets are met, the die frame is present, and the fill the density windows
+  # require is placed.
+  #
+  # The stage refuses rather than reports, so enabling it is the assertion that
+  # the ten conditions hold.  It is left strict and no condition is waived: a
+  # waiver would be recorded in the manifest, which is the correct mechanism, and
+  # none is warranted.
+  enabled: true
+  revision: A
+  strict: true
+  waive: []
+
+circuit:
+  # The passive circuit assembled from scattering matrices by SAX.  Off by
+  # default: the extras are optional.  It is anchored to the closed-form
+  # two-mirror result and agrees with it to 6e-14, and it reports the ripple the
+  # residual facet reflection imposes on the mirror the laser sees, which the
+  # cavity stage applies at a single plane and therefore cannot express.
+  #
+  # ON as of 2026-08-09.  The facet stage computes 3.13 dB per facet against the
+  # 1.50 dB the cavity block assumes, so the reflection the gain chip actually
+  # sees is the quantity in question and this stage is what assembles it.
+  enabled: true
+  facet_transmission: 0.7
+  taper_transmission: 0.99
+
+# `release` is listed and left disabled DELIBERATELY, and this is the one
+# omission on the record.  That stage refuses rather than reports: it evaluates
+# ten conditions of readiness and raises where any fails.  Two are known to fail
+# here, the fill being sized and not placed and the die-level netlist expectation
+# being undeclared, so enabling it would abort every run before `verify` is
+# reached.  It is to be enabled once those two are closed, and not before.
+# THE FLOW IS COMPREHENSIVE BY DEFAULT.  Every stage the chain offers is listed,
+# and a stage omitted from this list is a question nobody asked rather than a
+# question answered favourably.
+#
+# Until 2026-08-09 this list carried twelve of the seventeen.  `taper`, `fem`,
+# `fdtd`, `bend` and `facet` were absent, so every run of this design skipped
+# them and the verdict read PASS on twelve of twelve targets with five of the
+# chain's cross-checks never performed.  Each had been run once as a one-off
+# probe, and each of those probes predated the solved grating period, the 0.90 um
+# ridge, the 0.210 um etch, the 0.82 um post gap, the 1000 um gain chip, the
+# angled facet route and the 20.2 mm die.
+#
+# Where a stage must be omitted, it is to be removed from this list WITH a
+# comment giving the reason, so that the omission is a decision on the record.
+stages: [mode, taper, fem, fdtd, bend, facet, grating, eo, cavity, dynamics,
+         circuit, layout, reticle, drc, mask, verify, release]

@@ -1,0 +1,26 @@
+# A demonstration runset, not a foundry deck.
+#
+# Its purpose is to exercise the path by which a real runset is executed: the
+# KLayout application in batch, against the emitted GDS, writing a report
+# database that the chain reads back. A foundry deck drops into the same place
+# and needs no change to the chain.
+#
+#   picchain run <design.yaml>            with drc.deck: smoke_deck.lydrc
+#
+source($input)
+report("picchain smoke deck", $report)
+
+wg    = input(1, 0)
+slab  = input(2, 0)
+metal = input(10, 0)
+
+wg.width(0.20.um).output("WG_min_width",
+    "waveguide feature narrower than 200 nm")
+wg.space(0.30.um).output("WG_min_space",
+    "waveguide features closer than 300 nm")
+metal.width(2.0.um).output("METAL_min_width",
+    "electrode narrower than 2 um")
+metal.separation(wg, 2.0.um).output("METAL_to_WG_sep",
+    "electrode closer than 2 um to a guiding feature")
+wg.not(slab).output("WG_outside_SLAB",
+    "waveguide drawn outside the slab region")

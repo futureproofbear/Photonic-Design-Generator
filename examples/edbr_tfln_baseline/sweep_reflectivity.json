@@ -1,0 +1,66 @@
+{
+  "design": "..\\examples\\edbr_tfln_baseline\\design.yaml",
+  "param": "grating.post_gap_um",
+  "rows": [
+    {
+      "param": "grating.post_gap_um",
+      "value": "0.63",
+      "grating.peak_reflectivity": 0.9748785231694664,
+      "grating.fwhm_GHz": 21.380218343125,
+      "grating.penetration_depth_mm": 1.269272087262965,
+      "cavity.pockels_lever": 0.32607845743127783,
+      "cavity.fsr_GHz": 17.369655455290086,
+      "cavity.mode_hop_free_range_GHz": 3.84514901234375,
+      "cavity.smsr_dB": 52.578857525336645,
+      "cavity.modal_threshold_gain_per_cm": 14.153943956477734
+    },
+    {
+      "param": "grating.post_gap_um",
+      "value": "0.73",
+      "grating.peak_reflectivity": 0.8410005323674703,
+      "grating.fwhm_GHz": 14.4301695536875,
+      "grating.penetration_depth_mm": 2.0612181319222516,
+      "cavity.pockels_lever": 0.4398815134708207,
+      "cavity.fsr_GHz": 14.43649521852601,
+      "cavity.mode_hop_free_range_GHz": 11.2803147083125,
+      "cavity.smsr_dB": 48.65458214950813,
+      "cavity.modal_threshold_gain_per_cm": 14.892546849600999
+    },
+    {
+      "param": "grating.post_gap_um",
+      "value": "0.79",
+      "grating.peak_reflectivity": 0.6621615684664223,
+      "grating.fwhm_GHz": 11.8412906916875,
+      "grating.penetration_depth_mm": 2.55720922736759,
+      "cavity.pockels_lever": 0.49320914065576543,
+      "cavity.fsr_GHz": 13.062028829978,
+      "cavity.mode_hop_free_range_GHz": 4.79152718640625,
+      "cavity.smsr_dB": 50.00882740527957,
+      "cavity.modal_threshold_gain_per_cm": 16.087960378118453
+    },
+    {
+      "param": "grating.post_gap_um",
+      "value": "0.83",
+      "grating.peak_reflectivity": 0.5232623160602485,
+      "grating.fwhm_GHz": 10.674895316625,
+      "grating.penetration_depth_mm": 2.8416145481535766,
+      "cavity.pockels_lever": 0.5193298852684368,
+      "cavity.fsr_GHz": 12.388792697255651,
+      "cavity.mode_hop_free_range_GHz": 8.93796602834375,
+      "cavity.smsr_dB": 48.865186094674186,
+      "cavity.modal_threshold_gain_per_cm": 17.265093821199674
+    },
+    {
+      "param": "grating.post_gap_um",
+      "value": "0.88",
+      "grating.peak_reflectivity": 0.3612936954176861,
+      "grating.fwhm_GHz": 9.7023437564375,
+      "grating.penetration_depth_mm": 3.119634627237557,
+      "cavity.pockels_lever": 0.5422993753597087,
+      "cavity.fsr_GHz": 11.796777006346616,
+      "cavity.mode_hop_free_range_GHz": 2.61643607696875,
+      "cavity.smsr_dB": 47.36108489712164,
+      "cavity.modal_threshold_gain_per_cm": 19.11705237312297
+    }
+  ]
+}

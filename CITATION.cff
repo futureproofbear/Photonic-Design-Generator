@@ -1,0 +1,48 @@
+cff-version: 1.2.0
+title: >-
+  picchain: an agent-drivable design, simulation and verification chain for
+  photonic integrated circuits
+message: "If this software is used in work that is published, please cite it."
+type: software
+license: MIT
+repository-code: "https://github.com/<OWNER>/<REPO>"
+abstract: >-
+  A headless design chain for photonic integrated circuits. A design is
+  expressed as a single YAML file carrying its own acceptance criteria; the
+  chain returns a JSON metric tree and a non-zero exit code where those criteria
+  are unmet. Seventeen stages take a device from cross-section to a
+  rule-checked mask and a submission manifest, assembled from open tools. It is
+  validated against a published and measured thin-film lithium niobate
+  extended-DBR Pockels laser, and the agreements and disagreements with that
+  device are recorded rather than reconciled.
+keywords:
+  - photonics
+  - photonic integrated circuits
+  - thin-film lithium niobate
+  - electronic design automation
+  - Bragg grating
+  - coupled-mode theory
+authors:
+  - family-names: Leow
+    given-names: "Kwang Siong Jeremy"
+  - name: "Republic of Singapore"
+
+# The repository URL above remains a placeholder. Set it to the published
+# location before the first public commit; a citation pointing nowhere is worse
+# than none.
+
+references:
+  - type: article
+    title: >-
+      Ultrafast tunable photonic integrated Pockels extended-DBR laser
+    authors:
+      - name: "A. Siddharth et al."
+    journal: "Nature Photonics"
+    volume: 19
+    start: 709
+    end: 717
+    year: 2025
+    doi: "10.1038/s41566-025-01660-x"
+    notes: >-
+      The device against which this chain is validated. See
+      examples/edbr_tfln_baseline/TOOLCHAIN_VALIDATION.md.

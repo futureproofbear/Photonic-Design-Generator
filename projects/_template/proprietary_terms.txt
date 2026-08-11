@@ -1,0 +1,28 @@
+# Proprietary terms for this scope.
+#
+# Any occurrence of a term below, ANYWHERE outside this project folder, is
+# treated as a breach of the IP boundary by tools/check_ip_boundary.py.
+#
+# One term per line. Matching is case-insensitive and word-bounded.
+# Comments begin with '#'.
+#
+# Complete this file BEFORE any analysis is written. The check cannot protect
+# terms that have not been declared.
+#
+# This file is itself proprietary and must not be copied out of the project.
+
+# --- client and programme identity ---
+# ExampleCorp
+# Example Programme Name
+# <principal investigator or contact name>
+
+# --- application (where the combination is identifying) ---
+# <application, e.g. a band plus a system type>
+
+# --- programme-specific deliverable and work-package codes ---
+# WPn
+# Dn
+
+# --- distinctive part numbers named in client documents ---
+
+# --- client document filenames ---

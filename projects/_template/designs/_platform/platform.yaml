@@ -1,0 +1,70 @@
+# Shared process stack for this scope.
+#
+# Design files incorporate this by
+#     extends: ../_platform/platform.yaml
+# and override only what is specific to that PIC.
+#
+# Where foundry data has been received under non-disclosure, place it in the
+# project `pdk/` directory and point at it here:
+#     platform:
+#       materials_file: ../../pdk/materials.yaml
+# The shared design-chain/pdk/materials.yaml is never to be edited with
+# project-proprietary data.
+
+meta:
+  name: _platform
+  title: "<platform name> defaults"
+  status: scaffold
+
+platform:
+  cut: x
+  film_material: LiNbO3
+  film_thickness_um: 0.400
+  etch_depth_um: 0.200
+  sidewall_deg: 75.0
+  box_material: SiO2
+  box_thickness_um: 4.7
+  clad_material: SiO2
+  clad_thickness_um: 2.0
+  substrate_material: Si
+  propagation_loss_dB_per_cm: 0.5
+
+mesh:
+  d_fine_um: 0.010
+  d_coarse_um: 0.060
+  fine_margin_um: 0.6
+  subsample: 3
+  num_modes: 3
+  polarisation: TE
+
+waveguide:
+  top_width_um: 1.0
+  wavelength_um: 1.550
+
+electrodes:
+  enabled: true
+  gap_um: 7.0
+  width_um: 20.0
+  thickness_um: 0.9
+  material: Au
+  eo_coefficient: r33
+  test_voltage_V: 1.0
+  drive_impedance_ohm: 50.0
+  rf_window_pad_um: 40.0
+
+layout:
+  enabled: true
+  draw_periods: 400
+  taper_length_um: 200.0
+  taper_tip_width_um: 0.4
+
+drc:
+  enabled: true
+  rules:
+    - {name: WG_min_width,    kind: min_width,      layer: WG,    value_um: 0.25, severity: error}
+    - {name: WG_min_space,    kind: min_space,      layer: WG,    value_um: 0.35, severity: error}
+    - {name: METAL_min_width, kind: min_width,      layer: METAL, value_um: 2.00, severity: error}
+    - {name: METAL_to_WG_sep, kind: min_separation, layer: METAL, other_layer: WG, value_um: 2.00, severity: error}
+
+allow_unconfirmed_materials: true
+stages: [mode, grating, eo, cavity, layout, drc, verify]

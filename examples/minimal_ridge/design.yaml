@@ -1,0 +1,79 @@
+# The smallest design this chain accepts.
+#
+# One cross-section, one grating, three targets. It runs in about a minute and
+# needs no optional backend and no external solver. Copy it to start something
+# of your own.
+#
+# The validation baseline next door is 588 lines and the candidate beside it is
+# over a thousand. Almost all of that is commentary recording why each number is
+# what it is, which is the right way to carry a design and the wrong way to
+# introduce one.
+#
+#   picchain run examples/minimal_ridge/design.yaml
+#
+# Exit 0 means every `must` target was met. Exit 2 means one was not, and
+# `runs/<id>/metrics.json` says which.
+
+meta:
+  name: minimal_ridge
+  title: "A single-mode ridge with a first-order Bragg mirror"
+  status: scaffold
+
+# The process stack. Thicknesses in micrometres throughout, everywhere.
+platform:
+  film_material: LiNbO3
+  film_thickness_um: 0.400
+  etch_depth_um: 0.200
+  sidewall_deg: 80.0            # a real etch has no vertical wall
+  box_thickness_um: 4.7
+  clad_thickness_um: 2.0
+
+waveguide:
+  top_width_um: 1.0
+  wavelength_um: 1.55
+
+# The mirror. Give a period, or give a target wavelength and let the chain
+# solve the period that lands on it.
+grating:
+  enabled: true
+  order: 1
+  period_um: 0.4322             # chosen so the Bragg condition lands near 1550 nm
+  length_um: 500.0
+  post_width_um: 0.30
+  post_gap_um: 0.50             # from the ridge edge; kappa is exponential in it
+  # The reflection is swept over this span to find its width. A short grating
+  # has a wide mirror: the transform limit alone is 0.886 c / (2 n_g L), about
+  # 270 GHz here, and the coupling widens it further. Leave the default 160 GHz
+  # and the sweep never reaches half power, so the width comes back `nan`.
+  span_GHz: 6000.0
+  points: 4001
+
+electrodes:
+  enabled: false                # nothing to tune here
+
+cavity:
+  enabled: false                # a mirror, not a laser
+
+# What the design must achieve. A target names a metric from the tree, a
+# criterion, and where the requirement came from. `must` fails the run;
+# `should` is reported and does not.
+targets:
+  - metric: mode.n_guided_modes
+    max: 1.0
+    severity: must
+    source: "single lateral mode is required"
+
+  - metric: grating.peak_reflectivity
+    min: 0.50
+    max: 0.99
+    severity: must
+    source: "a usable mirror, not a perfect one"
+
+  - metric: grating.bragg_wavelength_nm
+    value: 1550.0
+    rel_tol: 0.02
+    unit: nm
+    severity: should
+    source: "the C band"
+
+stages: [mode, grating, verify]

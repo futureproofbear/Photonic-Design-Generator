@@ -1,0 +1,65 @@
+# environments and caches
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Run artifacts. Reproducible from design.yaml plus the pinned environment, and
+# a single die-level run writes tens of megabytes.
+**/runs/
+
+# --- The IP boundary, enforced here and not by recollection -----------------
+#
+# Everything under projects/ is proprietary to its scope and MUST NOT be
+# published. The exclusion below was commented out until 2026-08-11, which meant
+# a first commit of this repository would have published client work. It is now
+# active, and it is not to be relaxed.
+#
+# The files remain on disk where they are: tools/check_ip_boundary.py reads
+# projects/<scope>/proprietary_terms.txt in place, so excluding the tree from
+# version control does not weaken the check. The intended arrangement is a
+# separate private repository per scope, mounted at projects/<scope>/.
+projects/*
+!projects/_template/
+!projects/README.md
+
+# --- Third-party material not ours to redistribute --------------------------
+#
+# Published papers and vendor datasheets are cited in references/README.md and
+# are to be obtained from their sources. A supplier datasheet in particular is
+# not redistributable.
+references/*
+!references/README.md
+
+# The open Luxtelligence PDK, vendored for convenience during development. It
+# is MIT licensed and could be redistributed with its notice, but a documented
+# install step is preferred to a 6 MB copy that will drift from upstream.
+design-chain/pdk/lxt_pdk_gf/
+
+# Foundry rule decks are obtained from the foundry under their own terms.
+design-chain/pdk/LXT_KLayout_DRC_Runsets/
+
+# --- Deliberately tracked ---------------------------------------------------
+#
+# golden/ holds the layout regression reference. It is binary and it is tracked
+# on purpose: `picchain golden` compares against it, and a reference that is not
+# under version control is not a reference.
+!**/golden/
+!**/golden/**
+
+# --- Not published --------------------------------------------------------
+#
+# Rendered documents. They are generated from the Markdown beside them and go
+# stale the moment it is edited, which it frequently is. A stale PDF next to a
+# current source is worse than no PDF.
+*.pdf
+
+# The operating manuals, wherever they sit. These are instructions to an agent
+# rather than documentation of the chain, and they carry working directives that
+# are of no use to a reader of the repository. The skills, the sub-agents and the
+# lessons ledger under .claude/ ARE published: they hold transferable design
+# knowledge and are sanitised.
+CLAUDE.md
+**/CLAUDE.md

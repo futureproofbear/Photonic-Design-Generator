@@ -1,0 +1,258 @@
+"""Stage 3 - Pockels electrodes: RF field, EO overlap, tuning efficiency.
+
+Two meshes, deliberately:
+
+* the **optical** mesh from stage 1 - a few um wide, 10 nm fine, no metal, no
+  handle wafer (the real 4.7 um BOX isolates the mode, and putting a truncated
+  BOX over silicon invites spurious substrate modes);
+* an **RF** mesh - tens of um wide, coarse, *with* the gold electrodes and the
+  silicon handle, because the electrostatic problem is set by geometry an
+  order of magnitude larger than the mode.
+
+The electrostatic potential is solved on the RF mesh and interpolated onto the
+optical mesh for the overlap integral.  The RF field is smooth on the scale of
+the optical mode, so this costs nothing in accuracy and saves ~30x in runtime
+versus meshing the whole electrode span at optical resolution.
+
+Why the group index appears in the tuning
+-----------------------------------------
+The Bragg condition is lambda_B = 2 n_eff Lambda / m, but n_eff is itself
+dispersive.  Perturbing both sides,
+
+    d(lambda_B)/lambda_B = dn / n_g          (NOT dn / n_eff)
+
+because n_g = n_eff - lambda dn_eff/dlambda.  For a shallow-etched thin-film
+LN/LT ridge n_g/n_eff ~ 1.25, so using n_eff would over-predict the tuning
+efficiency by ~25%.  This is the easiest way to mis-size a Pockels DBR.
+"""
+
+from __future__ import annotations
+
+import cmath
+import math
+from typing import Any
+
+import numpy as np
+from scipy.interpolate import RegularGridInterpolator
+
+from .. import process
+from ..artifacts import RunContext
+from ..config import Design
+from ..geometry import RasterGrid, graded_axis, material_mask, rasterise
+from ..materials import MaterialLibrary
+from ..solvers.electrostatic import eo_overlap, solve_potential
+from .s01_mode import _build
+
+C0 = 299792458.0
+EPS0 = 8.8541878128e-12  # F/m
+
+
+
+def travelling_wave(grid, eps_x, eps_y, mask_L, mask_R, V, C_per_m, e, n_g, length_m, geom):
+    """Microwave index, impedance, conductor loss and the bandwidth they imply.
+
+    The closed-form parts live in ``picchain.rf`` and are tested there. What is
+    done here is the one thing that needs the mesh: the same electrostatic
+    problem solved with every dielectric removed, which gives the inductance,
+    since a magnetostatic problem does not see them.
+    """
+    import numpy as np
+
+    from .. import rf
+
+    ones = np.ones_like(eps_x)
+    es_air = solve_potential(grid.x, grid.y, ones, ones,
+                             [(mask_L, +V / 2), (mask_R, -V / 2)])
+    C_air = 2 * (es_air.energy(ones, ones) * EPS0) / (V**2)
+    if C_air <= 0 or C_per_m <= 0:
+        return {"enabled": False, "reason": "a capacitance was not positive"}
+
+    line = rf.line_parameters(C_per_m, C_air)
+    Z0 = line["characteristic_impedance_ohm"]
+    n_m = line["microwave_index"]
+
+    def alpha(f_Hz):
+        R = rf.skin_resistance_per_m(f_Hz, e.conductivity_S_per_m,
+                                     geom.electrode_width_um * 1e-6, e.thickness_um * 1e-6)
+        return R / (2.0 * Z0)
+
+    f_3dB = rf.bandwidth(length_m, alpha, n_m, n_g)
+    f_6dB = rf.bandwidth(length_m, alpha, n_m, n_g, level=0.5)
+    mismatch = abs((Z0 - e.drive_impedance_ohm) / (Z0 + e.drive_impedance_ohm))
+
+    return {
+        "enabled": True,
+        "capacitance_air_pF_per_cm": C_air * 1e12 / 100,
+        "inductance_nH_per_cm": line["inductance_H_per_m"] * 1e9 / 100,
+        "microwave_index": n_m,
+        "optical_group_index": n_g,
+        "velocity_mismatch": n_m - n_g,
+        "characteristic_impedance_ohm": Z0,
+        "reflection_at_driver": mismatch,
+        "return_loss_dB": -20 * math.log10(mismatch) if mismatch > 0 else float("inf"),
+        "conductor_loss_dB_per_cm_at_10GHz": alpha(1e10) * rf.NEPER_TO_DB / 100,
+        "electro_optic_3dB_GHz": f_3dB / 1e9,
+        "electro_optic_6dB_GHz": f_6dB / 1e9,
+        "electrode_length_mm": length_m * 1e3,
+    }
+
+
+def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]:
+    e = design.electrodes
+    if not e.enabled:
+        ctx.put("eo", {"enabled": False})
+        return {"enabled": False}
+
+    p, mesh = design.platform, design.mesh
+    lam = design.waveguide.wavelength_um
+    V = e.test_voltage_V
+    # every electrode dimension below is the printed one, matching the
+    # cross-section stage 1 solved and not the figure drawn on the mask
+    geom = process.geometry(design, design.process.simulate)
+
+    # ---- optical mode from stage 1 (same mesh, no re-solve) -------------
+    mode_npz = ctx.run_dir / "mode.npz"
+    if not mode_npz.exists():
+        raise RuntimeError("stage 'eo' requires stage 'mode' artifacts")
+    md = np.load(mode_npz)
+    ox, oy = md["x_um"], md["y_um"]
+    intensity = np.abs(md["field_bare"]) ** 2
+    mask_film_opt = md["mask_film"]
+
+    # ---- RF problem on its own, coarser, wider mesh ---------------------
+    xs_rf = _build(design, with_posts=False, electrodes=True, name="rf")
+    d_fine_rf = max(mesh.d_fine_um * 5, 0.05)
+    d_coarse_rf = max(mesh.d_coarse_um * 10, 0.60)
+    # Grid the RF problem explicitly rather than through build_grid: the
+    # blanket layers span the whole (deliberately huge) window, so the generic
+    # "fine across all features" rule would mesh the entire fringing volume at
+    # 50 nm.  Only the electrode gap and the film stack need resolving.
+    x0, x1, y0, y1 = xs_rf.window
+    slab_y = design.platform.film_thickness_um - design.platform.etch_depth_um
+    fx = [-geom.electrode_gap_um / 2, geom.electrode_gap_um / 2,
+          -geom.wg_top_width_um / 2, geom.wg_top_width_um / 2]
+    fy = [0.0, slab_y, design.platform.film_thickness_um, slab_y + e.thickness_um]
+    grid = RasterGrid(
+        graded_axis(x0, x1, fx, d_fine_rf, d_coarse_rf, fine_margin=geom.electrode_width_um),
+        graded_axis(y0, y1, fy, d_fine_rf, d_coarse_rf, fine_margin=2.0),
+    )
+
+    eps_rf = {m: lib[m].eps_rf_device(p.cut) for m in xs_rf.materials_used()}
+    eps_x = rasterise(xs_rf, grid, {m: v[0] for m, v in eps_rf.items()}, subsample=2)
+    eps_y = rasterise(xs_rf, grid, {m: v[1] for m, v in eps_rf.items()}, subsample=2)
+
+    metal = material_mask(xs_rf, grid, e.material, subsample=2)
+    mask_L = metal * (grid.x[:, None] < 0)
+    mask_R = metal * (grid.x[:, None] > 0)
+    es = solve_potential(grid.x, grid.y, eps_x, eps_y, [(mask_L, +V / 2), (mask_R, -V / 2)])
+
+    # ---- interpolate E_x onto the optical mesh --------------------------
+    interp = RegularGridInterpolator(
+        (grid.x, grid.y), es.Ex, bounds_error=False, fill_value=0.0
+    )
+    OX, OY = np.meshgrid(ox, oy, indexing="ij")
+    Ex_opt = interp(np.stack([OX.ravel(), OY.ravel()], axis=-1)).reshape(OX.shape)
+
+    gamma = eo_overlap(Ex_opt, intensity, mask_film_opt, ox, oy, geom.electrode_gap_um, V)
+
+    mat = lib[p.film_material]
+    n_e = mat.index(lam, "e", p.use_index_override)
+    r = mat.r_pm_per_V(e.eo_coefficient) * 1e-12  # m/V
+
+    E_ref = V / (geom.electrode_gap_um * 1e-6)                  # parallel-plate reference, V/m
+    dn_ideal = 0.5 * n_e**3 * r * E_ref
+    dn_eff = gamma * dn_ideal
+    dn_eff_per_V = dn_eff / V
+
+    grating = ctx.get("grating") or {}
+    n_g = float(grating.get("n_g") or (ctx.get("mode") or {}).get("n_g") or n_e)
+    lam_B_um = float(grating.get("bragg_wavelength_um") or lam)
+    f_B = C0 / (lam_B_um * 1e-6)
+
+    tuning_Hz_per_V = f_B * dn_eff_per_V / n_g
+    VpiL_V_cm = (
+        (lam_B_um * 1e-6) * (geom.electrode_gap_um * 1e-6) / (n_e**3 * r * abs(gamma)) * 100
+        if abs(gamma) > 0 else float("inf")
+    )
+    VpiL_ideal_V_cm = (lam_B_um * 1e-6) * (geom.electrode_gap_um * 1e-6) / (n_e**3 * r) * 100
+
+    # capacitance per unit length from the stored energy (F/m)
+    # E is in V/um and dA in um^2; those two unit factors cancel exactly, so
+    # this is already joules per metre of electrode run.
+    W = es.energy(eps_x, eps_y) * EPS0
+    C_per_m = 2 * W / (V**2)
+    L_electrode_m = float(grating.get("length_um", design.grating.length_um)) * 1e-6
+    C_total_F = C_per_m * L_electrode_m
+    f_rc_Hz = 1.0 / (2 * math.pi * e.drive_impedance_ohm * C_total_F) if C_total_F > 0 else float("inf")
+
+    # optical power beyond the electrode inner edge -> metal absorption proxy
+    dxo, dyo = np.gradient(ox), np.gradient(oy)
+    dA = np.outer(dxo, dyo)
+    beyond = np.abs(ox)[:, None] >= (geom.electrode_gap_um / 2)
+    tail = float(np.sum(intensity * beyond * dA) / np.sum(intensity * dA))
+
+    tw = travelling_wave(grid, eps_x, eps_y, mask_L, mask_R, V,
+                         C_per_m, e, n_g, L_electrode_m, geom) if e.travelling_wave \
+        else {"enabled": False}
+
+    payload = {
+        "enabled": True,
+        "electrode_gap_um": geom.electrode_gap_um,
+        "electrode_width_um": geom.electrode_width_um,
+        "test_voltage_V": V,
+        "eo_coefficient": e.eo_coefficient,
+        "r_pm_per_V": r * 1e12,
+        "n_extraordinary": n_e,
+        "eo_overlap_gamma": gamma,
+        "dn_ideal_per_V": dn_ideal / V,
+        "dn_eff_per_V": dn_eff_per_V,
+        "tuning_MHz_per_V": tuning_Hz_per_V / 1e6,
+        "tuning_GHz_per_V": tuning_Hz_per_V / 1e9,
+        "VpiL_V_cm": VpiL_V_cm,
+        "VpiL_ideal_V_cm": VpiL_ideal_V_cm,
+        "capacitance_pF_per_cm": C_per_m * 1e12 / 100,
+        "capacitance_total_pF": C_total_F * 1e12,
+        "lumped_RC_bandwidth_MHz": f_rc_Hz / 1e6,
+        "mode_overlap_with_metal": tail,
+        "rf_mesh": {"nx": int(len(grid.x)), "ny": int(len(grid.y)),
+                    "d_fine_um": d_fine_rf, "d_coarse_um": d_coarse_rf},
+        "n_g_used": n_g,
+        "note_group_index": "tuning uses dlambda/lambda = dn/n_g (dispersive Bragg condition)",
+        "note_metal_overlap": "reported as the fraction of |E|^2 beyond the electrode inner edge",
+        "travelling_wave": tw,
+    }
+
+    ctx.put("eo", payload)
+    ctx.write_stage(
+        "eo",
+        payload,
+        {"x_um": ox, "y_um": oy, "Ex": Ex_opt, "intensity": intensity,
+         "mask_film": mask_film_opt, "rf_x_um": grid.x, "rf_y_um": grid.y,
+         "rf_V": es.V, "rf_Ex": es.Ex, "rf_Ey": es.Ey},
+    )
+
+    if tw.get("enabled") and tw["electro_optic_3dB_GHz"] > 5 * (f_rc_Hz / 1e9):
+        ctx.warn(
+            f"the lumped RC estimate gives {f_rc_Hz / 1e9:.2f} GHz against "
+            f"{tw['electro_optic_3dB_GHz']:.1f} GHz from the travelling-wave model. "
+            f"Over {tw['electrode_length_mm']:.1f} mm the electrode is a transmission "
+            "line, not a capacitor, and the lumped figure is not the bandwidth"
+        )
+    if tw.get("enabled") and tw["return_loss_dB"] < 10.0:
+        ctx.warn(
+            f"the electrode presents {tw['characteristic_impedance_ohm']:.0f} ohm "
+            f"against a {e.drive_impedance_ohm:.0f} ohm driver, a return loss of "
+            f"{tw['return_loss_dB']:.1f} dB. The reflected power does not modulate"
+        )
+    if tail > 1e-4:
+        ctx.warn(
+            f"{tail:.2e} of the optical power sits beyond the electrode inner edge; "
+            "metal absorption will dominate the propagation loss - widen the gap"
+        )
+    if f_rc_Hz < 20e6:
+        ctx.warn(
+            f"lumped-electrode RC bandwidth is {f_rc_Hz/1e6:.1f} MHz over the full "
+            f"{L_electrode_m*1e3:.2f} mm; segment the electrode or go travelling-wave "
+            "if the chirp rate needs more"
+        )
+    return payload

@@ -1,0 +1,146 @@
+"""Run-artifact management.
+
+Every stage writes:
+  runs/<run_id>/<stage>.json    machine-readable metrics + provenance
+  runs/<run_id>/<stage>.npz     bulk arrays (fields, spectra)
+  runs/<run_id>/figures/*.png   optional plots
+
+and the orchestrator writes runs/<run_id>/metrics.json (the merged metric tree)
+plus runs/latest -> the newest run.  Everything an agent needs is in
+metrics.json; the npz files are for humans and for re-plotting.
+"""
+
+from __future__ import annotations
+
+import json
+import platform
+import subprocess
+import sys
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+
+def _json_default(o: Any):
+    if isinstance(o, (np.integer,)):
+        return int(o)
+    if isinstance(o, (np.floating,)):
+        return float(o)
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    if isinstance(o, Path):
+        return str(o)
+    if isinstance(o, complex):
+        return {"re": o.real, "im": o.imag}
+    raise TypeError(f"not JSON serialisable: {type(o)}")
+
+
+def dump_json(path: Path, obj: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(obj, fh, indent=2, default=_json_default, allow_nan=True)
+
+
+def load_json(path: Path) -> Any:
+    with open(path, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def environment_fingerprint() -> dict[str, Any]:
+    def _v(mod: str) -> str | None:
+        try:
+            m = __import__(mod)
+            return getattr(m, "__version__", "unknown")
+        except Exception:
+            return None
+
+    try:
+        rev = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip() or None
+    except Exception:
+        rev = None
+
+    return {
+        "python": sys.version.split()[0],
+        "platform": platform.platform(),
+        "git_rev": rev,
+        "packages": {m: _v(m) for m in
+                     ["numpy", "scipy", "klayout", "gdsfactory", "femwell", "gmsh", "sax",
+                      "matplotlib"]},
+    }
+
+
+@dataclass
+class RunContext:
+    design_dir: Path
+    run_id: str
+    metrics: dict[str, Any] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    t0: float = field(default_factory=time.time)
+
+    @property
+    def run_dir(self) -> Path:
+        return self.design_dir / "runs" / self.run_id
+
+    @property
+    def fig_dir(self) -> Path:
+        return self.run_dir / "figures"
+
+    def ensure(self) -> "RunContext":
+        self.fig_dir.mkdir(parents=True, exist_ok=True)
+        return self
+
+    # -- metric tree ------------------------------------------------------
+    def put(self, dotted: str, value: Any) -> None:
+        node = self.metrics
+        parts = dotted.split(".")
+        for p in parts[:-1]:
+            node = node.setdefault(p, {})
+        node[parts[-1]] = value
+
+    def get(self, dotted: str, default: Any = None) -> Any:
+        node: Any = self.metrics
+        for p in dotted.split("."):
+            if not isinstance(node, dict) or p not in node:
+                return default
+            node = node[p]
+        return node
+
+    def warn(self, msg: str) -> None:
+        self.warnings.append(msg)
+
+    # -- io ---------------------------------------------------------------
+    def write_stage(self, stage: str, payload: dict[str, Any], arrays: dict[str, np.ndarray] | None = None) -> None:
+        self.ensure()
+        dump_json(self.run_dir / f"{stage}.json", payload)
+        if arrays:
+            np.savez_compressed(self.run_dir / f"{stage}.npz", **arrays)
+
+    def finalise(self, status: str, update_latest: bool = True) -> Path:
+        self.ensure()
+        out = {
+            "run_id": self.run_id,
+            "status": status,
+            "elapsed_s": round(time.time() - self.t0, 2),
+            "environment": environment_fingerprint(),
+            "warnings": self.warnings,
+            "metrics": self.metrics,
+        }
+        p = self.run_dir / "metrics.json"
+        dump_json(p, out)
+        if update_latest:
+            # sweep points are probes, not the design's current state, so they
+            # deliberately do not move the `latest` pointer
+            dump_json(self.design_dir / "runs" / "latest.json",
+                      {"run_id": self.run_id, "path": str(p)})
+        return p
+
+
+def new_run_id(tag: str = "") -> str:
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    return f"{stamp}-{tag}" if tag else stamp

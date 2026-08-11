@@ -1,0 +1,60 @@
+{
+  "design": "..\\examples\\edbr_tfln_baseline\\design.yaml",
+  "param": "grating.post_gap_um",
+  "rows": [
+    {
+      "param": "grating.post_gap_um",
+      "value": "0.63",
+      "mode.dn_eff_posts": 0.0011186993837679626,
+      "grating.kappa_per_cm": 3.9122701329694585,
+      "grating.kappa_L": 2.8363958464028576,
+      "grating.peak_reflectivity": 0.9748785231694662,
+      "grating.fwhm_GHz": 21.380218343125
+    },
+    {
+      "param": "grating.post_gap_um",
+      "value": "0.68",
+      "mode.dn_eff_posts": 0.0008475096466791232,
+      "grating.kappa_per_cm": 2.963981395954824,
+      "grating.kappa_L": 2.1488865120672473,
+      "grating.peak_reflectivity": 0.9328464852747481,
+      "grating.fwhm_GHz": 17.462000530875
+    },
+    {
+      "param": "grating.post_gap_um",
+      "value": "0.73",
+      "mode.dn_eff_posts": 0.0006421279577837335,
+      "grating.kappa_per_cm": 2.2457636937210848,
+      "grating.kappa_L": 1.6281786779477865,
+      "grating.peak_reflectivity": 0.8410005323674713,
+      "grating.fwhm_GHz": 14.4301695536875
+    },
+    {
+      "param": "grating.post_gap_um",
+      "value": "0.77",
+      "mode.dn_eff_posts": 0.0005143151870363738,
+      "grating.kappa_per_cm": 1.7987842600803943,
+      "grating.kappa_L": 1.304118588558286,
+      "grating.peak_reflectivity": 0.728142532291956,
+      "grating.fwhm_GHz": 12.5841154530625
+    },
+    {
+      "param": "grating.post_gap_um",
+      "value": "0.80",
+      "mode.dn_eff_posts": 0.00043546092470125863,
+      "grating.kappa_per_cm": 1.5230122453511004,
+      "grating.kappa_L": 1.1041838778795479,
+      "grating.peak_reflectivity": 0.6278084862464857,
+      "grating.fwhm_GHz": 11.511666113375
+    },
+    {
+      "param": "grating.post_gap_um",
+      "value": "0.85",
+      "mode.dn_eff_posts": 0.0003299959254288165,
+      "grating.kappa_per_cm": 1.1541673035839137,
+      "grating.kappa_L": 0.8367712950983374,
+      "grating.peak_reflectivity": 0.4554067036707978,
+      "grating.fwhm_GHz": 10.2297635589375
+    }
+  ]
+}

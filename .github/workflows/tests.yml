@@ -1,0 +1,58 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # The suite on both platforms the chain is used from. It has only ever been
+  # run on Windows, so the Linux job is expected to find something: the KLayout
+  # application is discovered by path and the browser paths are Windows-only.
+  # A first red build there is information rather than a failure.
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.11", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e "design-chain[dev,layout,fem,circuit]"
+      - name: what is available
+        run: python -m picchain.cli doctor --no-fdtd
+        continue-on-error: true
+      - name: tests
+        run: python -m pytest tests/ -q
+        working-directory: design-chain
+
+  # The separation between the generic tree and project work is enforced here
+  # as well as locally, because a check that runs only on a developer's machine
+  # is a check that runs only when remembered.
+  ip-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python tools/check_ip_boundary.py
+
+  # The smallest design, as a check that a newcomer's first command works.
+  minimal-example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e design-chain
+      - run: python -m picchain.cli run ../examples/minimal_ridge/design.yaml --no-figures --no-report
+        working-directory: design-chain

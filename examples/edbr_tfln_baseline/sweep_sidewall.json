@@ -1,0 +1,72 @@
+{
+  "design": "..\\examples\\edbr_tfln_baseline\\design.yaml",
+  "param": "platform.sidewall_deg",
+  "rows": [
+    {
+      "param": "platform.sidewall_deg",
+      "value": "90",
+      "mode.n_eff_bare": 1.788867214095995,
+      "mode.dn_eff_posts": 0.0008277104420475467,
+      "grating.kappa_per_cm": 2.902856018650355,
+      "grating.kappa_L": 2.104570613521507,
+      "grating.peak_reflectivity": 0.9278956201486851,
+      "grating.bragg_wavelength_nm": 1526.415123373685,
+      "grating.fwhm_GHz": 17.2254097074375
+    },
+    {
+      "param": "platform.sidewall_deg",
+      "value": "85",
+      "mode.n_eff_bare": 1.7907941850310993,
+      "mode.dn_eff_posts": 0.0009257723238018656,
+      "grating.kappa_per_cm": 3.2432330738306128,
+      "grating.kappa_L": 2.3513439785271943,
+      "grating.peak_reflectivity": 0.9510147545385291,
+      "grating.bragg_wavelength_nm": 1528.078814505394,
+      "grating.fwhm_GHz": 18.6412833663125
+    },
+    {
+      "param": "platform.sidewall_deg",
+      "value": "80",
+      "mode.n_eff_bare": 1.7927043793975197,
+      "mode.dn_eff_posts": 0.0010394176831609592,
+      "grating.kappa_per_cm": 3.6374301912606426,
+      "grating.kappa_L": 2.637136888663966,
+      "grating.peak_reflectivity": 0.9675223312803962,
+      "grating.bragg_wavelength_nm": 1529.7313086760666,
+      "grating.fwhm_GHz": 20.2619421101875
+    },
+    {
+      "param": "platform.sidewall_deg",
+      "value": "77",
+      "mode.n_eff_bare": 1.7938798444906405,
+      "mode.dn_eff_posts": 0.0011186993837679626,
+      "grating.kappa_per_cm": 3.9122701329694576,
+      "grating.kappa_L": 2.8363958464028567,
+      "grating.peak_reflectivity": 0.974878523169466,
+      "grating.bragg_wavelength_nm": 1530.750063997205,
+      "grating.fwhm_GHz": 21.380218343125
+    },
+    {
+      "param": "platform.sidewall_deg",
+      "value": "70",
+      "mode.n_eff_bare": 1.7965423072145492,
+      "mode.dn_eff_posts": 0.0013296699472131746,
+      "grating.kappa_per_cm": 4.643049680604853,
+      "grating.kappa_L": 3.3662110184385186,
+      "grating.peak_reflectivity": 0.9854460088736086,
+      "grating.bragg_wavelength_nm": 1533.0638535561814,
+      "grating.fwhm_GHz": 24.321128761625
+    },
+    {
+      "param": "platform.sidewall_deg",
+      "value": "60",
+      "mode.n_eff_bare": 1.800471342676284,
+      "mode.dn_eff_posts": 0.001766053280135571,
+      "grating.kappa_per_cm": 6.153043845121479,
+      "grating.kappa_L": 4.460956787713073,
+      "grating.peak_reflectivity": 0.9920160695847232,
+      "grating.bragg_wavelength_nm": 1536.503357085148,
+      "grating.fwhm_GHz": 30.3457615524375
+    }
+  ]
+}
