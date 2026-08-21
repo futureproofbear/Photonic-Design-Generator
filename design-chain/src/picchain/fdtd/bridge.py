@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections import deque
 import platform
 import shutil
 import subprocess
@@ -202,11 +203,45 @@ def _run(runner: Path, name: str, job: dict, work_dir: Path,
     else:
         cmd = backend.command(str(runner), str(job_path), str(out_path))
 
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s)
+    # STREAMED, not buffered, from 2026-08-17. This was
+    # `subprocess.run(capture_output=True)`, which holds the solver's output in
+    # memory and writes it only after the process exits, so a solve running for
+    # an hour was silent for that hour. meep prints exactly what an operator
+    # needs while it waits: the timestep reached, the simulated time, and the
+    # field decay the stopping condition is watching.
+    #
+    # The cost of that silence was paid twice. A live taper solve was checked
+    # against the host process list, showed nothing because eight ranks were in a
+    # synchronisation barrier, and was nearly reported dead; its remaining time
+    # then had to be estimated from the cell size and the Courant timestep rather
+    # than read. Worse, a job killed at the timeout left a log written from a
+    # buffer that was never flushed, so the one case where the output matters
+    # most was the case where it was least complete.
     log = (work_dir / f"meep_{name}_run.log")
-    log.write_text((proc.stdout or "") + "\n--- stderr ---\n" + (proc.stderr or ""),
-                   encoding="utf-8")
+    tail: deque[str] = deque(maxlen=40)
+    with open(log, "w", encoding="utf-8", buffering=1) as fh:
+        fh.write(f"$ {' '.join(str(c) for c in cmd)}\n\n")
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, bufsize=1)
+        try:
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                fh.write(line)
+                tail.append(line.rstrip())
+            proc.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            fh.write(f"\n--- killed at the {timeout_s} s ceiling ---\n")
+            raise RuntimeError(
+                f"meep exceeded its {timeout_s} s ceiling; the log holds every line "
+                f"it produced up to the kill, see {log.name}\n" + "\n".join(tail)
+            ) from None
+        finally:
+            if proc.stdout is not None:
+                proc.stdout.close()
+
     if not out_path.exists():
-        tail = (proc.stderr or proc.stdout or "").strip()[-800:]
-        raise RuntimeError(f"meep produced no result; see {log.name}\n{tail}")
+        raise RuntimeError(f"meep produced no result; see {log.name}\n"
+                           + "\n".join(tail))
     return json.loads(out_path.read_text(encoding="utf-8"))

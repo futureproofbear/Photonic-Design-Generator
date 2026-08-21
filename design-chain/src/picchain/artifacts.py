@@ -75,12 +75,31 @@ def environment_fingerprint() -> dict[str, Any]:
     }
 
 
+
+#: Words carrying no distinguishing weight in a finding's opening phrase.
+_KEY_SKIP = {"the", "a", "an", "of", "is", "to", "and", "on", "in", "this",
+             "that", "it", "at", "for", "its", "with", "no", "not", "so", "by",
+             "are", "was"}
+
+
+def derive_key(stage: str, msg: str) -> str:
+    """A stable key for a finding, from its stage and its opening words."""
+    import re as _re
+    words = [w for w in _re.findall(r"[a-z0-9]+", msg.lower())
+             if w not in _KEY_SKIP][:4]
+    return f"{stage}." + "_".join(words or ["warning"])
+
 @dataclass
 class RunContext:
     design_dir: Path
     run_id: str
     metrics: dict[str, Any] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    #: the same findings with their stage and a stable key, so that a design
+    #: can acknowledge one by name and a new one can be told from a known one
+    warning_records: list[dict] = field(default_factory=list)
+    #: set by the runner before each stage, so a warning knows its origin
+    current_stage: str = ""
     t0: float = field(default_factory=time.time)
 
     @property
@@ -111,8 +130,27 @@ class RunContext:
             node = node[p]
         return node
 
-    def warn(self, msg: str) -> None:
+    def warn(self, msg: str, key: str | None = None) -> None:
+        """Record a finding.
+
+        A warning is the chain saying *here is something you should know*, and
+        until 2026-08-17 nothing read the list: ninety call sites across
+        seventeen stages, and a run could emit seventeen findings and still be
+        reported a clean pass, because the acceptance verdict grades targets and
+        a finding carrying no threshold had no owner.
+
+        Each finding therefore carries a stage and a key. `key` may be given
+        explicitly where the wording is likely to change; otherwise it is derived
+        from the opening words, which is stable enough to acknowledge against and
+        changes if the finding is reworded, at which point it deserves a second
+        look anyway.
+        """
         self.warnings.append(msg)
+        self.warning_records.append({
+            "stage": self.current_stage or "unattributed",
+            "key": key or derive_key(self.current_stage or "unattributed", msg),
+            "message": msg,
+        })
 
     # -- io ---------------------------------------------------------------
     def write_stage(self, stage: str, payload: dict[str, Any], arrays: dict[str, np.ndarray] | None = None) -> None:
@@ -129,6 +167,7 @@ class RunContext:
             "elapsed_s": round(time.time() - self.t0, 2),
             "environment": environment_fingerprint(),
             "warnings": self.warnings,
+            "warning_records": self.warning_records,
             "metrics": self.metrics,
         }
         p = self.run_dir / "metrics.json"

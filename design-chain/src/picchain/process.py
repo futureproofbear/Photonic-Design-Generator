@@ -65,14 +65,23 @@ class Geometry:
         return asdict(self)
 
 
-def _shift(value: float, delta: float, kind: str, name: str) -> float:
+def _shift(value: float, delta: float, kind: str, name: str,
+           may_close: bool = False) -> float:
     """Apply an edge displacement to a width or to a gap.
 
     A width gains the full bias; a gap loses it. A dimension driven negative is
     refused rather than clipped, a mask on which a feature has closed being a
     different design from the one requested.
+
+    `may_close` admits a gap that is zero BY DESIGN rather than by bias. The
+    case is the corrugated grating, where the Bragg feature is a periodic
+    widening of the ridge itself and the gap between ridge and feature is
+    intended to be nothing at all. Such a gap is floored at zero rather than
+    driven negative, since a feature that has merged cannot merge further.
     """
     out = value + delta if kind == "width" else value - delta
+    if may_close:
+        return max(out, 0.0)
     if out <= 0.0:
         raise ValueError(
             f"{name} resolves to {out:.4f} um under a bias of {delta:+.4f} um. "
@@ -127,7 +136,12 @@ def resolve(
         wg_top_width_um=_shift(wg_top_width_um, dw, "width", "waveguide top width"),
         post_width_um=_shift(post_width_um, dw, "width", "Bragg post width"),
         post_length_um=_shift(post_length_um, dw, "width", "Bragg post length"),
-        post_gap_um=_shift(post_gap_um, dw, "gap", "Bragg post gap"),
+        # A gap declared as exactly zero is a corrugated ridge, where the Bragg
+        # feature is a widening of the guide rather than an island beside it.
+        # That is a design statement, so it is carried through rather than
+        # refused as a closure.
+        post_gap_um=_shift(post_gap_um, dw, "gap", "Bragg post gap",
+                           may_close=(post_gap_um == 0.0)),
         etch_depth_um=_shift(etch_depth_um, dd, "width", "etch depth"),
         electrode_gap_um=_shift(electrode_gap_um, dm, "gap", "electrode gap"),
         electrode_width_um=_shift(electrode_width_um, dm, "width", "electrode width"),

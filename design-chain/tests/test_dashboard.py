@@ -210,13 +210,46 @@ def test_a_stage_cannot_be_reported_as_run_and_in_flight_at_once(tmp_path):
     assert any("at once" in p for p in selfcheck(state))
 
 
-def test_a_verdict_of_pass_with_unmet_targets_is_refused(tmp_path):
+def test_a_verdict_of_pass_with_unmet_binding_rows_is_refused(tmp_path):
+    """The verdict is decided by severity, and the page is checked the same way.
+
+    `verify` returns PASS where no `must` and no `should` row is unmet. An `info`
+    row below its bound is reported and does not block, so a page carrying one is
+    not a contradiction. This check compared the pass count against the target
+    count until 2026-08-18 and refused every design holding a failing `info` row:
+    one such had never rendered a dashboard at all, the command raising each time
+    it was invoked. **A gate that refuses correct work teaches the reader to stop
+    invoking it.**
+    """
     from picchain.dashboard import selfcheck
 
     d = _run(tmp_path, metrics={"verify": {"verdict": "PASS", "n_targets": 12,
                                            "n_pass": 11, "n_fail": 1,
-                                           "n_missing": 0, "rows": []}})
+                                           "n_missing": 0, "must_failures": 1,
+                                           "should_failures": 0, "rows": []}})
     assert any("verdict PASS" in p for p in selfcheck(d and collect(d)))
+
+
+def test_a_verdict_of_pass_with_only_info_rows_unmet_is_accepted(tmp_path):
+    """The case the previous check used to refuse."""
+    from picchain.dashboard import selfcheck
+
+    d = _run(tmp_path, metrics={"verify": {"verdict": "PASS", "n_targets": 12,
+                                           "n_pass": 9, "n_fail": 3,
+                                           "n_missing": 0, "must_failures": 0,
+                                           "should_failures": 0, "rows": []}})
+    assert not [p for p in selfcheck(d and collect(d)) if "verdict PASS" in p]
+
+
+def test_a_verdict_of_fail_with_every_binding_row_met_is_refused(tmp_path):
+    """The contradiction in the other direction."""
+    from picchain.dashboard import selfcheck
+
+    d = _run(tmp_path, metrics={"verify": {"verdict": "FAIL", "n_targets": 12,
+                                           "n_pass": 12, "n_fail": 0,
+                                           "n_missing": 0, "must_failures": 0,
+                                           "should_failures": 0, "rows": []}})
+    assert any("verdict FAIL" in p for p in selfcheck(d and collect(d)))
 
 
 def test_a_contradictory_page_is_not_written(tmp_path):
@@ -225,7 +258,8 @@ def test_a_contradictory_page_is_not_written(tmp_path):
 
     d = _run(tmp_path, metrics={"verify": {"verdict": "PASS", "n_targets": 3,
                                            "n_pass": 1, "n_fail": 2,
-                                           "n_missing": 0, "rows": []}})
+                                           "n_missing": 0, "must_failures": 2,
+                                           "should_failures": 0, "rows": []}})
     with pytest.raises(RuntimeError, match="contradicts itself"):
         dash.render(d)
     assert not (d / "dashboard.html").exists()

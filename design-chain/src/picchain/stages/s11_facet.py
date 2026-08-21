@@ -158,6 +158,24 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             f"{assumed:.2f} dB assumed in the design. The dominant term is "
             f"{max(('overlap', payload['mode_overlap_loss_dB']), ('Fresnel', payload['fresnel_loss_dB']), ('the facet angle', payload['angle_loss_dB']), key=lambda kv: kv[1])[0]}"
         )
+    # The reverse direction, added 2026-08-16. The guard above catches an
+    # assumption that is optimistic, which is the dangerous case. It said
+    # nothing about one that is pessimistic, and a design carried a coupling
+    # loss of 2.850 dB against a computed 1.981 for eight days, the 2.850 being
+    # the figure computed for a different cross-section and inherited with the
+    # rest of the file. A stale assumption is worth reporting whichever way it
+    # points: the direction tells you whether the design is at risk or merely
+    # understated, and neither is what the file claims to carry.
+    elif assumed > payload["total_loss_dB"] + 0.5:
+        payload["assumption_is_pessimistic_by_dB"] = assumed - payload["total_loss_dB"]
+        ctx.warn(
+            f"the design assumes {assumed:.2f} dB of coupling loss per facet and this geometry "
+            f"is computed to lose {payload['total_loss_dB']:.2f} dB, so the assumption is "
+            f"{assumed - payload['total_loss_dB']:.2f} dB pessimistic. The threshold gain, the "
+            "output power and the linewidth all carry that margin. Confirm the figure belongs to "
+            "this cross-section and was not inherited from another"
+        )
+
     if tol_x < 0.3 or tol_y < 0.3:
         ctx.warn(
             f"a {cfg.tolerance_dB:.1f} dB alignment tolerance of {min(tol_x, tol_y):.2f} um "

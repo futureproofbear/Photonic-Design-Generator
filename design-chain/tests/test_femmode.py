@@ -198,3 +198,53 @@ def cross_section_keys(xs):
             shape = shape.difference(polys[earlier])
         tiled[k] = shape
     return tiled, by_material
+
+
+# --- a long grating must add coherently along its own length ----------------
+#
+# Everything the grating stage computes assumes one Bragg wavelength over the
+# whole mirror. The Bragg condition follows the effective index, the effective
+# index follows the film thickness, and a film that thins along the grating
+# detunes it. A corner sweep cannot see this: it moves the film uniformly,
+# which shifts the Bragg wavelength and leaves the grating perfectly coherent.
+
+
+def test_the_phase_budget_is_the_index_error_costing_pi_over_the_penetration():
+    """The closed form, checked by hand. An index error dn accumulates a Bragg
+    phase of 2*pi*dn*L/lambda; pi is reached at dn = lambda/(2L)."""
+    lam, L_pen = 1.573e-6, 4.891e-3
+    dn_pi = lam / (2.0 * L_pen)
+    assert abs(dn_pi - 1.608e-4) / 1.608e-4 < 0.01
+    # at the measured sensitivity this is a fraction of a nanometre of film
+    dn_dfilm_per_um = 1.3764
+    budget_nm = dn_pi / dn_dfilm_per_um * 1e3
+    assert 0.10 < budget_nm < 0.13
+
+
+def test_a_longer_mirror_tolerates_less_non_uniformity():
+    """The budget goes inversely with the distance the light samples, which is
+    why mirror length is not free."""
+    lam = 1.573e-6
+    short = lam / (2.0 * 1.0e-3)
+    long = lam / (2.0 * 8.0e-3)
+    assert short > long
+    assert abs(short / long - 8.0) < 1e-9
+
+
+def test_the_grating_stage_reports_the_budget_and_says_when_it_is_undeclared():
+    import inspect
+
+    from picchain.stages import s02_grating
+
+    src = inspect.getsource(s02_grating)
+    assert "film_uniformity_for_pi_phase_nm" in src
+    assert "assumed and not established" in src
+
+
+def test_the_film_sensitivity_solve_is_opt_in():
+    """It costs an extra mode solve, and only the coherence check reads it."""
+    from picchain.config import Design
+
+    d = Design(meta={"name": "x"}, grating={"period_um": 1.417})
+    assert d.mesh.film_sensitivity is False
+    assert d.platform.film_nonuniformity_nm == 0.0

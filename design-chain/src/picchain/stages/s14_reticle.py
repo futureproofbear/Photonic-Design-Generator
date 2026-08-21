@@ -133,6 +133,16 @@ def _build_monitors(design: Design, ctx: RunContext) -> tuple[dict[str, list], l
             wg_width_um=geom.wg_top_width_um, post_width_um=geom.post_width_um,
             post_length_um=geom.post_length_um, row_pitch_um=cfg.row_pitch_um,
         ))
+    if cfg.coherence_ladder and cfg.coherence_lengths_um:
+        take(*monitors.coherence_ladder(
+            lengths_um=cfg.coherence_lengths_um,
+            gap_um=design.grating.post_gap_um,
+            period_um=design.grating.period_um or 1.0,
+            wg_width_um=design.waveguide.top_width_um,
+            post_width_um=design.grating.post_width_um,
+            post_length_um=design.grating.post_length_um or design.grating.post_width_um,
+            row_pitch_um=cfg.row_pitch_um,
+        ))
     if cfg.loss_cutback and cfg.loss_lengths_um:
         take(*monitors.loss_cutback(
             lengths_um=cfg.loss_lengths_um, wg_width_um=geom.wg_top_width_um,
@@ -295,12 +305,50 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         if n:
             counts[layer] = counts.get(layer, 0) + n
 
-    # place the device at the top-left of the content area
+    # --- where the device sits on the die --------------------------------
+    #
+    # Two placements are offered and the default reproduces the original.
+    #
+    # ALONG X. `align_facet_to_edge` puts the input facet plane on the sawn
+    # edge, which is what a butt joint requires: the gain chip abuts the die,
+    # so the facet IS the die edge. Left false, the device sits inside the
+    # frame and the facet ends up `margin + clearance + seal + lane` short of
+    # the edge, which no assembly can couple to.
+    #
+    # ALONG Y. `centre` puts the guide on the die axis. The original `top`
+    # placement leaves the guide a few hundred micrometres from a sawn edge,
+    # where dicing damage, mount stress and the steepest thermal gradients are.
+    # The facet plane goes on the INNER chip boundary, not the outer one.
+    #
+    # The exclusion ring between the two is the material that the dice kerf and
+    # the facet polish remove, which is why the process forbids structures in
+    # it. A guide taken to the outer boundary is a guide drawn through the part
+    # of the die that will be ground away, and the foundry deck reports it.
+    # Ending the guide on the inner boundary places the facet exactly where the
+    # polish stops, so the port is exposed and the exclusion ring stays clear.
+    lane = cfg.dicing_lane_um
+    ez_x = cfg.chip_frame.exclusion_zone_um if cfg.chip_frame.enabled else 0.0
+    facet_x = die_x0 - lane + ez_x
+    dev_dx = (facet_x - dev_box.left) if cfg.align_facet_to_edge else -dev_box.left
+
+    if cfg.device_y == "centre":
+        # The CONTENT is centred, not the device. The ladder copies and the
+        # monitor field stack downward from the device, so centring the device
+        # alone pushes everything below it off the die: a four-device reticle
+        # overhung the usable area by 805 um on the waveguide layer and 911 um
+        # on the metal, and the foundry deck reported 39 violations.
+        below = split_h + monitor_gap + mon_height
+        mid = (ring_in_y0 + ring_in_y1) / 2.0
+        dev_dy = mid + (below - dev_box.top - dev_box.bottom) / 2.0
+    else:
+        dev_dy = ring_in_y1 - m - dev_box.top
+
     die.insert(db.DCellInstArray(
-        device_cell.cell_index(),
-        db.DTrans(db.DVector(-dev_box.left, ring_in_y1 - m - dev_box.top)),
+        device_cell.cell_index(), db.DTrans(db.DVector(dev_dx, dev_dy)),
     ))
-    dev_dy = ring_in_y1 - m - dev_box.top
+    # One seal-ring opening per optical port, collected as the devices are placed
+    ports: list[tuple[float, float]] = [
+        (dev_dy + dev_box.bottom - 10.0, dev_dy + dev_box.top + 10.0)]
 
     # the ladder below it, one copy per value, each labelled with the value it
     # carries so that a returned die can be identified under a microscope
@@ -308,8 +356,16 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     for k, (cell, desc) in enumerate(zip(split_cells, split_desc)):
         box = cell.dbbox()
         dy = split_top - k * split_pitch - 40.0 - box.top
+        # A ladder copy exists to be measured, so it needs light coupled into
+        # it, so its facet must reach the polish line exactly as the primary
+        # device's does. Left at its own origin the copy sat a few hundred
+        # micrometres inside the die with no optical port at all, which makes
+        # the ladder undiagnosable: it would return a die carrying four
+        # gratings of which only one could be interrogated.
+        dx = (facet_x - box.left) if cfg.align_facet_to_edge else -box.left
         die.insert(db.DCellInstArray(
-            cell.cell_index(), db.DTrans(db.DVector(-box.left, dy))))
+            cell.cell_index(), db.DTrans(db.DVector(dx, dy))))
+        ports.append((dy + box.bottom - 10.0, dy + box.top + 10.0))
         desc["placed_y_um"] = dy
         if cfg.split.label_each:
             text = f"{desc['parameter'].split('.')[-1]}={desc['value']:g}"
@@ -322,12 +378,74 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 
     # monitors below the ladder
     mon_dy = split_top - split_h - monitor_gap
+    mon_dx = -dev_box.left
     for layer, plist in mon_polys.items():
-        add(layer, plist, -dev_box.left, mon_dy)
+        add(layer, plist, mon_dx, mon_dy)
+
+    # --- optical ports for the monitors, added 2026-08-16 -----------------
+    #
+    # This block replaced a comment reading "they carry no optical port", which
+    # described the defect as if it were the design. The kappa ladder, the
+    # cut-back guides, the coherence ladder and the electrode ladder all
+    # measure guided light, and a structure that light cannot reach measures
+    # nothing: the mask carried four optical instruments and no way to read
+    # one of them. The same failure was found and fixed for the device ladder
+    # copies earlier, and the monitors repeated it.
+    #
+    # Each optical row's guide is extended to the same facet line the devices
+    # polish to, which lies on CHIP_INNER, so the extension stays inside the
+    # area the deck permits. One seal-ring opening is registered per row. The
+    # strips merge with their rows' guides, so the expected region and net
+    # counts are unchanged. Measurement is by reflectometry from the polished
+    # facet, the far end of each guide remaining internal.
+    # A port exists only where a polish line does. Without align_facet_to_edge
+    # the die has no facet line, the strips would cross the seal ring, and the
+    # extension would short the frame; the monitors then stay internal and the
+    # descriptor says so, which is the reportable condition.
+    OPTICAL_MONITORS = {"kappa_ladder", "coherence_ladder", "loss_cutback",
+                        "electrode_ladder"}
+    wg_half = design.waveguide.top_width_um / 2.0
+    port_rows = []
+    for m in (mon_desc if cfg.align_facet_to_edge else []):
+        if m.get("structure") not in OPTICAL_MONITORS:
+            continue
+        x_local = (m.get("extent_um") or [0.0])[0]
+        for row in m.get("rows", []):
+            y = mon_dy + float(row.get("y_um", 0.0))
+            x0 = mon_dx + x_local
+            if x0 > facet_x:
+                add("WG", [monitors._rect(facet_x, y - wg_half, x0 + 1.0, y + wg_half)])
+                ports.append((y - 10.0, y + 10.0))
+                port_rows.append({"structure": m["structure"], "y_um": y})
+    for m in mon_desc:
+        if m.get("structure") in OPTICAL_MONITORS:
+            m["optical_port"] = (
+                "extended to the polish line; read by reflectometry" if port_rows
+                else "NONE: align_facet_to_edge is off, so no polish line exists "
+                     "and this structure cannot be optically measured")
+    if mon_desc and cfg.monitors.enabled and not port_rows and any(
+            m.get("structure") in OPTICAL_MONITORS for m in mon_desc):
+        ctx.warn(
+            "the optical monitors have no port: align_facet_to_edge is off, so no "
+            "polish line exists for their guides to reach. They can be inspected "
+            "and cannot be measured"
+        )
+
 
     # --- the frame -------------------------------------------------------
     if cfg.seal_ring.enabled:
-        ring = monitors.seal_ring(x0=die_x0, y0=die_y0, x1=die_x1, y1=die_y1, width_um=sw)
+        # The guide reaches the sawn edge where the facet is aligned to it, so
+        # the ring is opened over the port. 30 um each side of the guide axis
+        # clears the METAL-to-WG rule with margin and keeps the opening far
+        # smaller than the three uninterrupted edges.
+        # The opening spans the device's full height at that edge. A fixed
+        # band was tried first and was too narrow: the angled lead-in swings
+        # 34.5 um off the guide axis before it returns, so a +-30 um window
+        # left ring metal beside the guide and the metal-to-guide rule failed
+        # at 30 places.
+        openings = ports if cfg.align_facet_to_edge else None
+        ring = monitors.seal_ring(x0=die_x0, y0=die_y0, x1=die_x1, y1=die_y1,
+                                  width_um=sw, left_openings=openings)
         for layer in cfg.seal_ring.layers:
             add(layer, ring)
 

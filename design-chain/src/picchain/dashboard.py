@@ -403,7 +403,8 @@ def collect(run_dir: Path) -> dict:
         "stages": stages,
         "targets": v.get("rows") or [],
         "verify": {k: v.get(k) for k in
-                   ("verdict", "n_targets", "n_pass", "n_fail", "n_missing")},
+                   ("verdict", "n_targets", "n_pass", "n_fail", "n_missing",
+                    "must_failures", "should_failures")},
         "drc": {
             "rules_checked": drc.get("rules_checked"),
             "own_violations": drc.get("error_violations"),
@@ -446,8 +447,23 @@ def selfcheck(state: dict) -> list[str]:
     if n_p is not None and n_t is not None:
         if n_p > n_t:
             bad.append(f"verify: {n_p} passing of {n_t} declared")
-        if v.get("verdict") == "PASS" and n_p != n_t:
-            bad.append(f"verify: verdict PASS with {n_t - n_p} target(s) not met")
+    # The verdict is decided by severity: `verify` returns PASS where no `must`
+    # and no `should` row is unmet, and an `info` row is reported and does not
+    # block. This check compared the pass count against the target count and
+    # ignored severity, so any design carrying an `info` row below its bound
+    # contradicted itself here and the page was refused.
+    #
+    # Corrected 2026-08-18. One design had carried three failing `info` rows
+    # since they were introduced and had never rendered a dashboard, the command
+    # raising every time it was invoked. **A gate that refuses correct work
+    # teaches the reader to stop invoking it**, which is what happened: no
+    # dashboard existed anywhere under that design's runs. See LESSONS T053.
+    m_f, s_f = v.get("must_failures"), v.get("should_failures")
+    if v.get("verdict") == "PASS" and (m_f or s_f):
+        bad.append(f"verify: verdict PASS with {m_f or 0} `must` and "
+                   f"{s_f or 0} `should` row(s) unmet")
+    if v.get("verdict") == "FAIL" and not (m_f or s_f):
+        bad.append("verify: verdict FAIL with every `must` and `should` row met")
     if len(state["stages"]) != len(set(s["name"] for s in state["stages"])):
         bad.append("the stage list contains a duplicate")
     return bad

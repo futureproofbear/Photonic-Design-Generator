@@ -41,6 +41,23 @@ class Platform(BaseModel):
     propagation_loss_dB_per_cm: float = 0.2
     use_index_override: bool = False
     materials_file: str | None = None
+    #: the foundry's identifier for this stack, as it appears in the rule deck,
+    #: for example ``ltoi300`` or ``lnoi400``. Set it and the chain refuses a
+    #: deck belonging to another stack.
+    #:
+    #: A tantalate design was drawn on the niobate stack's layer numbers and
+    #: checked against the niobate deck. It returned zero violations, ten of ten
+    #: release conditions and a signed manifest, because two runsets from one
+    #: foundry differ in their layer datatypes and in nothing a reader notices.
+    #: Nothing in the chain connected the declared platform to the deck, so
+    #: nothing could contradict it. This field is that connection.
+    stack: str | None = None
+    #: peak-to-peak film thickness variation across the device length, in
+    #: nanometres, as the foundry specifies it. The `grating` stage compares it
+    #: against the uniformity a long mirror needs to stay in phase along its own
+    #: length. Zero means undeclared, and the stage says so rather than assuming
+    #: the film is perfect.
+    film_nonuniformity_nm: float = 0.0
 
 
 class Mesh(BaseModel):
@@ -50,6 +67,10 @@ class Mesh(BaseModel):
     subsample: int = 3
     num_modes: int = 2
     polarisation: Literal["TE", "TM"] = "TE"
+    #: solve once more on a slightly thicker film, to obtain dn_eff/d(film).
+    #: One extra mode solve. It is what the grating coherence check needs, and
+    #: nothing else uses it, so it is off by default.
+    film_sensitivity: bool = False
 
 
 class Waveguide(BaseModel):
@@ -162,11 +183,52 @@ class RSOA(BaseModel):
     gain: GainMedium = Field(default_factory=GainMedium)
 
 
+class PhaseSection(BaseModel):
+    """An intracavity phase electrode over a passive stretch of the cavity.
+
+    The mirror and the mode comb are set by different things. Tuning the mirror
+    slides its stop band; the comb is fixed by the round-trip optical path and
+    does not follow. The mode therefore slips across the comb at ``(1-r)*S`` per
+    volt and eventually hands over to a neighbour, which is the mode hop.
+
+    A phase section changes the round-trip path without touching the mirror, so
+    the comb can be driven in step with the stop band and the hand-over never
+    happens. It converts a placed, commissioned tuning range into a continuous
+    one.
+
+    It is not free: a second electrode, a second drive channel, a driver that
+    coordinates the two, and cavity length that the die must accommodate. The
+    length it needs follows from the slip it must cancel:
+
+        slip  = (1-r) * S * V_max                        Hz
+        phi   = 2*pi * slip / FSR                        rad of round-trip phase
+        L_ph  = phi * lambda / (4*pi * dn_per_V * V_ph)
+
+    The electrodes may sit far closer than the mirror's, because a phase section
+    carries no Bragg posts: the only constraint is the metal-to-ridge rule and
+    the optical overlap with the metal.
+    """
+    enabled: bool = False
+    #: length of the phase electrode along the guide
+    length_um: float = 1500.0
+    #: electrode gap. Unconstrained by the grating posts, so it may be much
+    #: tighter than the mirror's, bounded by the foundry metal-to-ridge rule
+    gap_um: float = 4.0
+    width_um: float = 20.0
+    #: the drive available to the phase electrode
+    max_drive_voltage_V: float = 25.0
+    #: separation between the phase electrode and the mirror electrode, along
+    #: the guide, so the two do not merge on the mask
+    separation_um: float = 50.0
+
+
 class Cavity(BaseModel):
     enabled: bool = True
     #: passive PIC length between the chip facet and the start of the grating
     feed_length_um: float = 1000.0
     rsoa: RSOA = Field(default_factory=RSOA)
+    #: an intracavity phase electrode, driven synchronously with the mirror
+    phase_section: PhaseSection = Field(default_factory=PhaseSection)
 
 
 class DynamicsCfg(BaseModel):
@@ -459,6 +521,14 @@ class MonitorsCfg(BaseModel):
     kappa_ladder: bool = True
     kappa_gaps_um: list[float] = Field(default_factory=lambda: [0.53, 0.58, 0.63, 0.68, 0.73])
     kappa_periods: int = 300
+    #: gratings of stepped LENGTH at one gap, by which phase coherence along a
+    #: long mirror is measured. A post-gap ladder cannot reach this: every copy
+    #: sits on the same film and sees the same thickness gradient. Coupled-mode
+    #: theory says reflectivity follows tanh^2(kappa L); a mirror losing phase
+    #: departs from that curve and broadens instead of narrowing.
+    coherence_ladder: bool = False
+    coherence_lengths_um: list[float] = Field(
+        default_factory=lambda: [500.0, 2000.0, 5000.0, 10000.0])
     #: straight guides of several lengths, by which propagation loss is
     #: obtained by cut-back without reference to the coupling loss
     loss_cutback: bool = True
@@ -551,6 +621,21 @@ class ReticleCfg(BaseModel):
     marks: AlignmentMarkCfg = Field(default_factory=AlignmentMarkCfg)
     split: SplitCfg = Field(default_factory=SplitCfg)
     monitors: MonitorsCfg = Field(default_factory=MonitorsCfg)
+    #: Place the device so that its input facet lies on the sawn edge, and open
+    #: the seal ring where the guide crosses it.
+    #:
+    #: FALSE, THE DEFAULT, PLACES THE DEVICE INSIDE THE FRAME. The facet then
+    #: sits `margin + seal clearance + seal width + dicing lane` inside the die
+    #: outline, which on the L-band design was 205 um. **A butt-coupled facet
+    #: has to be the diced edge**, so a device that couples to a gain chip or to
+    #: a fibre at its edge sets this true. The default is retained so that
+    #: existing masks are unchanged.
+    align_facet_to_edge: bool = False
+    #: Vertical placement of the device within the frame. `top` reproduces the
+    #: original behaviour and puts the guide close to one long edge. `centre`
+    #: places it on the die axis, which keeps it away from dicing damage and in
+    #: the flattest part of the thermal and stress fields.
+    device_y: Literal["top", "centre"] = "top"
     #: die identification. Empty takes the design name
     label: str = ""
     revision: str = "A"
@@ -634,6 +719,14 @@ class LayoutCfg(BaseModel):
     taper_tip_width_um: float = 0.4
     input_facet_angle_deg: float = 8.0
     output_facet_angle_deg: float = 0.0
+    #: Side of the square bond pad on each electrode, in micrometres. This was a
+    #: literal 80.0 in the layout stage until 2026-08-12, repeated in two places.
+    #: 80 um accepts a probe or a wedge bond and is tight for a ball bond with
+    #: 25 um gold wire, where 100 um is ordinary practice. The default is kept at
+    #: 80.0 so that existing masks are unchanged; a design intended for wire
+    #: bonding sets it explicitly. The slab and floor plan are sized from this
+    #: value, so raising it widens the etch-clear region with it.
+    bond_pad_um: float = 80.0
     cell_name: str = "EDBR"
     layer_map: dict[str, list[int]] = Field(
         default_factory=lambda: {
@@ -915,6 +1008,34 @@ def set_dotted(obj: Any, dotted: str, value: Any) -> None:
         setattr(node, parts[-1], value)
 
 
+class AcknowledgedFinding(BaseModel):
+    """One warning the design accepts, with the reason it is accepted."""
+    key: str
+    reason: str
+
+
+class WarningsCfg(BaseModel):
+    """Findings the design has examined and accepted.
+
+    The chain raises warnings from ninety call sites and, until 2026-08-17, no
+    code read them: a run could emit seventeen findings and still be reported a
+    clean pass, because the acceptance verdict grades targets and a finding
+    carrying no threshold had no owner.
+
+    A finding is therefore acknowledged here by key, with its reason, and
+    `tools/warning_inventory.py` lists what a run emitted against what the design
+    accepts. The value is not in recording the known findings; it is that a
+    finding appearing for the first time is visible immediately, which is the
+    only mechanism that catches what nobody anticipated.
+    """
+    acknowledged: list[AcknowledgedFinding] = Field(default_factory=list)
+    #: fail the run on any finding the design has not acknowledged. Off by
+    #: default: turning it on before the standing findings are recorded fails
+    #: every released design at once, which teaches the reader to bypass the
+    #: gate rather than to read it.
+    enforce: bool = False
+
+
 class Design(BaseModel):
     meta: Meta
     platform: Platform = Field(default_factory=Platform)
@@ -939,6 +1060,7 @@ class Design(BaseModel):
     mask: MaskCfg = Field(default_factory=MaskCfg)
     drc: DRCCfg = Field(default_factory=DRCCfg)
     release: ReleaseCfg = Field(default_factory=ReleaseCfg)
+    warnings: WarningsCfg = Field(default_factory=WarningsCfg)
     targets: list[Target] = Field(default_factory=list)
     allow_unconfirmed_materials: bool = True
     stages: list[str] = Field(

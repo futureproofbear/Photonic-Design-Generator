@@ -102,6 +102,69 @@ def kappa_ladder(
     }
 
 
+def coherence_ladder(
+    *,
+    lengths_um: list[float],
+    gap_um: float,
+    period_um: float,
+    wg_width_um: float,
+    post_width_um: float,
+    post_length_um: float,
+    row_pitch_um: float,
+    lead_um: float = 40.0,
+) -> tuple[dict[str, list], dict[str, Any]]:
+    """Gratings differing only in length, by which phase coherence is measured.
+
+    Every dimension but the length is held, so the reflectivity measured across
+    the set is a function of the length alone. Coupled-mode theory says it
+    follows tanh^2(kappa L) and saturates. **A grating that loses phase along
+    its own length departs from that curve**: the reflectivity stops rising
+    where the accumulated Bragg detuning reaches a radian or so, and the stop
+    band broadens instead of narrowing.
+
+    This is the one process quantity a post-gap ladder cannot reach, because
+    every copy of that ladder sits on the same film and sees the same gradient.
+    The lengths are to span from well inside the coherence budget to well past
+    it, so the departure has somewhere to show.
+
+    The structures are passive and carry no electrode, so the set is thin in y
+    and sits in the monitor field rather than taking a device slot.
+    """
+    polys = _blank()
+    rows = []
+    y = 0.0
+    longest = max(lengths_um) if lengths_um else 0.0
+    for i, L in enumerate(sorted(lengths_um)):
+        n = int(L // period_um)
+        y0 = -i * row_pitch_um
+        polys["WG"].append(
+            _rect(0.0, y0 - wg_width_um / 2, longest + 2 * lead_um, y0 + wg_width_um / 2)
+        )
+        inner = wg_width_um / 2 + gap_um
+        for k in range(n):
+            xc = lead_um + (k + 0.5) * period_um
+            for sgn in (-1.0, 1.0):
+                yc = y0 + sgn * (inner + post_width_um / 2)
+                polys["WG"].append(
+                    _rect(xc - post_length_um / 2, yc - post_width_um / 2,
+                          xc + post_length_um / 2, yc + post_width_um / 2)
+                )
+        rows.append({"length_um": float(n * period_um), "n_periods": int(n),
+                     "y_um": float(y0)})
+        y = y0
+    return polys, {
+        "structure": "coherence_ladder",
+        "measures": (
+            "reflectivity and stop band against grating length, by which phase "
+            "coherence along a long mirror is separated from kappa"
+        ),
+        "rows": rows,
+        "gap_um": float(gap_um),
+        "extent_um": [0.0, longest + 2 * lead_um],
+        "height_um": abs(y),
+    }
+
+
 def loss_cutback(
     *,
     lengths_um: list[float],
@@ -276,17 +339,48 @@ def alignment_mark(
 
 
 def seal_ring(
-    *, x0: float, y0: float, x1: float, y1: float, width_um: float
+    *, x0: float, y0: float, x1: float, y1: float, width_um: float,
+    left_openings: list[tuple[float, float]] | None = None,
 ) -> list[list[tuple[float, float]]]:
-    """A closed ring, as four overlapping bars.
+    """A ring, as overlapping bars, optionally opened on the left edge.
 
     It is expressed as bars rather than as a polygon with a hole, every mask
     format handling the former and not every one the latter.
+
+    `left_opening` is a (y_lo, y_hi) band over which the left bar is omitted.
+    An optical port has to reach the sawn edge, so the guide crosses the line
+    the ring occupies. A ring drawn through it would place metal across the
+    waveguide. The ring is therefore interrupted, which is ordinary practice
+    wherever a die carries an edge coupler, and the two remaining segments still
+    arrest a crack travelling along the other three edges.
     """
     w = width_um
-    return [
+    bars = [
         _rect(x0, y0, x1, y0 + w),
         _rect(x0, y1 - w, x1, y1),
-        _rect(x0, y0, x0 + w, y1),
         _rect(x1 - w, y0, x1, y1),
     ]
+    if not left_openings:
+        bars.append(_rect(x0, y0, x0 + w, y1))
+        return bars
+
+    # Every optical port needs its own gap. A reticle carrying a ladder has one
+    # per copy, so the bar is cut into the segments between them.
+    spans = sorted((max(min(a, b), y0), min(max(a, b), y1))
+                   for a, b in left_openings)
+    merged: list[list[float]] = []
+    for lo, hi in spans:
+        if hi <= lo:
+            continue
+        if merged and lo <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], hi)
+        else:
+            merged.append([lo, hi])
+    cursor = y0
+    for lo, hi in merged:
+        if lo > cursor:
+            bars.append(_rect(x0, cursor, x0 + w, lo))
+        cursor = max(cursor, hi)
+    if cursor < y1:
+        bars.append(_rect(x0, cursor, x0 + w, y1))
+    return bars

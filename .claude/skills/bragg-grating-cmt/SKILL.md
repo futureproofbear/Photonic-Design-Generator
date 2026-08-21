@@ -131,7 +131,11 @@ or multi-phase-shift design distributes the field instead.
 $\kappa$ is a transverse overlap between the unperturbed mode and the index
 perturbation, and only then a longitudinal Fourier coefficient:
 
-$$\kappa_m = \frac{\pi}{\lambda_B}\, a_m, \qquad a_m = \frac{2}{\pi m}\,\Delta n_{\text{eff}}\,\sin(\pi m D)$$
+$$\kappa_m = \frac{\pi}{\lambda_B(m)}\, a_m, \qquad a_m = \frac{2}{\pi m}\,\Delta n_{\text{eff}}\,\sin(\pi m D)$$
+
+**The wavelength in the denominator is that harmonic's own Bragg wavelength**,
+and writing it as a bare $\lambda_B$ is the ambiguity that produced a wrong
+harmonic table in a released review. See below.
 
 $$\Delta n_{\text{eff}} = \frac{\displaystyle\iint_{A_{\text{pert}}} \Delta n(x,y)\,n(x,y)\,|E(x,y)|^2\,dA}{\displaystyle\iint_{-\infty}^{\infty} n(x,y)\,|E(x,y)|^2\,dA}$$
 
@@ -148,6 +152,48 @@ That difference evaluates the integral above numerically and without the
 first-order approximation, and systematic discretisation error largely cancels,
 so a difference of order $10^{-4}$ is trustworthy where the absolute
 $n_{\text{eff}}$ is not.
+
+### Each harmonic is evaluated at its own Bragg wavelength
+
+A table of harmonics is a common way to show that only one order lands in band.
+It carries a trap. The coupling of the $m$-th harmonic is
+
+$$\kappa_m = \frac{\pi a_m}{\lambda_B(m)}, \qquad \lambda_B(m) = \frac{2 \bar{n} \Lambda}{m}$$
+
+so $\lambda_B(m)$ scales as $1/m$ and $\kappa_m$ follows $m\,a_m \propto \sin(m\pi D)$
+rather than $a_m$. **Dividing every harmonic by the design order's wavelength is
+correct for that order alone and overstates the lower ones**, by a factor of
+three at first order against a third-order design. The error was found in a
+released design review, where the $\kappa$ column and the $\lambda_B$ column of
+one table had been computed at different wavelengths.
+
+### Centre the duty cycle on $D = 1/(2m)$ where nothing else claims it
+
+$a_m \propto \sin(m\pi D)/m$ is maximised at $D = 1/(2m)$ and falls on either
+side. A design placed there takes the largest available harmonic amplitude **and
+is insensitive to the duty term at first order**, which removes one of the two
+routes by which a lithographic excursion reaches $\kappa$.
+
+A third-order grating at $D = 0.212$ against the optimum $1/6 = 0.167$ carries
+91 % of the achievable amplitude and sits on the falling side, where
+$\mathrm{d}(\ln a_3)/\mathrm{d}D = 3\pi\cot(3\pi D) = -4.2$. Moving to the
+optimum costs a dimension change and no performance.
+
+### Applying a measured correction to $\kappa$ without moving the geometry
+
+Where an independent measurement finds the closed form overstates $\kappa$ by a
+factor, the correction can be applied **in place** through the longitudinal
+profile smoothing. Smoothing of RMS length $s$ suppresses the $m$-th harmonic by
+$\exp[-(2\pi m s/\Lambda)^2/2]$, so the $s$ that realises the measured ratio
+scales $\kappa$ by exactly that factor and touches nothing else.
+
+**The check that the lever reached only $\kappa$ is the Bragg wavelength**, which
+must come out unchanged; a lever that moved the geometry would move it. One run
+then reports the whole metric tree at the corrected coupling and replaces every
+extrapolation drawn from a neighbouring sweep.
+
+**The smoothing is a lever here and not a claim about the etch.** Record it as
+one, so that it is not later read as a measured property of the process.
 
 ### The Bragg condition takes the period-averaged index
 

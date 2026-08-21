@@ -13,10 +13,12 @@ mechanically rather than by convention.
 ```
 Photonic-Design-Generator/
 ├── design-chain/       the toolchain: solvers, stages, CLI, PDK, tests   [GENERIC]
+├── rules/              resident rules of method, in three tiers          [GENERIC]
 ├── docs/               methodology: the flow, the toolset, its limits    [GENERIC]
 ├── .claude/            skills, sub-agents and the sanitised lessons ledger [GENERIC]
 ├── examples/           validation designs drawn from public literature   [GENERIC]
 ├── references/         public literature underpinning the examples       [GENERIC]
+├── templates/          fragments proven on two or more designs           [GENERIC]
 ├── tools/              the IP boundary check                        [GENERIC]
 └── projects/           one folder per design scope             [PROPRIETARY]
     ├── _template/          copy this to start a new scope
@@ -54,6 +56,7 @@ generator is shared.
 | assess whether the toolchain is trustworthy | [examples/edbr_tfln_baseline/TOOLCHAIN_VALIDATION.md](examples/edbr_tfln_baseline/TOOLCHAIN_VALIDATION.md) |
 | install and execute the chain | [design-chain/PICCHAIN_REFERENCE.md](design-chain/PICCHAIN_REFERENCE.md) |
 | start a new design scope | [projects/README.md](projects/README.md) |
+| **the rules of method, read before designing** | [rules/README.md](rules/README.md) |
 | accumulated design knowledge | [.claude/skills/](.claude/skills/) and [.claude/LESSONS.md](.claude/LESSONS.md) |
 
 ## Prerequisites
@@ -205,13 +208,17 @@ not assumed where it is absent.
 The generator is intended to improve across successive design scopes. Two
 mechanisms are provided:
 
+* **Rules** in `rules/` hold the operative method, distilled short enough to be
+  read before every design activity and held in three tiers: what is true of any
+  photonic design, what is true of one film stack, and what is true of one tool.
 * **Skills** in `.claude/skills/` hold transferable design knowledge — the
   physics, the sensitivities, the failure modes and the correspondence between
   each control and the quantity it moves.
 * **A lessons ledger** in `.claude/LESSONS.md` records what was learnt from each
-  completed design activity, in sanitised form.
+  completed design activity, in sanitised form. It is the evidence behind every
+  rule, held in full.
 
-Both are located outside `projects/` and are therefore covered by the
+All three are located outside `projects/` and are therefore covered by the
 IP boundary check. Entries are required to be stated as general technical
 findings. No client, programme, application, deliverable code or specific design
 parameter set is to be recorded. The procedure is defined in

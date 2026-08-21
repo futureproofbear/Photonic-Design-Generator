@@ -138,6 +138,77 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     if spec.fwhm_Hz() == spec.fwhm_Hz():
         payload["fwhm_nm"] = spec.fwhm_Hz() * (lam_B * 1e-6) ** 2 / C0 * 1e9
 
+    # ---- radiation from the lower diffraction orders, stated as a budget ----
+    #
+    # A grating of order m phase-matches m diffraction orders, and every order
+    # below the Bragg one radiates: for m = 3, the m = 1 and m = 2 orders leave
+    # the guide into the cladding and the substrate. Coupled-mode theory keeps
+    # only the backward-coupled Bragg order, so this loss channel is absent from
+    # every figure this stage reports. The chain carries no solver for it here;
+    # the honest statement is the margin the design has against it, not a value.
+    #
+    # The bound is set by the threshold-gain requirement: the radiation adds to
+    # the distributed loss inside the mirror, and the room left under the
+    # threshold-gain ceiling is the loss the design survives.
+    tg = next((tt for tt in design.targets
+               if tt.metric == "cavity.modal_threshold_gain_per_cm"), None)
+    if design.grating.order > 1 and tg is not None and tg.max:
+        payload["radiation_orders_unmodelled"] = list(range(1, design.grating.order))
+        ctx.warn(
+            f"order-{design.grating.order} grating: diffraction orders "
+            f"{list(range(1, design.grating.order))} radiate out of the guide and no stage "
+            "models that loss. The reflectivity and the threshold quoted here assume it is "
+            "zero. The margin under the threshold-gain ceiling is the budget the design has "
+            "against it; read cavity.modal_threshold_gain_per_cm against its target"
+        )
+
+    # ---- will the grating add coherently along its own length? -------------
+    #
+    # Everything above assumes one Bragg wavelength over the whole mirror. The
+    # Bragg condition is set by the effective index, the effective index follows
+    # the film thickness, and a film that thins along the grating detunes it.
+    # The reflections then stop adding in phase: the peak falls and the stop
+    # band broadens and distorts.
+    #
+    # A corner sweep cannot see this. It moves the film uniformly, which shifts
+    # the Bragg wavelength and leaves the grating perfectly coherent. This is a
+    # different failure and it is the one that scales with mirror length.
+    #
+    # The budget is set over the penetration depth rather than the drawn length,
+    # because that is the distance the light actually samples.
+    dn_dfilm = float(mode.get("dn_eff_d_film_per_um") or float("nan"))
+    if dn_dfilm == dn_dfilm and dn_dfilm != 0.0 and L_pen > 0:
+        lam_m = lam_B * 1e-6
+        # an index error of this size costs pi of Bragg phase over L_pen
+        dn_pi = lam_m / (2.0 * (L_pen * 1e-6))
+        budget_um = dn_pi / dn_dfilm
+        payload["dn_eff_d_film_per_um"] = dn_dfilm
+        payload["film_uniformity_for_pi_phase_um"] = budget_um
+        payload["film_uniformity_for_pi_phase_nm"] = budget_um * 1e3
+        payload["film_uniformity_budget_percent"] = (
+            budget_um / design.platform.film_thickness_um * 100.0
+        )
+        declared = getattr(design.platform, "film_nonuniformity_nm", 0.0) or 0.0
+        if declared:
+            payload["film_nonuniformity_declared_nm"] = declared
+            payload["bragg_phase_error_rad"] = 3.14159265358979 * declared / (budget_um * 1e3)
+            if declared > budget_um * 1e3:
+                ctx.warn(
+                    f"the film is declared non-uniform by {declared:.3f} nm over the device and "
+                    f"the grating tolerates {budget_um * 1e3:.3f} nm before the Bragg phase slips "
+                    f"by pi across the {L_pen / 1e3:.2f} mm penetration depth. The reflections "
+                    "will not add in phase over the whole mirror: expect a lower peak and a "
+                    "broader, distorted stop band than this stage reports"
+                )
+        else:
+            ctx.warn(
+                f"this grating tolerates {budget_um * 1e3:.3f} nm of film non-uniformity "
+                f"({budget_um / design.platform.film_thickness_um * 100:.3f} % of the film) "
+                f"before the Bragg phase slips by pi over its {L_pen / 1e3:.2f} mm penetration "
+                "depth, and platform.film_nonuniformity_nm is not declared. Coherent addition "
+                "over the mirror is assumed and not established"
+            )
+
     arrays = {
         "freq_Hz": spec.freq_Hz,
         "R": spec.R,

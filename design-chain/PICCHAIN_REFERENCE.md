@@ -23,8 +23,8 @@ either absent or represented by a declared assumption.
 
 ## What Is Computed
 
-Sixteen stages are executed in dependency order, of which seven are disabled by
-default. The model employed by each is stated below, together with the
+Seventeen stages are executed in dependency order, of which nine are disabled
+by default. The model employed by each is stated below, together with the
 approximation that limits it, so that a figure is not read as carrying more
 authority than the model behind it supports.
 
@@ -358,10 +358,10 @@ result is produced by it.
 | `process.py` | the drawn, printed and nominal geometries, and the bias between them | the algebra: a width gains the bias, a gap loses it, and pre-compensation lands the printed feature on the nominal dimension |
 | `monitors.py` | process control structures as polygon lists: κ ladder, cut-back, critical-dimension vernier, electrode ladder, overlay marks, seal ring | each measured back off its own polygons, and each held to the rule deck declared for the device |
 | `stages/s16_circuit.py` | the passive circuit assembled from scattering matrices by <span style="color:#1a73e8"><strong>SAX</strong></span> | the closed-form two-mirror result, to 6 × 10⁻¹⁴ |
-| `stages/` | the sixteen chain stages | end to end against a published, measured device (see `examples/edbr_tfln_baseline/TOOLCHAIN_VALIDATION.md`) |
+| `stages/` | the seventeen chain stages | end to end against a published, measured device (see `examples/edbr_tfln_baseline/TOOLCHAIN_VALIDATION.md`) |
 
 ```bash
-./.venv/Scripts/python.exe -m pytest tests/ -q     # 249 tests
+./.venv/Scripts/python.exe -m pytest tests/ -q     # 304 tests
 ```
 
 ## Verification Beyond the Nominal Design
@@ -457,9 +457,370 @@ fill placed, the release is blocked on two conditions: no foundry rule deck has
 been executed, and the acceptance targets are not met. Both are true, and both
 are outstanding for reasons recorded elsewhere in this repository.
 
+## Stages and Their Dependencies
+
+| stage | requires | produces (top-level metric key) |
+|---|---|---|
+| `mode` | — | `mode` — n_eff, n_g, Δn_eff from the Bragg posts, confinement, mode count |
+| `taper` | `mode` | `taper` — guided-mode conversion, adiabaticity margin, staircase deficit. Disabled unless `taper.enabled` is set, costing one mode solve per slice |
+| `fem` | `mode` | `fem` — the same cross-section re-solved by <span style="color:#1a73e8"><strong>femwell</strong></span> on a conforming triangulation, full-vectorially. Reports the disagreement with the finite-difference solver in n_eff and in Δn_eff, the polarisation purity, a mesh-convergence guard and the anisotropy bracket. Disabled unless `fem.enabled` is set. Nothing downstream reads it |
+| `fdtd` | `mode`, `grating` | `fdtd` — by <span style="color:#1a73e8"><strong>meep</strong></span>, and disabled unless `fdtd.enabled` is set. `structure: taper` gives transmission, radiated power and reflection. `structure: grating` gives the reflection spectrum of a finite grating and an independent κ; `structure: bandstructure` gives κ from the photonic band gap by <span style="color:#1a73e8"><strong>MPB</strong></span>, which carries no radiation channel and is the sounder of the two. The gap is the difference of two nearly degenerate bands and converges slowly, so the structure is solved a second time on a coarser mesh and `fdtd.convergence.resolved` states whether the comparison distinguishes anything. An unresolved comparison is to be reported as unresolved. Both are set against the coupled-mode value on the same two-dimensional structure. The solver is external; `picchain doctor` reports whether it can be reached |
+| `bend` | `mode` | `bend` — the bend mode at each declared radius, its outward shift and the radiation caustic. Disabled unless `bend.enabled` is set. Radii at which the caustic falls inside the window are refused, being leaky |
+| `facet` | `mode` | `facet` — mode overlap, Fresnel, facet angle and alignment tolerance, each reported separately. Disabled unless `facet.enabled` is set; the partner mode is declared, not solved |
+| `grating` | `mode` | `grating` — period, κ, κL, Bragg λ, R, FWHM, sidelobes, penetration depth |
+| `eo` | `mode`, `grating` | `eo` — EO overlap Γ, MHz/V, Vπ·L, capacitance, RC bandwidth |
+| `cavity` | `grating`, `eo` | `cavity` — FSR, Pockels lever, tuning, mode-hop-free range, chirp nonlinearity, linewidth, SMSR. The optical power is an input here |
+| `dynamics` | `cavity` | `dynamics` — the single-mode rate equations: photon lifetime of the composite cavity, threshold current, the light-current curve, relaxation oscillation and its damping, the small-signal bandwidth, the intensity-noise spectrum, and the Lang-Kobayashi feedback parameter with the regime it implies. Disabled unless `dynamics.enabled` is set, the gain-chip parameters under `cavity.rsoa.gain` being properties of a part rather than of the photonic design |
+| `circuit` | `mode`, `grating` | `circuit` — the passive circuit assembled from scattering matrices by <span style="color:#1a73e8"><strong>SAX</strong></span>, giving the reflection presented to the gain chip, the facet etalon ripple the cavity stage cannot express, and the residual against the closed-form two-mirror result. Disabled unless `circuit.enabled` is set |
+| `layout` | `grating` | `layout` — GDS and OASIS paths, the layer table, polygon counts, the drawn/printed/nominal geometry triple, whether the mask carries the whole device (`layout.mask_is_complete`), the exclusive-or between the two backends, the manufacturing-grid snap and what it cost, the crystal orientation, derived layers by boolean operation, and geometry a rule deck does not examine |
+| `reticle` | `layout` | `reticle` — the die: the device placed, a seal ring, a dicing lane, nested overlay marks, a die label, process control monitors, and a split ladder of device copies stepped across a declared parameter. Disabled unless `reticle.enabled` is set |
+| `drc` | `layout` | `drc` — per-rule violation counts, and, where `drc.deck` is set, the violations a foundry runset reports through the <span style="color:#1a73e8"><strong>KLayout</strong></span> application. `drc.target: die` checks the assembled reticle instead of the device cell |
+| `mask` | `layout` | `mask` — connected regions per layer, an extracted **netlist** named from text labels and compared against a declared schematic, shorts between layers, density per tile, and the fill placed where `mask.fill` declares a pattern. `mask.target: die` as above |
+| `release` | `layout` | `release` — the submission manifest: every artifact with its SHA-256, the design and environment that produced it, and ten readiness conditions. The only stage that refuses rather than reports |
+| `verify` | — | `verify` — verdict and per-target rows |
+
+Dependencies are resolved by `--stages`; a request for `cavity` causes
+`mode,grating,eo,cavity` to be executed.
+
+
+## Correspondence Between Controls and Quantities
+
+Internalisation of the following is required before parameter changes are
+attempted.
+
+| quantity to be changed | control | mechanism |
+|---|---|---|
+| Bragg wavelength | `grating.period_um`, or set `target_wavelength_um` and allow the chain to solve the period | λ_B = 2·n̄·Λ/m |
+| κ (and hence R and bandwidth) | `grating.post_gap_um`, **first** | κ is *exponentially* sensitive to the gap — a decay rate of approximately 5.4 µm⁻¹ on the TFLN validation baseline, so 20 nm of lithographic error constitutes 11 % of κ |
+| κ, secondary control | `grating.post_width_um`, `platform.sidewall_deg` | sloped sidewalls *increase* κ, a wider post base being positioned closer to the ridge |
+| peak reflectivity at fixed κ | `grating.length_um` | R = tanh²(κL) |
+| mirror bandwidth | `grating.length_um` | the floor is 0.886·c/(2·n_g·L); see `grating.transform_limit_fwhm_GHz` |
+| sidelobes | `grating.apodisation` | uniform gratings exhibit first sidelobes at approximately −9 dB, by which the laser mode is pulled and which appear as chirp nonlinearity |
+| tuning MHz/V | `electrodes.gap_um` | Δn ∝ 1/G, but Γ falls as G is reduced and metal loss rises; inspect `eo.mode_overlap_with_metal` |
+| the mask against the manufacturing grid | `process.grid_nm` | every vertex is snapped after the layer is merged, a boolean introducing vertices at intersections that the drawing never placed. A period that is not an integer number of grid steps acquires a dither, reported as `layout.grid.period_dither_nm_rms`, which is a weak chirp of the grating and is carried by no model here |
+| what the process prints against what is drawn | `process.bias_um` per layer, and `process.precompensate` | a width gains the bias and a **gap loses it**, both facing edges advancing into it. With pre-compensation the mask is drawn inward by half the bias so the printed feature lands on the nominal dimension |
+| κ under a lithographic bias, on a grating of order m > 1 | as above | two opposing terms: Δn_eff rises as the gap closes, and the harmonic amplitude sin(mπD) falls as the duty cycle moves away from 1/(2m). On the validation baseline a 40 nm bias raised Δn_eff by 24 % and lowered κ by 8 % |
+| **mode-hop-free range** | `cavity.rsoa.length_um` ↓, `cavity.feed_length_um` ↓, `grating.post_gap_um` ↑, `grating.length_um` ↑ | MHF ≈ r/(1−r) · FSR/2, where r = `cavity.pockels_lever` = τ_DBR/τ_rt. Weakening the mirror raises r, the penetration depth growing toward L/2, so κ is a control on the tuning range and not only on the reflectivity. It is bounded: at L/2 the range asymptotes, and on the validation baseline that asymptote is 7.47 GHz against an 8 GHz target, so weakening alone cannot reach it. The range is measured between mode hops and not from zero bias; `mode_hop_free_range_from_zero_bias_GHz` is the figure obtained without a DC offset and `bias_offset_needed` states when they differ |
+| threshold current and output power | `cavity.rsoa.gain.*`, `dynamics.operating_current_mA` | the rate equations. Every carrier above threshold makes one photon, and `dynamics.output_coupling_fraction` of them leave |
+| **whether the laser is stable at all** | `cavity.rsoa.front_facet_R` | an external-cavity laser is operated under strong feedback deliberately, and is stable only while the external mirror dominates the chip facet. `dynamics.external_over_facet_margin_dB` is that margin, and `dynamics.feedback_regime` is the regime. On the validation baseline the margin is 36.8 dB and the regime is V; a facet degrading from 10⁻⁴ to 5 × 10⁻³ takes it to 19.9 dB and regime IV, coherence collapse |
+| laser tuning MHz/V | as above | the laser tunes at r × the mirror MHz/V figure, and not at the mirror rate |
+| linewidth | `cavity.rsoa.output_power_mW` ↑, mirror R ↑, `cavity.rsoa.length_um` (through the active fraction) | Schawlow–Townes–Henry with the extended-cavity (τ_a/τ_rt)² factor |
+
+**The most consequential derived quantity in this chain is
+`cavity.pockels_lever`.** Only the fraction of the round-trip delay residing
+within the electro-optically tuned grating follows the mirror when voltage is
+applied. A lever of 0.39 (the TFLN validation baseline) indicates that the laser tunes at 39 %
+of the mirror efficiency and hops after approximately 2.8 GHz. It is raised
+toward unity by shortening everything that is not the grating.
+
+
+## Sensitivity, and Why It Is Two Tables
+
+`picchain sensitivity` perturbs each declared parameter either side of nominal
+and reports two matrices. They answer different questions and neither substitutes
+for the other.
+
+**Elasticity**, d(ln metric)/d(ln parameter), is a property of the physics. It
+ranks the knobs and does not depend on how well anything is controlled.
+
+**Contribution**, the half-span over the excursion declared in
+`corners.parameters`, is a property of the process. It ranks the risks.
+
+The distinction is not academic. On the validation baseline
+`eo.mode_overlap_with_metal` carries the largest elasticity in the matrix at
+−14.4 against the etch depth, and a 72 % contribution, and is no risk whatever:
+it sits three orders of magnitude below its bound. A quantity is at risk only
+where the contribution is large **relative to the margin the target leaves**, and
+that comparison needs the target as well as both tables.
+
+Two further cautions.
+
+**An elasticity presumes the metric is monotone in the parameter.** Where it is
+not, the number depends on the width of the perturbation and means nothing. On
+the validation baseline the mode-hop-free range gave +17.2 against the sidewall
+angle over a ±2° excursion and +0.9 over a ±5 % probe, a factor of nineteen,
+because the metric doubles back within the range. `search` flags the same
+condition in its reachability phase. Read the elasticity of a non-monotone metric
+as a warning that no derivative describes it.
+
+**A corner summary reports spreads and verdicts, not which target failed where.**
+The per-corner failures are the informative part: on the validation baseline the
+single-mode condition, a `must` target, fails at three of eight excursions, which
+no aggregate spread reveals.
+
+
+## Searching for a Configuration That Meets the Targets
+
+`picchain search` moves the parameters declared under `search.parameters`. It is
+not an optimiser, and its value is in the order of its phases rather than in the
+solve.
+
+1. **The problem.** Which targets are unmet and by how much, relative to their
+   own bounds. A target whose metric the chosen stage subset does not produce is
+   named and set aside, since a search cannot chase a quantity it never computes.
+2. **Sensitivity.** Each parameter is probed once and the elasticity
+   d(ln metric)/d(ln parameter) is reported against every target metric. One run
+   per parameter, and the result is a matrix: it states which knob moves which
+   target, with sign and magnitude.
+3. **Reachability, before any search.** Each parameter is evaluated at both
+   bounds. A requirement outside what a parameter reaches is reported as
+   unreachable with the binding bound named, rather than approached until the
+   budget is spent. Monotonicity across the bracket is checked in the same pass,
+   a metric that is not monotone being unsearchable by bisection.
+4. **Solve, then verify everything.** Bisection on the dominant control, then
+   every target evaluated at the candidate so that what worsened is reported
+   beside what improved.
+
+Two guards are declared rather than inferred. `search.constraints` are
+comparisons between dotted fields, evaluated before a point is run; a violating
+candidate is skipped rather than clamped, a clamp producing geometry that no
+longer matches the model. A constraint that cannot be parsed counts as violated,
+so a typo cannot silently disable a check.
+
+Each phase exists because of a specific failure. Reachability exists because the
+mode-hop-free range asymptotes at 7.47 GHz as the mirror is weakened, against an
+8 GHz target, and no gradient descent discovers that. The monotonicity check
+exists because the same range measured from zero bias moved between 0.37 and
+6.86 GHz on cavities differing by a fraction of a wavelength. The
+verify-everything phase exists because shortening the gain chip widened the range
+and doubled the linewidth.
+
+
+## The Flow Is Comprehensive By Default
+
+**A design declares every stage the chain offers, and a stage omitted from
+`stages:` is a question nobody asked rather than a question answered
+favourably.** This is a rule and not a preference.
+
+The reason is that a verdict cannot report on evidence that does not exist. The
+`verify` stage evaluates the targets it was given, a target may only name a
+metric that some stage produced, and a stage that never ran produces nothing.
+A design whose `taper`, `fem`, `fdtd`, `bend` and `facet` stages are absent
+therefore returns PASS on every target while none of the chain's five
+cross-checks has been performed, and nothing in that verdict discloses it.
+
+That is not hypothetical. The validation baseline carried twelve of the
+seventeen stages for the whole of its development. Each of the five absentees
+had been run once as a one-off probe, and every one of those probes predated the
+solved grating period, the changed ridge and etch, the real gain chip, the routed
+facet and the enlarged die. The verdict read twelve of twelve throughout.
+
+Three requirements follow.
+
+**Enable the cross-checks even where they cost more than the rest of the chain.**
+One mode solve per taper slice costs about three minutes against fifty seconds
+for everything else. Cost is a reason to run the chain less often. It is not a
+reason to leave a cross-check unperformed.
+
+**Where a stage must be omitted, remove it from `stages:` with a comment stating
+why.** An omission on the record is a decision. An omission by default is an
+oversight that looks identical to a pass.
+
+**Order is not the author's problem.** `stages:` is closed over its dependencies
+and sorted topologically before execution, so the list may be written in any
+order. It was previously executed in registration order, which is not the same
+thing, and a run naming both `fdtd` and `grating` executed `fdtd` first and
+raised.
+
+`picchain dashboard` reports the coverage beside the verdict, and names the
+stages that produced nothing. A design report is to state the coverage wherever
+it states the verdict.
+
+
+## Running the Chain Efficiently
+
+The chain is cheap except where it is not, and the difference is three orders of
+magnitude. Measured on the validation baseline: `grating` under a second,
+`facet` 12 s, `fem` 18 s, `mode` 33 s, `bend` 40 s, `taper` 123 s, and the
+external band structure **3.2 hours**. One stage is 98 % of a full run.
+
+**Work in three tiers, and choose deliberately between them.**
+
+| tier | stages | cost | when |
+|---|---|---|---|
+| iterate | `mode,grating,eo,cavity` | about 1 min | changing a parameter and reading its effect |
+| decide | everything except `fdtd` | about 15 min | before accepting a change, and at every decision point |
+| confirm | the whole list | hours | once per frozen configuration |
+
+**A sweep multiplies whatever it is given, so what is correct for one run is not
+correct for nine.** `corners` derives its stages from the metrics it declares
+rather than inheriting the design's list. Making the flow comprehensive turned a
+nine-corner sweep into a thirty-one hour job until that was fixed, and the
+symptom was invisible because nothing reported per-stage cost.
+
+**An identical external solve is never repeated.** The job is content-hashed with
+floats rounded to ten significant figures, and a matching prior result is reused
+and attributed. Two runs of the same geometry differ in the fifteenth
+significant figure through evaluation order alone, so a raw hash never matches:
+that is how a three-hour band structure came to be re-queued for a structure
+that had not changed. Set `PICCHAIN_NO_REUSE` to force a fresh solve.
+
+**Ask what a run can possibly tell you before starting it.** The re-queued band
+structure could not have produced a different answer, `grating.profile_sigma_um`
+not entering the solver's job at all. The check that mattered was arithmetic and
+took a second. A run that cannot change a conclusion is not evidence, it is
+delay.
+
+**Time is recorded on two clocks and both are needed.** Wall clock counts machine
+suspend; processor time does not. A corner left overnight reported 8.2 hours
+against 70 seconds for its neighbours, and a defect was reported against a period
+solver that did not have one. Where a stage delegates to an external process,
+that process's own reported time is the one to believe.
+
+**Slow is not stuck, and unfinished is not failed.** Every wrong call about this
+chain's health has had the same shape: a 20-minute solve killed as a hang, a
+3-hour run declared dead at 13 minutes, an 11-minute sweep killed twice by a
+9.8-minute timeout. Before concluding that a job has failed, establish what it
+should cost and how far in it is. `picchain dashboard` reports a stage now
+running with its elapsed time beside the longest it has previously taken, for
+exactly this purpose.
+
+
+## The Dashboard
+
+`picchain dashboard` writes one self-contained HTML file per run, openable from
+disk. It is produced alongside `report.md` whenever `picchain report` is run.
+
+It exists to draw a distinction a verdict cannot. A run reports PASS when every
+target it was given is met, and a target may only name a metric that some stage
+produced. A design whose `taper`, `fem`, `fdtd`, `bend` and `facet` stages are
+switched off therefore passes without any of them having been performed, and the
+page states the stage coverage beside the verdict for that reason.
+
+Three things on it are not in the metric tree.
+
+**When each stage last produced a result, anywhere under `runs/`.** A subset run
+leaves the other stages untouched, so their absence from one metric tree means
+they were not asked rather than that they failed. Each card names the most recent
+run that produced that stage.
+
+**Whether the design has changed since.** The resolved design of that earlier run
+is compared against the current one. The comparison is over the whole file, so it
+is conservative: it may call a result stale that remains valid, and it cannot
+call a stale result current. On the validation baseline every one of the five
+cross-checks last ran against a different configuration.
+
+**Headroom against each target.** The distance from the value to the bound that
+constrains it, as a fraction of that bound, so a quantity three orders inside its
+limit is told apart from one 2 % inside it. It is not margin against the process,
+which is what `picchain corners` answers.
+
+The warnings are grouped by what must be done about them. The grouping is a
+heuristic over the warning text, and anything it does not recognise stays in the
+least severe group, so a warning is only ever demoted by it.
+
+
+## The Run Register
+
+**Every design report carries a table of what was run, when, with which
+parameters, and what came of it.** This is a rule and not a convention. A report
+states conclusions; the register states the evidence those conclusions rest on,
+and without it a reader cannot tell a figure obtained from a converged
+twenty-five point map from one obtained by a single probe.
+
+Each row records:
+
+| column | what it must say |
+|---|---|
+| date | when the study was executed |
+| study | the command, and what question it was asked |
+| parameters | the fields varied and the values they took |
+| runs | how many evaluations the study cost |
+| outcome | what it established, including where it established nothing |
+
+Three requirements follow from experience rather than from tidiness.
+
+**A study that was superseded stays in the register, marked as superseded.** The
+band-structure cross-check was run four times before it converged, and the first
+three produced a verdict that was withdrawn. Deleting them would leave a reader
+unable to see that the surviving number is the fourth attempt.
+
+**A study whose result was discarded says so and says why.** A film-etch probe
+was run at the wrong nominal film thickness and its four rows were meaningless.
+That is worth a line, since the alternative is a reader finding those runs under
+`runs/` and believing them.
+
+**The parameters recorded are the ones actually resolved, not the ones
+intended.** Every run directory stores `design.resolved.json` for this reason.
+
+
+## The Concept of Operation, and Why the Targets Are Traced to It
+
+Every design carries a `DESIGN_CONCEPT.md` beside its `design.yaml`. It states
+what the device does, by what principle it does it, and which physical quantity
+expresses each clause of that principle. **The acceptance targets are derived
+from those clauses**, and the concept ends with a trace table binding each clause
+to the target that tests it:
+
+```
+| clause | target metric | severity |
+|---|---|---|
+| the sweep is continuous | `cavity.mode_hop_free_range_synchronous_GHz` | must |
+| a lost phase drive degrades | `cavity.mode_hop_free_range_placed_GHz` | should |
+```
+
+`tools/check_concept_trace.py` compares that table against the declared targets
+and reports three kinds of discrepancy:
+
+```bash
+$PY tools/check_concept_trace.py ../examples/edbr_tfln_baseline
+$PY tools/check_concept_trace.py ../examples/*/          # several at once
+```
+
+* **a target declared and absent from the concept** — the design is graded on
+  something the concept does not ask for, which is where an inherited target
+  hides;
+* **a clause traced to a metric no target declares** — the concept promises what
+  the validation does not test;
+* **a severity disagreement** between the two.
+
+Exit code 0 means every target traces, 1 a discrepancy, 2 a missing file.
+
+### The failure this exists to prevent
+
+**A target carries a mechanism as well as a number.** Where a design replaces
+the mechanism, the target stops testing the requirement and starts testing the
+absence of the change. There is no symptom: the run completes, the metric is
+computed, the corner sweep returns a spread.
+
+A laser was built with a second electrode holding its mode comb in step with its
+mirror, so that no mode hop occurs. Its targets were inherited from a laser built
+on the opposite concept of positioning the hop outside the sweep, so the `must`
+row measured a comb left to slip. The new device read 8.41 GHz against the older
+design's 11.22, and 17 of 81 process corners failed. Re-derived from its own
+concept it gives 12.11 GHz continuously against 5.61 guaranteed, and every corner
+clears. **The verdict inverted on which concept the target encoded**, and not on
+any property of the device.
+
+Rereading the documents does not find this. Each was internally consistent, and
+only comparing the targets against a written statement of the principle exposes
+it. That is why the trace is a table checked by a tool rather than a paragraph
+of prose.
+
+### Two obligations
+
+* **When the architecture changes, re-derive the targets from the new concept**
+  rather than inheriting them. Where the old row still describes a real degraded
+  mode, keep it at a lower severity so the degradation stays on the record.
+* **Validate against the concept**, so that a passing run is evidence about this
+  device rather than about the one before it.
+
+## Addition of a Stage
+
+1. Write `src/picchain/stages/sNN_<name>.py`, exposing
+   `run(design, ctx, lib) -> dict`.
+2. Read upstream results by means of `ctx.get("grating")`, and upstream arrays
+   from `ctx.run_dir / "grating.npz"`.
+3. Write results by means of `ctx.put("<name>", payload)` and
+   `ctx.write_stage("<name>", payload, arrays)`.
+4. Register the stage in `stages/__init__.py` (`STAGES` and `DEPENDENCIES`).
+5. Add a closed-form test to `tests/`. Solvers are validated against analytic
+   results and not against recorded outputs; a regression test that pins only the
+   previous numerical result will equally pin the previous defect.
+
 ## Annex: The Test Suite
 
-249 tests are distributed over 13 modules. The organising rule is that a test is
+304 tests are distributed over 13 modules. The organising rule is that a test is
 anchored to a closed-form result, to a limit whose value is known without
 computation, or to a property measured back off the emitted artifact. No test
 pins a previously recorded numerical output. A test written the other way round
@@ -473,7 +834,7 @@ would attest to nothing.
 | [`test_laser.py`](tests/test_laser.py) | 31 | the rate equations against closed forms and limits |
 | [`test_foundry.py`](tests/test_foundry.py) | 35 | that a declared quantity reaches a polygon |
 | [`test_reticle.py`](tests/test_reticle.py) | 28 | the process-control structures, measured off their own geometry |
-| [`test_dashboard.py`](tests/test_dashboard.py) | 18 | the per-design dashboard, and the distinction it exists to draw |
+| [`test_dashboard.py`](tests/test_dashboard.py) | 26 | the per-design dashboard, and the distinction it exists to draw |
 | [`test_release.py`](tests/test_release.py) | 23 | the steps between a working design and a sendable mask |
 | [`test_coupling.py`](tests/test_coupling.py) | 15 | facet coupling against closed forms |
 | [`test_process.py`](tests/test_process.py) | 10 | the drawn, printed and nominal frames |
@@ -483,7 +844,7 @@ would attest to nothing.
 | [`test_femmode.py`](tests/test_femmode.py) | 6 | the finite-element solver against the analytic slab |
 
 ```bash
-./.venv/Scripts/python.exe -m pytest tests/ -q     # 249 tests
+./.venv/Scripts/python.exe -m pytest tests/ -q     # 304 tests
 ```
 
 ### Solvers — 25
@@ -643,7 +1004,7 @@ angle once fed the coupling calculation and drew nothing.
 | `the_routed_lead_in_butts_cleanly_against_the_feed` | the rails were offset from a differenced heading, so the joint carried a 1 nm sliver that both rule engines reported |
 | `the_floor_plan_encloses_the_bond_pads` | the plan was sized off the electrodes with 30 um of allowance while the pads reach 80 um, so the foundry runset reported them outside the usable area |
 
-### The dashboard — 18
+### The dashboard — 26
 
 Implemented in [`dashboard.py`](src/picchain/dashboard.py).
 
@@ -660,6 +1021,14 @@ Implemented in [`dashboard.py`](src/picchain/dashboard.py).
 | `a_warning_the_heuristic_does_not_recognise_is_only_ever_demoted` | promotion by accident would misreport a note as a defect |
 | `the_page_is_one_file_with_no_external_reference` | it is opened from disk and sent onward |
 | `it_renders_for_a_run_that_produced_almost_nothing` | it is most wanted during the part of a design where least exists |
+| `every_stage_runs_after_the_stages_it_depends_on` | the execution order was the registration order, which is not a topological sort: fdtd is registered before grating and depends on it |
+| `the_declared_order_does_not_change_the_executed_order` | the author declares which stages, and the dependency map decides when |
+| `asking_for_one_stage_brings_in_what_it_needs` | a request closes over its dependencies |
+| `a_stage_cannot_be_reported_as_run_and_in_flight_at_once` | a green chip beside a line saying the run was interrupted asserts two incompatible things |
+| `a_verdict_of_pass_with_unmet_targets_is_refused` | the page must not contradict the verdict it reports |
+| `a_contradictory_page_is_not_written` | a page nobody can trust is worse than no page |
+| `the_page_names_a_later_run_where_one_exists` | a stale page is read as a current one unless it says otherwise |
+| `no_later_run_leaves_the_page_unqualified` | the banner appears only when it is true |
 
 ### Reticle monitors — 28
 

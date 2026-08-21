@@ -46,7 +46,8 @@ def _eps_maps(
     )
 
 
-def _build(design: Design, *, with_posts: bool, electrodes: bool, name: str) -> CrossSection:
+def _build(design: Design, *, with_posts: bool, electrodes: bool, name: str,
+           film_delta_um: float = 0.0) -> CrossSection:
     """Optical cross-sections omit the electrodes and the handle wafer; the RF
     cross-section (``electrodes=True``) includes both.
 
@@ -60,7 +61,7 @@ def _build(design: Design, *, with_posts: bool, electrodes: bool, name: str) -> 
     geom = process.geometry(design, design.process.simulate)
     return edbr_cross_section(
         film_material=p.film_material,
-        film_thickness_um=p.film_thickness_um,
+        film_thickness_um=p.film_thickness_um + film_delta_um,
         etch_depth_um=geom.etch_depth_um,
         wg_top_width_um=geom.wg_top_width_um,
         sidewall_deg=p.sidewall_deg,
@@ -119,6 +120,25 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     m_post = _solve(design, xs_posts, grid, lib, lam, m_bare.n_eff)
     dn_eff = m_post.n_eff - m_bare.n_eff
 
+    # How hard the effective index leans on the film thickness. One extra solve
+    # on a slightly thicker film, differenced against the bare one.
+    #
+    # This is what decides whether a long grating adds coherently. The Bragg
+    # condition is set by n_eff, so a film that thins along the grating detunes
+    # it, and the reflections stop adding in phase. On a 300 nm tantalate ridge
+    # the sensitivity is near 1e-3 per nm of film, which puts the whole stop
+    # band inside a twentieth of a nanometre of thickness. A corner sweep cannot
+    # see this: it moves the film uniformly, which shifts the Bragg wavelength
+    # and leaves the grating perfectly coherent.
+    dn_dfilm = float("nan")
+    if design.mesh.film_sensitivity:
+        dt = 0.005  # um, small against the film and large against the mesh
+        xs_thick = _build(design, with_posts=False, electrodes=False, name="bare_thick",
+                          film_delta_um=dt)
+        xs_thick.window = xs_posts.window
+        m_thick = _solve(design, xs_thick, grid, lib, lam, m_bare.n_eff)
+        dn_dfilm = (m_thick.n_eff - m_bare.n_eff) / dt
+
     film = design.platform.film_material
     mask_film = material_mask(xs_bare, grid, film, mesh.subsample)
     gamma_film = m_bare.confinement(mask_film)
@@ -152,6 +172,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "n_eff_bare": m_bare.n_eff,
         "n_eff_with_posts": m_post.n_eff,
         "dn_eff_posts": dn_eff,
+        # per micron of film thickness; NaN where mesh.film_sensitivity is off
+        "dn_eff_d_film_per_um": dn_dfilm,
         "n_g": float(n_g),
         "confinement_film": gamma_film,
         "n_guided_modes": n_guided,
@@ -193,4 +215,37 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         )
     if dn_eff <= 0:
         ctx.warn("dn_eff from the Bragg posts is <= 0; check post geometry")
+
+    # A measured index declared in the library and gated off is a value that was
+    # adopted and never consumed. Measured thin-film indices replaced bulk
+    # congruent ones for a tantalate stack, the provenance was rewritten, a
+    # design report stated the replacement, and the release gate reported the
+    # material data confirmed, while every solve continued to evaluate the bulk
+    # fit because `use_index_override` defaults to false and no design set it.
+    #
+    # Enabling it on that cross-section moved the bare index by 1.18 %, the
+    # electro-optic overlap by 2.46 %, the mirror tuning by 4.56 % and the
+    # grating index perturbation by -19.3 %, so the coupling constant and every
+    # quantity built on it move with it.
+    #
+    # The provenance gate cannot catch this. It tests whether a material is
+    # tagged as needing confirmation, which is a statement about the tag and not
+    # about the number the solver read.
+    plat = design.platform
+    if not plat.use_index_override:
+        gated = sorted(
+            name for name in {plat.film_material, plat.clad_material,
+                              plat.box_material, plat.substrate_material}
+            if "index_override_1550" in lib[name].spec
+        )
+        if gated:
+            ctx.warn(
+                "these materials declare a measured index that this run did not read: "
+                + ", ".join(gated)
+                + ". `platform.use_index_override` is false, so the Sellmeier fit was "
+                "evaluated instead. Either set the flag and re-solve the period, since the "
+                "Bragg wavelength follows the index, or record that the declared value is "
+                "held for reference and is not in use",
+                key="mode.index_override_declared_and_unread",
+            )
     return payload

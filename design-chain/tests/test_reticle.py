@@ -461,3 +461,57 @@ def test_the_composite_mark_is_suppressed_where_its_layer_is_a_level(tmp_path):
         ly.layer(*d.layout.layer_map["WG"]))).merged()
     assert not mark.is_empty(), "the mark level was not drawn"
     assert (mark & wg).is_empty()
+
+
+# --- the coherence ladder: the monitor a post-gap ladder cannot replace ------
+
+
+def test_the_coherence_ladder_holds_everything_but_the_length():
+    from picchain.monitors import coherence_ladder
+
+    polys, desc = coherence_ladder(
+        lengths_um=[500.0, 2000.0, 5000.0],
+        gap_um=0.970, period_um=1.417, wg_width_um=1.0,
+        post_width_um=0.30, post_length_um=0.30, row_pitch_um=120.0)
+    assert desc["structure"] == "coherence_ladder"
+    assert len(desc["rows"]) == 3
+    # each row's period count follows its length at the single shared period
+    for row in desc["rows"]:
+        assert row["n_periods"] == int(row["length_um"] / 1.417)
+    # one gap for the whole set: the length is the only variable
+    assert desc["gap_um"] == 0.970
+    # guide + 2 posts per period, per row
+    expected = sum(1 + 2 * r["n_periods"] for r in desc["rows"])
+    assert len(polys["WG"]) == expected
+
+
+def test_the_ladder_spans_the_penetration_depth():
+    """The departure from tanh^2(kappa L) needs somewhere to appear, so the
+    default lengths must bracket a several-mm penetration depth."""
+    from picchain.config import Design
+
+    d = Design(meta={"name": "x"}, grating={"period_um": 1.417})
+    ls = d.reticle.monitors.coherence_lengths_um
+    assert min(ls) <= 500.0 and max(ls) >= 10000.0
+    # and it is opt-in, costing die area
+    assert d.reticle.monitors.coherence_ladder is False
+
+
+def test_every_optical_monitor_row_receives_a_port():
+    """A structure that measures guided light and cannot receive it measures
+    nothing. The mask carried four optical instruments with no optical port,
+    the placement comment stating so as if it were a property. Each optical
+    row is now extended to the polish line with a seal-ring opening."""
+    import inspect
+
+    from picchain.stages import s14_reticle
+
+    src = inspect.getsource(s14_reticle)
+    assert "OPTICAL_MONITORS" in src
+    for name in ("kappa_ladder", "coherence_ladder", "loss_cutback",
+                 "electrode_ladder"):
+        assert f'"{name}"' in src
+    # the extension registers a seal-ring opening per row
+    assert "ports.append((y - 10.0, y + 10.0))" in src
+    # and the defect's phrasing is gone from the placement path
+    assert "They carry no optical port" not in src

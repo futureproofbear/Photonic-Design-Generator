@@ -292,3 +292,33 @@ def test_the_scan_finds_the_intersection_of_two_intervals_on_one_control():
     best = max(scored, key=lambda t: (t[1][0], -t[1][1]))
     assert best[0] == 0.70            # the only gap meeting both
     assert best[1][0] == 2
+
+
+def test_the_corner_summary_takes_its_nominal_from_the_nominal_row():
+    """In factorial mode the nominal is not the first row. Reading rows[0]
+    printed a corner's value under a column headed 'nominal' and computed every
+    spread percentage against it."""
+    import inspect
+
+    from picchain import cli
+
+    src = inspect.getsource(cli)
+    assert 'next((r for r in rows if r["corner"] == "nominal"), None)' in src
+    assert "nom_row" in src
+
+
+
+def test_only_reachable_must_targets_are_added_to_a_corner_sweep():
+    """The corner stage list is derived from the metrics, so adding a mask-level
+    `must` row drags layout and drc into a physics sweep and every corner then
+    fails on something a corner cannot move. Twenty-four of twenty-four failed
+    that way before this was restricted."""
+    import inspect
+
+    from picchain import cli
+
+    src = inspect.getsource(cli)
+    assert "declared_stages" in src and "unreachable" in src
+    assert "properties of the mask rather than of the process point" in src
+    # the reachable ones are still added, which is the original guard
+    assert "they have been added" in src

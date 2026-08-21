@@ -307,17 +307,60 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     # taper, so a feed that left 50 um of straight may leave none.
     feed = cav.feed_length_um - lead_path
     if feed < 10.0:
-        ctx.warn(
+        # RAISED, not floored, from 2026-08-17. Applying the floor silently
+        # redraws the cavity: the drawn facet-to-grating distance exceeds the one
+        # every delay, the Pockels lever and the mode-hop-free range were computed
+        # from, and the discrepancy appears in no metric. It warned from
+        # 2026-08-07 and the warning went unread on four devices of a die.
+        #
+        # A geometry the layout has to correct is a design that has not been
+        # closed, and it is cheap to close: the condition involves only the feed
+        # and the lead-in path, both of which are known before any polygon.
+        raise RuntimeError(
             f"the straight run between the lead-in and the grating is "
-            f"{feed:.1f} um and has been raised to the 10 um floor. The drawn "
-            f"facet-to-grating distance is therefore {lead_path + 10.0:.1f} um "
-            f"against the {cav.feed_length_um:.1f} um the cavity delay was "
-            f"computed from. Open cavity.feed_length_um or tighten "
-            f"layout.facet_bend_radius_um"
+            f"{feed:.1f} um, below the 10 um floor. Drawing it would put the "
+            f"facet-to-grating distance at {lead_path + 10.0:.1f} um against the "
+            f"{cav.feed_length_um:.1f} um the cavity delay is computed from, so "
+            f"the drawn device would not be the modelled one. Set "
+            f"cavity.feed_length_um to at least {lead_path + 10.0:.1f} um, or "
+            f"tighten layout.facet_bend_radius_um"
         )
-        feed = 10.0
     out["WG"].append(_rect(z, -wg_width / 2, z + feed, wg_width / 2))
     z += feed
+
+    # --- the intracavity phase section -------------------------------------
+    #
+    # A quantity declared in the design file is not on the mask until a polygon
+    # carries it. The cavity stage models this section, and until it is drawn
+    # the mask is the one without it.
+    #
+    # It sits between the feed and the grating: passive guide, its own electrode
+    # pair, its own pads. The gap is its own and is typically far tighter than
+    # the mirror's, a phase section carrying no Bragg posts to clear.
+    ps = getattr(cav, "phase_section", None)
+    if ps and ps.enabled and ps.length_um > 0:
+        p0 = z
+        out["WG"].append(_rect(p0, -wg_width / 2, p0 + ps.length_um, wg_width / 2))
+        if e.enabled:
+            for sgn in (-1, 1):
+                y_in = sgn * ps.gap_um / 2
+                y_out = y_in + sgn * ps.width_um
+                out["METAL"].append(
+                    _rect(p0, min(y_in, y_out), p0 + ps.length_um, max(y_in, y_out))
+                )
+                pad = lay.bond_pad_um
+                out["PAD"].append(
+                    _rect(p0 + ps.length_um / 2 - pad / 2, min(y_out, y_out + sgn * pad),
+                          p0 + ps.length_um / 2 + pad / 2, max(y_out, y_out + sgn * pad))
+                )
+                side = "L" if sgn < 0 else "R"
+                texts.append((f"P_{side}_PAD", p0 + ps.length_um / 2, y_out + sgn * pad / 2))
+                texts.append((f"P_{side}_ELEC", p0 + ps.length_um * 0.25, (y_in + y_out) / 2))
+        z += ps.length_um
+        # a gap in the metal, so the phase and mirror electrodes stay separate
+        # nets and can be driven independently
+        z += ps.separation_um
+        out["WG"].append(_rect(z - ps.separation_um, -wg_width / 2, z, wg_width / 2))
 
     # --- grating: straight waveguide + post pairs ---
     g0 = z
@@ -349,8 +392,8 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
             out["METAL"].append(
                 _rect(g0, min(y_in, y_out), g0 + drawn_length, max(y_in, y_out))
             )
-            # bond pad
-            pad = 80.0
+            # bond pad, sized from the design rather than from a literal
+            pad = lay.bond_pad_um
             out["PAD"].append(
                 _rect(g0 + drawn_length / 2 - pad / 2, min(y_out, y_out + sgn * pad),
                       g0 + drawn_length / 2 + pad / 2, max(y_out, y_out + sgn * pad))
@@ -369,12 +412,14 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     # the electrodes alone would leave the lead-in outside the etch-clear region.
     pad_y = (geom.electrode_gap_um / 2 + geom.electrode_width_um + 30.0) if e.enabled else 30.0
     pad_y = max(pad_y, lead_excursion + 30.0)
-    # The bond pads reach 80 um beyond the outer electrode edge, and the figure
-    # above allowed only 30. The floor plan therefore stopped at 58.8 um while
-    # the pads ran to 103.8, and the foundry runset reported the pads as lying
-    # outside the usable area. Sized off the pads as well.
+    # The bond pads reach `layout.bond_pad_um` beyond the outer electrode edge,
+    # and the figure above allowed only 30. The floor plan therefore stopped at
+    # 58.8 um while the pads ran past it, and the foundry runset reported the
+    # pads as lying outside the usable area. Sized off the pads as well, and
+    # from the same field the pads are drawn from so that the two cannot drift.
     if e.enabled:
-        pad_y = max(pad_y, geom.electrode_gap_um / 2 + geom.electrode_width_um + 80.0 + 20.0)
+        pad_y = max(pad_y, geom.electrode_gap_um / 2 + geom.electrode_width_um
+                    + lay.bond_pad_um + 20.0)
     out["SLAB"].append(_rect(-5.0, -pad_y, z_end + 5.0, pad_y))
     out["FLOORPLAN"].append(_rect(-5.0, -pad_y - 5.0, z_end + 5.0, pad_y + 5.0))
 

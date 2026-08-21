@@ -32,17 +32,38 @@ is left in the project.**
    * does it reproduce a parameter set that identifies a delivered design?
 
    A candidate is admissible only where the answers are yes, no, no, no.
-4. Classify each admissible candidate:
+4. Classify each admissible candidate by kind:
    * **physics or invariant** — belongs in the ledger, and frequently also in a
      skill;
    * **procedural** — belongs in the relevant skill;
    * **toolchain defect** — belongs in the ledger under the defect section, and
      requires a closed-form test in `design-chain/tests/`;
    * **not yet a lesson** — true only of this design. Leave it in the project.
-5. Draft each entry. State the physics, not the instance. Where a number is
+5. **Place each admissible candidate in a tier.** The ledger records every
+   lesson in full and is the evidence. A lesson whose operative instruction is
+   general enough to be read before every design activity also earns a rule in
+   [`rules/`](../../rules/), and the tier discipline in
+   [`rules/README.md`](../../rules/README.md) governs which folder. Answer
+   explicitly, and take the **narrowest tier that remains true**:
+
+   * **generic** — holds for any photonic design on any platform with any tool;
+   * **platform** — holds for one film stack and its process, on any tool;
+   * **tool** — holds for one solver or engine, on any platform;
+   * **ledger only** — the evidence is worth keeping and the instruction is
+     already covered by an existing rule, or is too narrow to be a rule.
+
+   Where a candidate could sit in more than one tier, say so and choose the
+   narrower. A fact promoted above its truth will misinform a design lacking the
+   context it depends on. A sidewall sensitivity measured on one film stack is a
+   platform fact; a solver boundary condition is a tool fact; neither is generic.
+
+6. **Search the target tier before adding a file.** Where the finding refines an
+   existing rule, amend that rule and cite the new evidence. Two files on one
+   subject will drift, and the second will be believed.
+7. Draft each entry. State the physics, not the instance. Where a number is
    quoted, it must be one that derives from physics or from a measured
    sensitivity, never one that derives from a requirement.
-6. Propose the corresponding test. A lesson that is recorded but not enforced
+8. Propose the corresponding test. A lesson that is recorded but not enforced
    will be relearned.
 
 ## Sanitisation Examples
@@ -73,12 +94,19 @@ by narrowing a project's term list.
 Return:
 
 1. the proposed ledger entries, drafted in full and ready to append;
-2. the proposed skill amendments, quoted as the exact text to be inserted and the
+2. the proposed rule additions or amendments, each naming its tier, the file it
+   belongs in, and whether it amends an existing rule or creates one;
+3. the proposed skill amendments, quoted as the exact text to be inserted and the
    file it belongs in;
-3. the proposed tests, one per lesson that admits enforcement;
-4. the candidates **rejected** on IP-boundary grounds, described only by
+4. the proposed tests, one per lesson that admits enforcement;
+5. the candidates **rejected** on IP-boundary grounds, described only by
    their class and never by their content, so that the reviewer knows something
    was withheld and can judge whether it should have been.
 
-Item 4 is not optional. A harvest that reports no rejections has probably not
+Item 5 is not optional. A harvest that reports no rejections has probably not
 applied the test.
+
+For each proposed rule, state the tier that was chosen and the tier that was
+rejected, with the reason. A tier decision recorded is a decision that can be
+revisited when a second design shows the statement to be narrower or broader
+than it appeared.

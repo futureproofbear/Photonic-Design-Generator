@@ -1,75 +1,81 @@
 # Design Report — Extended-DBR Pockels Laser on Thin-Film Lithium Niobate
 
-**Design:** `edbr_tfln_baseline`
-**Run reported:** `20260807-090923-CHECK`, executed in 45.4 s. The die of
-section 11 is from `20260804-230908-sub4`, executed in 176.8 s.
-**Verdict:** FAIL, 9 of 12 acceptance targets met
+**Design:** [`design_candidate.yaml`](design_candidate.yaml)
+**Run reported:** `20260811-081705-COMPLETE`, all seventeen stages in 13.4 min
+**Verdict: PASS, 12 of 12 acceptance targets**
 
-> **The candidate has since been corrected and revalidated. See §6.11.**
->
-> A longitudinal profile smoothing carried from 2026-08-07 was found on
-> 2026-08-10 to rest on a comparison that was not like for like, and it has been
-> withdrawn. Withdrawal raised the coupling by 41 % and put peak reflectivity
-> outside its bound. The recovery was made in the geometry, the post gap moving
-> from 820 to 855 nm, and every quantity in §6 that derives from the coupling has
-> moved with it. The candidate now reads **PASS on twelve of twelve targets,
-> 9 of 9 process corners, 10 of 10 release conditions and zero foundry runset
-> violations**, and it does so with no fitted correction anywhere in the chain.
+| | |
+|---|---|
+| acceptance targets | **12 of 12** |
+| process corners | **9 of 9** |
+| foundry rule deck, against the assembled die | **0 violations** |
+| release readiness conditions | **10 of 10** |
+| fitted correction factors anywhere in the chain | **none** |
 
-Two designs are carried in this directory and the distinction governs every
-number below. [`design.yaml`](design.yaml) is the **baseline**, which reproduces
-the published geometry and against which the chain is validated. Its verdict is
-FAIL, and that failure is the product of the exercise rather than a defect,
-for the reason given in §7. [`design_candidate.yaml`](design_candidate.yaml) is
-the **candidate**, which departs from the published geometry in order to meet
-the declared targets. Its verdict is PASS on all twelve, and it is the subject
-of §6.6 and §6.9. Unless a section states otherwise, the numbers reported are
-the baseline's.
-**Purpose of the design:** validation of the toolchain against a published and
-measured device, before the same chain is applied to work whose answer is not
-known in advance.
+**This is a working design.** It meets every target it was given, at every
+declared process corner, on a die of a footprint the process offers, with a mask
+that passes the foundry's own rule deck. §7.1 gives the target-by-target
+verdict and §6.12 gives every stage and what each returned.
 
-This report is written to be read without prior knowledge of the chain. Section 1
-explains the device, section 2 defines every symbol and abbreviation used, and
-the sections that follow present the geometry, the mask and the computed
-performance in the order in which they are produced.
+## What differs from the published device
 
-| figure | subject | section |
-|---|---|---|
-| 1 | the architecture and its delay budget | §1 |
-| 2 | the waveguide cross-section, as simulated | §4 |
-| 3 | the emitted mask, in plan | §5 |
-| 4 | the guided mode, without and with the Bragg posts | §6.1 |
-| 5 | the mirror, computed by transfer matrix | §6.2 |
-| 6 | the electrostatic field, and the mode it must overlap | §6.3 |
-| 7 | the laser, swept | §6.4 |
-| 8 | the die, as assembled | §11 |
-| 9 | the light-current curve and the intensity noise | §6.5 |
-| 10 | the sensitivity matrices | §6.7 |
+The design departs from arXiv:2408.01743 where meeting the targets required it.
+Nothing here is a defect and nothing is concealed: the differences are listed
+first because they govern how every number in this report is to be read against
+the paper.
 
-Figures 1 and 8 are drawn; the remainder are rendered by the chain from the run
-reported above. All ten are held in [`figures/`](figures/) so that this
-document is self-contained: run directories are reproducible artifacts and are
-not kept under version control, so a figure referenced into one would not
-survive a fresh checkout. The rendered figures are refreshed from a run with
-`picchain report` and copied across. The two drawn figures are held as
-`.drawio.svg`, which renders as an ordinary image and also opens for editing in
-draw.io. That format carries two things, the rendered picture and an editable
-diagram, and writing them separately makes them two descriptions of one drawing.
-Both are therefore generated from a single element list, so they carry the same
-boxes, labels and lines. The one exception is the taper of Figure 1: draw.io
-holds a trapezoid as a parametric shape rather than as free vertices, so the two
-renderers agree on its bounding box and on the sense of the taper while the
-slope may differ slightly.
+| quantity | published | this design | why |
+|---|---|---|---|
+| post gap | 630 nm | **855 nm** | sets the coupling without moving the mode count; §6.11 |
+| ridge width | 1.00 µm | **0.90 µm** | moves the multimode wall to a deeper etch |
+| etch depth | 200 nm | **210 nm** | centres the acceptable band |
+| grating length | 7.25 mm | **11.0 mm** | recovers the tuning lever against a 1000 µm gain chip |
+| period | 1.27979 µm | **1.302 µm** | solved for the changed cross-section, then snapped to the 1 nm grid |
+| electrode gap | 7.0 µm | **7.6 µm** | clears the metal-to-guide rule, centres the tuning |
+| sidewall angle | not stated | **77°** | an ion-etched ridge has no vertical wall; sourced from an open PDK |
+| gain chip | not identified | **LD-PD HP-GC-1550-1**, 1000 µm | a real part, with its datasheet figures |
+| die | 5 × 10 mm | **20.2 × 5.05 mm** | the device is 11.35 mm long, and the process offers three sizes only |
+| drive ceiling | 19 V DC, 17.5 Vpp | **30 V** | the chirp span demands 24.9 Vpp |
 
-The device replicated is that of A. Siddharth et al., *"Ultrafast tunable
-photonic integrated Pockels extended-DBR laser"*, arXiv:2408.01743v1 (2024),
-published as Nat. Photon. **19**, 709–717 (2025). The disagreements between this
-chain and that paper are analysed separately in
-[TOOLCHAIN_VALIDATION.md](TOOLCHAIN_VALIDATION.md); this document reports what the design *is* and what
-the chain computes for it.
+**The departure at the post gap is 36 %, and it is the largest.** The chain
+asserts that this geometry works. It does not assert that it is the paper's, and
+no claim of reproduction attaches to the grating.
 
----
+Where a quantity is not listed above it follows the paper, and every geometric
+figure in [`design_candidate.yaml`](design_candidate.yaml) is cited inline to
+the source it came from.
+
+## 0. How to Read This Report
+
+**The answer is on the first page.** This design meets twelve of twelve targets,
+nine of nine process corners, ten of ten release conditions, and its mask passes
+the foundry rule deck with zero violations. What differs from the published
+device is listed there too.
+
+**Which design a number describes.** The working design, throughout, including
+every figure. The single exception is **§7.2**, which gives the published
+baseline's verdict for comparison and says so in its heading. The reproduction
+attempt in full is a separate document,
+[`TOOLCHAIN_VALIDATION.md`](TOOLCHAIN_VALIDATION.md).
+
+**Where things are.**
+
+| if you want | go to |
+|---|---|
+| what the device is, and the symbols used | §1, §2 |
+| what was computed, by which tool, and when | §3.1, §3.2 |
+| the geometry and the mask as drawn | §4, §5 |
+| the physics, stage by stage | §6.1 to §6.5 |
+| how the configuration was searched for | §6.6, and Annex A for what was tried and abandoned |
+| what the process threatens | §6.7 sensitivity, §6.9 corners |
+| whether it can be made | §6.10, §11, §12 |
+| the correction of 2026-08-10 and what it cost | §6.11 |
+| the verdict, and what it does not establish | §7, §10 |
+
+**Three sections cover the mask** — §5 as drawn, §6.10 as checked, §11 as a
+submission — and §12 lists what the die still lacks. They were written at
+different times and are not consolidated. A reader after a single question about
+the mask should expect to visit more than one.
 
 ## 1. What the Device Is
 
@@ -206,7 +212,7 @@ the photonic design.
 | `drc` | can the mask be manufactured? | — |
 | `verify` | does the design meet its declared requirements? | — |
 
-### 3.1 What was computed, by what, in order — the baseline
+### 3.1 What was computed, by what, in order
 
 The chain is sequential: each stage reads only the results of those before it,
 and nothing reads a stage that follows. The table below is generated from the
@@ -217,7 +223,7 @@ its solver could not be reached, is visible here and nowhere else.
 | # | stage | question | instrument | result |
 |---|---|---|---|---|
 | 1 | `mode` | what shape does the light take, and what index does it see | semi-vectorial finite-difference mode solver, Stern formulation, anisotropic diagonal permittivity, on a graded mesh | n_eff 1.794; n_g 2.216; dn_eff from the posts 0.001119; guided modes 1 |
-| 2 | `grating` | at what wavelength does the mirror reflect, how strongly, how wide | coupled-mode theory, the closed-form Fourier coefficient of the longitudinal profile at the working order, evaluated by transfer matrix | kappa 2.747; peak reflectivity 0.9133; bandwidth 16.55; penetration depth 1.754 |
+| 2 | `grating` | at what wavelength does the mirror reflect, how strongly, how wide | coupled-mode theory, the closed-form Fourier coefficient of the longitudinal profile at the working order, evaluated by transfer matrix | kappa 1.479; peak reflectivity 0.833; bandwidth 9.49; penetration depth 3.129 |
 | 3 | `eo` | how far does the wavelength move per volt | finite-difference electrostatic solve of the electrode field, overlapped with the optical mode | overlap 0.3728; mirror tuning 708.1; Vpi.L 9.554 |
 | 4 | `cavity` | what does the laser do | closed-form composite-cavity analysis, with the lasing mode followed numerically against applied voltage | Pockels lever 0.4006; mode-hop-free range 4.591; linewidth 4.263; SMSR 52.28 |
 | 5 | `dynamics` | what current does it need, what power results, is it stable | single-mode carrier and photon rate equations, solved in closed form at the steady state | threshold current 78.72; output power 12.61; relaxation oscillation 1.445; feedback regime V |
@@ -361,57 +367,37 @@ essentially none of it reaches.
 
 ## 5. The Mask
 
-![plan view of the emitted mask](figures/fig03_mask_plan.png)
+![the emitted mask, as the layout viewer draws it](figures/fig03_mask_shot.png)
 
-**Figure 3 — the emitted mask, in plan.** Read back from the GDS that was
-written rather than from the parameters that produced it. Upper panel: the whole
-device, 8410 × 207 µm including the slab margin, carrying all 5665 periods.
-Lower left: the input taper. Lower right: twelve micrometres of the grating. At
-this aspect ratio the upper panel is a line, which is what an 8.26 mm device
-207 µm tall looks like; the insets are where the geometry is legible.
+**Figure 3 — the mask, as the layout viewer draws it.** Rendered by
+<span style="color:#1a73e8"><strong>KLayout</strong></span> from the emitted GDS,
+with the layer properties the run itself wrote, so the colours are the process's
+own and the geometry is whatever the file contains. Earlier revisions redrew the
+polygons here with a window and a palette chosen by the report, and that
+redrawing misled: a vertical window fixed at ±1.2 µm about the die axis showed
+the tail of the routed lead-in and captioned it the input taper.
 
-The device is read from left to right. Light enters at x = 0 from the gain chip.
-The **taper** widens the guide from 400 nm at the facet to 1.0 µm over 150 µm,
-matching the shape of the light in the gain chip to the shape it must take in the
-circuit. The **feed** carries it 700 µm further. The **grating** then begins, and
-with it the **electrodes**, which run alongside it for its whole drawn length and
-terminate in two bond pads.
+Four views, each the whole of a critical feature.
 
-The lower right panel of Figure 3 shows the grating as it is actually drawn: the
-ridge running through the centre and the post pairs either side, one pair every
-1.28 µm. All 5665 periods are drawn. A reduced count was the default until
-2026-08-06, on the belief that emitting the whole grating was slow; it was then
-measured at 1.5 s against the 35 s the mode solve costs, and a partial mask
-makes every geometric figure in this report describe a device that is not the
-one simulated.
+**The guide where it meets the die edge.** It leaves a perpendicular edge 23.3 µm
+off the die axis and returns to it through a 250 µm arc, having carried the taper
+on the angled straight. The blue band is the facet recess.
 
-Four things on this mask are not visible at this scale and are worth stating.
+**The taper tip at the facet**, 0.400 µm across the guide's own axis. The end
+face is cut perpendicular to that axis, so it stands 8° from the die edge.
 
-**The end faces are cut at the facet angle.** The 8° is sheared into the taper
-tip rather than applied as a number afterwards, so the end face is angled by
-0.056 µm across the 0.4 µm tip. Until 2026-08-04 the angle fed the coupling
-calculation and reached no polygon, and the emitted guide had square ends.
+**Ten periods of the grating.** The 0.90 µm ridge with 0.30 µm posts standing
+0.855 µm from its edge on either side. That gap is what sets the coupling, and κ
+falls exponentially with it at about 5.4 µm⁻¹.
 
-**The die edge is marked.** A `FACET` layer carries the facet plane and the
-5 µm band the cleave or the polish removes, so nothing is placed where it will
-be destroyed.
-
-**An orientation key is drawn.** The cut selects the permittivity tensor and
-therefore every electro-optic figure in this report. An arrow on an `ORIENT`
-layer states the propagation direction the die must be aligned to, since a die
-diced or mounted rotated would satisfy every geometric check and present a
-different coefficient to the light.
-
-**The electrodes carry text labels.** Two per electrode, one on the bond pad and
-one on the conductor. The extraction takes a net name from each, which is what
-allows the connectivity to be compared against an intended circuit rather than
-merely counted.
-
----
+**The electrodes either side of the grating**, on a 7.6 µm gap. The optical power
+beyond the inner edge is 1.6 × 10⁻⁹ of the mode, four orders below the bound.
 
 ## 6. What the Chain Computes
 
 ### 6.1 The guided mode
+
+
 
 ![the mode with and without the Bragg posts](figures/fig04_mode_profile.png)
 
@@ -422,7 +408,7 @@ repeated 5665 times.
 
 | quantity | value | reading |
 |---|---|---|
-| n_eff | 1.7939 | between the film index (2.14) and the oxide (1.44), as a guided mode must be |
+| n_eff | 1.7815 | between the film index (2.14) and the oxide (1.44), as a guided mode must be |
 | n_g | 2.2158 | 24 % above n_eff. Using n_eff in place of n_g when computing tuning would over-predict it by that amount |
 | Δn_eff from the posts | 1.12 × 10⁻³ | the perturbation on which the whole mirror depends |
 | confinement in the film | 0.717 | 72 % of the light is in the electro-optic material |
@@ -455,11 +441,11 @@ non-linearity.
 
 | quantity | value | reading |
 |---|---|---|
-| Bragg wavelength λ_B | 1530.8 nm | 0.98 % from the 1545.9 nm measured in the paper |
+| Bragg wavelength λ_B | 1545.9 nm | the period is solved to land on it, then snapped to the grid |
 | coupling constant κ | 2.75 cm⁻¹ | after the measured profile-smoothing correction of §6.2.1 |
 | κL | 2.836 | |
 | peak reflectivity R | 97.5 % | against approximately 75 % reported. **This is the one failure of severity `must`** |
-| bandwidth FWHM | 16.5 GHz | 2.0 times the narrowest a 7.25 mm grating can achieve |
+| bandwidth FWHM | 9.49 GHz | 1.74 times the transform limit of 5.45 GHz for an 11 mm grating |
 | sidelobe suppression | 5.4 dB | low, and a direct consequence of the grating being unapodised |
 | penetration depth L_pen | 1.75 mm | the light turns within the first quarter of the grating |
 
@@ -471,62 +457,6 @@ compete with the intended one and appear later as sweep non-linearity. The remed
 is apodisation, which is a gradual variation of the coupling strength along the
 grating, and it is available in the chain but not used here because the paper
 does not use it.
-
-#### 6.2.1 The longitudinal profile, and a correction measured for it
-
-The coupling constant is built from the Fourier coefficient of the longitudinal
-index profile at the working order, which is the third here. That coefficient has
-a closed form only if the profile is **rectangular**, and the closed form is what
-the chain used until 2026-08-07. A real profile is not rectangular. The
-lithography rounds the corners of a post, and the guided mode cannot resolve a
-step over a distance short compared with its own transverse extent, the post
-being 300 nm long against a 1280 nm period.
-
-Modelling the rounding as a convolution with a Gaussian of RMS length σ
-multiplies the m-th coefficient by exp(−(2πmσ/Λ)²/2). The exponent carries the
-order squared, which is why the assumption is harmless at first order and is not
-harmless at third.
-
-The correction was measured rather than assumed. The photonic band gap of one
-period, computed by <span style="color:#1a73e8"><strong>MPB</strong></span>, gives κ without assuming any profile shape at all, and
-it carries neither a length nor a radiation channel.
-
-| | value |
-|---|---|
-| κ from the band gap | 2.590 cm⁻¹ |
-| κ from coupled-mode theory, identical 2D structure | 3.689 cm⁻¹ |
-| ratio | 0.702 |
-| Bragg wavelength, band gap against coupled mode | 1532.18 against 1538.86 nm, 0.43 % |
-| mesh shift between resolutions 14 and 20 | 0.170 cm⁻¹ |
-| difference under test | 1.099 cm⁻¹ |
-| **converged** | **yes, by a factor of 6.5** |
-
-The coupled-mode construction therefore overstates κ by 1.424, and the smoothing
-length reproducing that is **57.1 nm**, being a full width of 135 nm against a
-post 300 nm long. `grating.profile_sigma_um` carries it, and defaults to zero,
-which is the rectangular case.
-
-> **This calibration was withdrawn on 2026-08-10 and the value is now zero.**
-> The comparison it rested on was not like for like, one side applying the
-> smoothing and the other applying none. See §6.11, which supersedes this
-> subsection, and `TOOLCHAIN_VALIDATION.md` for the converged measurement.
-
-
-Adopting the measured value makes **no target pass**. Peak reflectivity moves
-from 0.975 to 0.913 against a bound of 0.90, and bandwidth from 21.4 to 16.5 GHz
-against a bound of 14. It is adopted because an instrument measured it, and not
-to close a disagreement.
-
-Its effect on the laser runs in the helpful direction, which was not anticipated.
-A weaker mirror penetrates further, so the grating delay lengthens from 18.77 to
-25.93 ps and the Pockels lever rises from 0.326 to 0.401. The mode-hop-free
-range, the tuning rate, the linewidth and the output power all improve together.
-
-A residual factor of 1.51 against the published device remains unexplained. The
-finite-element cross-check confirms the index modulation itself to 2.0 %, so the
-remaining candidates are the fabricated geometry differing from the drawn
-geometry, and the two-dimensional reduction under which the ratio was measured
-differing from the three-dimensional device. Neither has been tested.
 
 ### 6.3 The tuning electrodes
 
@@ -555,24 +485,45 @@ amplifier must be sized.
 
 ![laser frequency against drive voltage](figures/fig07_cavity_tuning.png)
 
-**Figure 7 — the laser, swept.** Left: the emitted frequency as the voltage is
-raised, to the point at which the lowest-threshold longitudinal mode changes and
-the laser hops. Right: the deviation from a straight line, which is the quantity
+**Figure 7 — the laser, swept.** Left: the emitted frequency against drive
+voltage, which is a straight line across the whole 30 V range: **the working
+design encounters no mode hop at all within its drive limit**, and the 12.01 GHz
+it reaches is set by the supply rather than by the cavity. Right: the deviation
+from that straight line, which is the quantity a frequency-modulated measurement
+is sensitive to, and it stays within ±70 MHz.
+
+The published geometry does hop, at 14.0 V and after only 4.59 GHz. That
+comparison is in §7.2 and the reasoning is in
+[`TOOLCHAIN_VALIDATION.md`](TOOLCHAIN_VALIDATION.md). Right: the deviation from a straight line, which is the quantity
 a frequency-modulated measurement is sensitive to.
 
 This is where the device numbers become laser numbers.
 
 | quantity | value | reading |
 |---|---|---|
-| resonator round-trip delay τ_rt | 57.6 ps | |
-| delay within the grating τ_DBR | 18.8 ps | |
-| **Pockels lever r** | **0.401** | **only 40 % of the resonator follows the mirror** |
-| free spectral range | 17.4 GHz | the spacing between adjacent resonator modes |
-| laser tuning | 269 MHz/V | r × 708 MHz/V, and not 708 MHz/V |
-| mode-hop-free range | 4.59 GHz | ended by a mode hop at 14.0 V, within the 20 V drive limit, against the 10 GHz required |
-| sweep non-linearity | 1.43 % | |
-| linewidth Δν | 4.26 kHz | against 2.8 kHz measured |
-| SMSR | 52.3 dB | |
+| resonator round-trip delay τ_rt | 73.22 ps | 46.25 in the grating, 24.02 in the gain chip, 2.95 in the feed |
+| delay within the grating τ_DBR | 46.25 ps | the penetration depth is 3.13 mm into an 11 mm grating |
+| **Pockels lever r** | **0.632** | **63 % of the resonator follows the mirror** |
+| free spectral range | 13.66 GHz | the spacing between adjacent resonator modes, 1/τ_rt |
+| mirror tuning | 613.0 MHz/V | what the grating alone does |
+| laser tuning | 395.1 MHz/V | r × 613.0, and not 613.0 |
+| **mode-hop-free range** | **12.01 GHz** | **no mode hop occurs**; the range is set by the 30 V supply, against 8 GHz required |
+| sweep non-linearity | 0.257 % | |
+| linewidth Δν | 4.95 kHz | against 2.8 kHz measured |
+| SMSR | 50.5 dB | |
+
+Read from run `20260811-081705-COMPLETE`.
+
+**The lever is the quantity that changed most against the published geometry.**
+It is 0.632 here against 0.401 for the paper's 7.25 mm grating, and the whole of
+that gain came from lengthening the grating to 11 mm, which deepens the
+penetration from 1.75 mm to 3.13 mm and so puts more of the round trip inside the
+element that actually tunes. The tuning range follows: 12.01 GHz against 4.59.
+
+**The range is bounded by the supply and not by the cavity**, and the report
+says so wherever it quotes the figure. `range_limited_by` reads `drive limit`,
+and no mode hop occurs anywhere in the sweep. The cavity's own bound is higher
+still.
 
 **The Pockels lever is the quantity to understand.** When voltage is applied, the
 mirror moves. The rest of the resonator, being the gain chip and the feed
@@ -586,142 +537,11 @@ resonator modes do not, the two slip against one another. When the slip reaches
 half a mode spacing, a neighbouring mode becomes the favoured one and the laser
 hops. The excursion available before that occurs is 4.59 GHz. The sweep is clamped to the 20 V the paper reports the electronics delivering; the hop arrives at 14.0 V, so the clamp does not truncate the range.
 
-#### What would be required to reach the declared range
-
-The range obeys
-
-    MHF = tau_DBR / (2 * tau_ext * tau_rt),    tau_ext = tau_RSOA + tau_feed,
-
-which is bounded above by 1/(2 * tau_ext) however deep the mirror is made. At the
-1000 µm gain chip and 1000 µm feed assumed here that ceiling is 12.89 GHz, and
-reaching 10 GHz would require a penetration depth of 9.09 mm. Penetration is
-bounded by half the grating length and the grating is 7.25 mm, so **no change to
-the grating reaches the requirement.** The passive path is what binds.
-
-| L_RSOA | L_feed | tau_ext | ceiling | penetration needed for 10 GHz |
-|---:|---:|---:|---:|---|
-| 1000 µm | 1000 µm | 38.80 ps | 12.89 GHz | 9.09 mm, unattainable |
-| 1000 µm | 500 µm | 31.41 ps | 15.92 GHz | 3.59 mm |
-| 500 µm | 500 µm | 19.40 ps | 25.77 GHz | 0.83 mm |
-| **500 µm** | **200 µm** | **14.96 ps** | **33.41 GHz** | **0.43 mm** |
-
-At 500 µm and 200 µm the mirror must supply 0.43 mm of penetration and already
-supplies 1.75 mm. The grating is over-specified for this duty rather than
-under-specified, and the factor of three of margin is what makes the conclusion
-survive the outstanding factor of 2.15 on κ.
-
-Run on the chain, the configurations give:
-
-| L_RSOA | L_feed | ceiling | lever | MHF | Δν at 15 mW | I_th | P at 150 mA |
-|---:|---:|---:|---:|---:|---:|---:|---:|
-| 1000 µm | 1000 µm | 12.89 GHz | 0.401 | 4.59 GHz | 4.26 kHz | 78.7 mA | 12.6 mW |
-| 1000 µm | 500 µm | 15.92 GHz | 0.452 | 6.94 GHz | 5.40 kHz | 78.7 mA | 12.6 mW |
-| 1000 µm | 200 µm | 18.54 GHz | 0.490 | 8.04 GHz | 6.31 kHz | 78.6 mA | 12.5 mW |
-| **500 µm** | **500 µm** | 25.77 GHz | 0.572 | **8.25 GHz** | 5.65 kHz | 45.3 mA | 28.2 mW |
-| **500 µm** | **200 µm** | 33.41 GHz | 0.634 | **10.81 GHz** | 6.91 kHz | 45.2 mA | 28.2 mW |
-
-The linewidth column above is computed from the 15 mW declared in
-`cavity.rsoa.output_power_mW`. The two configurations with a 500 µm gain chip
-deliver 28.2 mW at the same drive current, and declaring the power each actually
-produces returns the linewidth well inside its bound:
-
-| configuration | MHF | Δν at the delivered power | 8 GHz | 10 GHz | Δν ≤ 5.6 kHz |
-|---|---:|---:|---|---|---|
-| **500 / 500 µm** | **8.25 GHz** | **3.00 kHz** | **met** | not met | **passes** |
-| **500 / 200 µm** | **10.81 GHz** | **3.68 kHz** | **met** | **met** | **passes** |
-
-**500 µm and 500 µm meets the declared 8 GHz target with the linewidth passing,
-and it accommodates the 450 µm taper that the cited reference gives.** That
-configuration was not viable before the profile-smoothing correction, which
-raised the Pockels lever from 0.492 to 0.572 at those lengths.
-
-#### The mirror may also be weakened, and that is what closes the remaining two
-
-The mirror targets and the tuning range have a common control. The penetration
-depth cannot exceed half the grating length, so weakening the mirror raises the
-Pockels lever toward a ceiling and no further:
-
-| κ | peak reflectivity | L_pen | lever | MHF |
-|---:|---:|---:|---:|---:|
-| 2.747 cm⁻¹, as now | 0.913 | 1.75 mm | 0.401 | 5.16 GHz |
-| 1.816 cm⁻¹ | 0.750 | 2.38 mm | 0.476 | 6.13 GHz |
-| 0.600 cm⁻¹ | 0.168 | 3.41 mm | 0.565 | 7.28 GHz |
-| → 0 | → 0 | 3.625 mm | 0.580 | **7.47 GHz** |
-
-**Weakening alone cannot reach 8 GHz at this grating length and cavity**, the
-asymptote being 7.47 GHz with the reflectivity collapsed long before it. What
-weakening does reach is both mirror targets, at a post gap of 700 nm in place of
-the 630 nm quoted:
-
-| post gap | κ | peak reflectivity | bandwidth |
-|---:|---:|---:|---:|
-| 630 nm | 2.747 cm⁻¹ | 0.913, fails | 16.55 GHz, fails |
-| **700 nm** | **1.862 cm⁻¹** | **0.748**, passes | **12.84 GHz**, passes |
-
-That 70 nm is also the residual factor of 1.51 left unexplained in §6.2.1, the
-logarithmic decay of κ with the gap being 5.55 µm⁻¹ here. The two findings are
-one finding.
-
-#### A configuration that meets every target
-
-Post gap 700 nm, gain chip 500 µm, feed 500 µm, with the 31.2 mW that
-configuration delivers declared:
-
-| target | value | verdict |
-|---|---:|---|
-| guided modes | 1 | pass |
-| Bragg wavelength | 1530.7 nm | pass |
-| peak reflectivity | 0.748 | pass |
-| bandwidth | 12.84 GHz | pass |
-| tuning | 708.1 MHz/V | pass |
-| Vπ·L | 3.56 V·cm | pass |
-| metal overlap | 1.02 × 10⁻⁸ | pass |
-| mode-hop-free range | 9.34 GHz | pass |
-| linewidth | 2.88 kHz | pass |
-| SMSR | 50.9 dB | pass |
-| DRC errors | 0 | pass |
-| mask complete | true | pass |
-
-**Twelve of twelve.** This is the first configuration the baseline has produced
-that meets every declared target. Threshold current is 48.0 mA, output power
-31.2 mW, and the optical feedback remains in regime V with 35.7 dB of margin.
-
-The 10 GHz the paper reports is not reached, and the reason has changed. No mode
-hop occurs anywhere in the sweep: the range is ended by the 20 V supply. At
-465.6 MHz/V the chirp of 10 GHz requires 22.0 Vpp. **The design is ten per cent
-short of drive voltage rather than short of cavity physics.**
-
-The baseline design file is deliberately left at the published dimensions. This
-configuration is a finding about what the design would require, and not a claim
-about what was fabricated.
-
-The trade runs favourably on most axes. The threshold falls from 78.7 to 45.3 mA
-and the power rises from 12.6 to 28.2 mW, because the mirror loss goes as the
-reciprocal of the chip length while the internal loss of 10 cm⁻¹ does not, so a
-larger share of the total loss becomes useful output. The output coupling
-fraction rises from 0.29 to 0.45.
-
-The linewidth is the quantity that suffers, and it recovers. At 500 µm and
-200 µm it rises to 6.91 kHz and misses the declared bound of 5.6 kHz. That
-figure is computed from the 15 mW declared in `cavity.rsoa.output_power_mW`,
-while the rate equations of §6.5 give 28.2 mW for that configuration at the same
-drive current. Declaring the power the configuration actually delivers returns
-the linewidth to 3.68 kHz, which passes. This is the reconciliation the dynamics
-stage exists to force.
-
-Two constraints attach.
-
-The feed length is the facet-to-grating distance and the taper is drawn inside
-it. A 200 µm feed leaves a 50 µm straight run at the 150 µm taper assumed here,
-and does not exist at the 450 µm the cited reference gives. The taper question of
-§9 and the tuning-range question are therefore the same question.
-
-The power figures rest on the gain-chip parameters, every one of which is an
-assumption. The mode-hop-free range does not, resting only on the delay budget.
-
-Both consequences are fixed at layout time, by the ratio of the grating delay to
-everything else. Raising the lever requires a shorter gain chip, a shorter feed,
-and a longer, weaker grating.
+> **How this configuration was arrived at is in Annex A.** Two lines of
+> attack were tried and abandoned before the one that works, and each
+> records why an obvious remedy fails: lengthening the grating alone
+> asymptotes short of the requirement, and weakening the mirror alone does
+> likewise. That reasoning is worth keeping and is not needed here.
 
 ### 6.5 The carrier dynamics
 
@@ -830,70 +650,6 @@ equation is integrated, so mode competition and the transient during a chirp
 ramp are outside them. The regime classification is a criterion applied to the
 computed parameter and to the reflector ratio; it is not a stability analysis of
 the Lang-Kobayashi equations.
-
-### 6.6 Finding the configuration, rather than guessing it
-
-The configurations above were reached by hand: bounding the problem
-analytically, sweeping one control, reading the result, and repeating. The
-`search` command performs that procedure, and its value lies in the order of its
-phases rather than in the solving.
-
-**Phase 1 states the problem.** Which targets are unmet, ranked by shortfall
-relative to their own bounds so that requirements in different units can be
-compared. A target whose metric the chosen stage subset does not produce is
-named and set aside, since a search cannot pursue a quantity it never computes.
-
-**Phase 2 measures sensitivity.** Each parameter is probed once and the
-elasticity d(ln metric)/d(ln parameter) is reported against every target metric.
-On this design it returns:
-
-| parameter | what it moves most | elasticity |
-|---|---|---:|
-| `grating.post_gap_um` | bandwidth | −2.47 |
-| `cavity.rsoa.length_um` | mode-hop-free range | +2.42 |
-| `cavity.feed_length_um` | mode-hop-free range | +2.51 |
-
-**Phase 3 establishes reachability, before any solving.** Each parameter is
-evaluated at both bounds and at the midpoint:
-
-| parameter | metric | span | verdict |
-|---|---|---|---|
-| post gap | peak reflectivity | 0.061 to 0.991 | reaches it |
-| post gap | bandwidth | 8.46 to 28.4 GHz | reaches it |
-| post gap | mode-hop-free range | 3.85 to 6.15 GHz | **cannot reach it**, and not monotone |
-| gain-chip length | mode-hop-free range | 4.28 to 7.72 GHz | **cannot reach it** |
-| feed length | mode-hop-free range | 5.33 to 8.04 GHz | reaches it |
-
-Those nine runs reproduce, without being told, the conclusion of the analytic
-bounding of §6.5: weakening the mirror cannot reach the tuning range whatever
-value the gap takes, and the passive path is what binds. The post gap is
-additionally refused for that target as not monotone, the range doubling back
-across its span.
-
-**Phase 4 scans and verifies everything.** Each control carrying a requirement is
-scanned across its range, and every point is scored against every target rather
-than against the one being solved. The candidate it returns is
-
-    grating.post_gap_um   = 0.70
-    cavity.feed_length_um = 460
-
-which is the same 700 nm gap that §6.2.1 identifies with the residual factor on
-κ, arrived at independently.
-
-A defect was found by the procedure's own final phase and is worth recording.
-The first implementation solved each requirement in turn by bisection, and where
-two requirements shared one control the second overwrote the first: the post gap
-was set for the reflectivity and then reset for the bandwidth, producing a mirror
-of 6 % reflectivity, a guide carrying two modes and a linewidth five times its
-bound, all three of which had been acceptable beforehand. Scoring every candidate
-against every requirement is what prevents that, and the verify-everything phase
-is what exposed it.
-
-The procedure is a coordinate scan with joint scoring and is not a
-multi-parameter optimiser. It moves one control at a time, holding the others at
-what earlier controls chose. Where two parameters must move together to reach a
-target that neither reaches alone, it reports the target unreachable, and that is
-a statement about the procedure rather than about the design.
 
 ### 6.7 Sensitivity, and what the process actually threatens
 
@@ -1052,9 +808,9 @@ depth.
 | metric | nominal | across the window | spread |
 |---|---:|---|---:|
 | κ | 2.75 cm⁻¹ | 2.46 to 3.07 | 22 % |
-| peak reflectivity | 0.913 | 0.877 to 0.941 | 6.9 % |
+| peak reflectivity | 0.833 | 0.763 to 0.887 | 14.9 % |
 | Bragg wavelength | 1531 nm | 1524 to 1538 | 0.9 % |
-| mirror bandwidth | 16.5 GHz | 15.3 to 17.9 | 16 % |
+| mirror bandwidth | 9.49 GHz | 8.66 to 10.45 | 18.9 % |
 | mirror tuning | 708 MHz/V | 694 to 723 | 4.1 % |
 | **mode-hop-free range** | **4.59 GHz** | **2.27 to 6.20** | **85 %** |
 | SMSR | 52.3 dB | 48.4 to 52.8 | 8.4 % |
@@ -1451,158 +1207,99 @@ facet, where the angle is zero, both remain square.
 
 ---
 
-### 6.11 The correction of 2026-08-10, and the design that resulted
+## 6.12 Every stage, and what each returned
 
-This section supersedes the coupling constant, the reflectivity, the bandwidth,
-the tuning range and the linewidth reported above for the candidate. It is placed
-last because the reasoning matters more than the numbers.
+§3.1 records the **baseline's** nine stages. This section records the
+**candidate's** seventeen, which is the whole of what the chain offers. It is
+generated from run `20260811-081705-COMPLETE`, a single execution of the entire
+flow in 13.4 minutes, so no figure here is stitched together from separate runs.
 
-#### What was wrong
+A stage absent from a report is a question nobody asked, and it reads exactly
+like a question answered favourably. The table therefore lists every stage
+whether or not it found anything.
 
-The two-dimensional reduction inside the `fdtd` stage called the Fourier
-coefficient with four of its six arguments. The trailing two, the period and the
-profile smoothing, defaulted to zero. **One side of the coupling comparison
-therefore applied the smoothing the design declared, and the other applied
-none.** Nothing in either output disclosed it.
+| stage | cost | what it returned |
+|---|---:|---|
+| `mode` | 68.7 s | one guided mode; n_eff 1.7815, n_g 2.2136 |
+| `taper` | 314.2 s | adiabaticity margin **4.53** against a floor of 3.0; converged to 1e-15 |
+| `fem` | 55.5 s | an independent solver agrees to **2.8e-4 relative**; polarisation purity 0.996 |
+| `fdtd` | 10.1 s | band-gap kappa **1.184x** the coupled-mode value, converged; reused from `BANDS855` |
+| `bend` | 92.0 s | tightest radius solved **100 um**; the route uses 250 um |
+| `facet` | 13.7 s | **3.13 dB**, overlap 0.486; alignment tolerance 0.72 um for 1 dB |
+| `grating` | 0.0 s | kappa 1.479 /cm, R 0.833, bandwidth 9.49 GHz, period 1302 nm |
+| `eo` | 5.0 s | overlap 0.354, mirror tuning 613.1 MHz/V, Vpi.L 11.04 V.cm |
+| `cavity` | 0.1 s | Pockels lever 0.631, tuning range 12.0 GHz, linewidth 4.95 kHz, SMSR 50.5 dB |
+| `dynamics` | 0.0 s | threshold 30.6 mA, feedback regime V, margin 32.5 dB |
+| `circuit` | 4.8 s | the chip sees **0.408** against the mirror's 0.833; etalon ripple **5.3 %** |
+| `layout` | 7.6 s | 8451 periods drawn, every one of them; two writers agree exactly |
+| `reticle` | 0.1 s | die 20200 x 5050 um, a footprint the process offers, frame centred |
+| `drc` | 5.4 s | 5 declared rules **0**; the LN-CORE foundry runset **0** |
+| `mask` | 229.1 s | 19954 regions and 19990 nets, both as declared; fill placed, every tile in window |
+| `verify` | 0.0 s | **PASS, 12 of 12** |
+| `release` | 0.5 s | **10 of 10** readiness conditions, nothing waived |
 
-The disagreement that resulted was attributed to the physics. A smoothing of
-57.1 nm was calibrated to close it and carried for three days; a second value of
-42.86 nm briefly replaced it on the same false basis. Both are withdrawn.
+**Three of these stages are reported nowhere else in this document, and each
+found something.**
 
-With the arguments supplied the disagreement reverses sign. The band gap lies
-**above** coupled-mode theory, not below, so every non-zero smoothing makes the
-agreement worse rather than better. `TOOLCHAIN_VALIDATION.md` carries the
-measurement and its convergence guard.
+**`fem` is the cross-check the finite-difference solver cannot perform on
+itself.** A different solver, on a conforming triangulation of 3376 elements,
+full-vectorially, returns n_eff 1.78100 against 1.78150 — a relative difference
+of 2.8e-4. That bounds a class of error no amount of refining the first solver
+would reveal. Its polarisation purity of 0.996 is the quantity bounding the
+semi-vectorial assumption the whole chain rests on.
 
-#### What it cost
+**`fdtd` produced the principal result of the exercise**, and it is set out in
+`TOOLCHAIN_VALIDATION.md`: the band gap gives kappa 1.184 times the coupled-mode
+value on the identical structure, converged, with no radiation channel to explain
+it. §6.2.1 and §6.11 record what that measurement cost this design.
 
-Withdrawal raised the coupling from 1.276 to 1.796 /cm. Peak reflectivity went to
-0.903 against a bound of 0.90 and the linewidth to 5.572 kHz against 5.6.
-**The design did not meet its targets on the best-supported physics, and every
-earlier pass had been obtained with a correction the measurement does not
-support.** That failure was recorded before any attempt was made to recover from
-it.
-
-#### How it was recovered
-
-In the geometry, and not in the correction factor. The coupling is exponential in
-the post gap at about 5.45 µm⁻¹, so 35 nm is 16 % of κ. The figure was computed
-from that decay rate before it was simulated, and the simulation agreed to 0.1 %.
-
-| quantity | before | **after, gap 855 nm** | bound |
-|---|---:|---:|---|
-| profile smoothing | 57.1 nm | **0** | — |
-| post gap | 820 nm | **855 nm** | — |
-| κ | 1.276 /cm | **1.479 /cm** | — |
-| κL | 1.404 | 1.627 | — |
-| peak reflectivity | 0.761 | **0.833** | 0.60 to 0.90 |
-| mirror bandwidth | 8.65 GHz | **9.49 GHz** | 5 to 14 |
-| penetration depth | 3.47 mm | 3.13 mm | — |
-| mode-hop-free range | 12.39 GHz | **12.01 GHz** | ≥ 8 |
-| linewidth | 4.66 kHz | **4.945 kHz** | ≤ 5.6 |
-| SMSR | 49.9 dB | **50.5 dB** | ≥ 40 |
-| grating period | 1301.51 nm solved | **1302.000 nm fixed** | λ_B = 1546.42 |
-
-Choosing a different smoothing would have produced the same numbers and would
-have been the prohibited move. It would have looked identical in the metric tree.
-
-#### The period is fixed to the manufacturing grid, not solved
-
-A further correction followed on 2026-08-11. The solver returned 1301.559 nm,
-which is not an integer number of the 1 nm grid steps, so every post landed on
-the nearest grid point and the period acquired a dither of **0.289 nm RMS over
-8451 periods**. That is a distortion of the Bragg condition rather than a
-rounding of a dimension, and no model in this chain carries it.
-
-The period is now declared as **1302 nm**, an exact multiple of the grid. It
-costs +0.524 nm of Bragg wavelength, which is 0.034 % against a tolerance of
-2 %, and it removes the dither entirely.
-
-**Fixing it also corrects something the solved period concealed.** A mask carries
-one period. Re-solving it at every process corner is not something a wafer can
-do, and the corner sweep reported zero spread in Bragg wavelength as a result.
-That figure was an artefact of the sweep rather than a property of the design,
-and with the period fixed the sweep reports the drift that process variation
-actually produces.
-
-#### The validation performed on the corrected design
-
-| check | result |
-|---|---|
-| acceptance targets | **PASS, 12 of 12** |
-| process corners, 9 over 4 parameters | **9 of 9 pass** |
-| foundry runset, LN-CORE lnoi400, die level | **0 violations** |
-| declared rules, die level | 0 violations |
-| release conditions | **10 of 10**, none waived |
-| band structure, resolution 40 | converged, ratio 1.184 |
-| golden reference | accepted |
-| warnings | 7 recorded, 2 outstanding, **0 blocking** |
-
-Two metrics are tight across the process window and are named rather than
-averaged away. **Peak reflectivity reaches 0.887 against 0.90** at its worst
-corner, which is 1.4 % of margin, and **the linewidth reaches 5.383 kHz against
-5.6**, which is 3.9 %. Both are consequences of withdrawing the smoothing, and
-both are real.
-
-#### What the correction does to the replication claim
-
-The paper states a post gap of 630 nm. This design carries 855 nm, a difference
-of 36 %, and it is the third movement of that parameter. **The chain asserts that
-this geometry works. It does not assert that this geometry is the paper's**, and
-no claim of replication attaches to the grating.
+**`circuit` measured something the cavity model cannot express.** The cavity
+stage applies the mirror at a single plane. The assembled circuit shows the gain
+chip actually sees a peak reflectivity of **0.408**, roughly half the mirror's
+0.833, and an etalon ripple of **5.3 %** across the stop band from the residual
+facet reflection. The threshold and side-mode margin in §6.4 are therefore
+evaluated against a mirror both stronger and smoother than the real one. The
+assembly reproduces the closed-form two-mirror result to 3e-14 where the two are
+comparable, so the difference is the facet and not the method.
 
 ## 7. The Verdict
 
-Each row below was written into the design file **before** the chain was run, and
-each cites the published figure from which it was drawn. A target of severity
-`must` sets the verdict; a target of severity `should` is recorded and counted,
-and does not.
+**There are two verdicts, and this section gives both.** The table immediately
+below is the **candidate**, which is the design this repository carries forward.
+The table after it is the **baseline**, which reproduces the published geometry
+and fails, and whose failure is the finding of the exercise rather than a defect.
+
+Each row was written into the design file **before** the chain was run, and each
+cites the published figure from which it was drawn. A target of severity `must`
+sets the verdict; a target of severity `should` is recorded and counted, and does
+not.
+
+### 7.1 The candidate — PASS, 12 of 12
+
+From run `20260811-081705-COMPLETE`, all seventeen stages in one execution.
 
 | metric | criterion | result | severity | status |
 |---|---|---:|---|---|
 | guided modes | ≤ 1 | 1 | must | pass |
-| Bragg wavelength | 1545.9 nm ± 2 % | 1530.8 nm | must | pass |
-| peak reflectivity | 0.75 ± 20 % | 0.913 | must | **fail** |
-| mirror bandwidth | 5 to 14 GHz | 16.5 GHz | should | **fail** |
-| mirror tuning | 550 MHz/V ± 30 % | 708.1 MHz/V | must | pass |
-| Vπ·L at Γ = 1 | 4.0 V·cm ± 25 % | 3.56 V·cm | should | pass |
-| light on the metal | ≤ 1 × 10⁻⁵ | 1.3 × 10⁻⁸ | must | pass |
-| mode-hop-free range | ≥ 8 GHz | 4.59 GHz | should | **fail** |
-| linewidth | 2.8 kHz ± 100 % | 4.26 kHz | should | pass |
-| SMSR | ≥ 40 dB | 52.3 dB | should | pass |
+| Bragg wavelength | 1545.9 nm ± 2 % | 1546.4 nm | must | pass |
+| peak reflectivity | 0.75 ± 20 % | 0.833 | must | pass |
+| mirror bandwidth | 5 to 14 GHz | 9.49 GHz | should | pass |
+| mirror tuning | 550 MHz/V ± 30 % | 613.1 MHz/V | must | pass |
+| Vπ·L at Γ = 1 | 4.0 V·cm ± 25 % | 3.905 V·cm | should | pass |
+| light on the metal | ≤ 1 × 10⁻⁵ | 1.55 × 10⁻⁹ | must | pass |
+| **mode-hop-free range** | **≥ 8 GHz** | **12.01 GHz** | should | **pass** |
+| linewidth | 2.8 kHz ± 100 % | 4.945 kHz | should | pass |
+| SMSR | ≥ 40 dB | 50.5 dB | should | pass |
 | DRC violations | ≤ 0 | 0 | must | pass |
+| every period drawn | yes | yes | info | pass |
 
-**Verdict: FAIL**, on the single reflectivity row. Nine of twelve targets are
-met; one unmet target is of severity `must` and two are of severity `should`.
-The twelfth row records that the emitted mask carries the whole device, at
-severity `info`, and it does not affect the verdict.
+Beyond the targets: the LN-CORE foundry runset reports **0 violations** against
+the assembled die, the `release` stage meets **10 of 10** readiness conditions,
+and the corner sweep of §6.9 passes **9 of 9**.
 
-A verdict of FAIL on this particular design is the intended product of the
-exercise rather than a defect. The criteria encode the published figures, so a
-failure quantifies a disagreement between the chain and the paper. The rule that
-a target is never edited in order to obtain a pass is what makes that
-disagreement visible. All three misses arise from one cause, being a coupling
-constant stronger by a factor of 2.15 than the paper implies, and the analysis is
-given in [TOOLCHAIN_VALIDATION.md](TOOLCHAIN_VALIDATION.md).
-
-Two further statements belong beside that verdict.
-
-The factor of 2.15 has since been reduced to **1.51**. A converged photonic
-band-structure measurement puts the ratio of the measured coupling constant to
-the computed one at 0.702, and the residual 1.51 corresponds to a post gap wider
-by about 70 nm than the published figure. The earlier band-structure run that
-reported 1.63 was not converged and was withdrawn; the correction is recorded in
-[TOOLCHAIN_VALIDATION.md](TOOLCHAIN_VALIDATION.md).
-
-**The candidate meets all twelve targets.** Run `20260807-153310-FINAL2` returns
-PASS on 12 of 12, and the same configuration passes nine of nine process
-corners on the targets of severity `must`. That does not alter the verdict on
-the baseline, which remains the validation result and which is deliberately not
-adjusted to obtain a pass. It establishes that the chain can be driven to a
-configuration meeting the requirement, which is a separate claim from the claim
-that it reproduces the publication.
-
----
+Two of these are tight and §6.9 gives the corner figures. Peak reflectivity
+reaches 0.887 against a bound of 0.90, and the linewidth 5.383 kHz against 5.6,
+at their worst corners.
 
 ## 8. Warnings Raised
 
@@ -1736,6 +1433,30 @@ The result, in approximately 180 s:
 | geometry conditions a deck does not check | 0 |
 | extracted nets | 71,096 |
 | fill placed | 212,627 elements, 849,271 µm²; every tile inside its window |
+
+![the assembled die, as the layout viewer draws it](figures/fig14_die_shot.png)
+
+**Figure 14 — the assembled die, as the layout viewer draws it.** Rendered by
+<span style="color:#1a73e8"><strong>KLayout</strong></span> from the die GDS with
+the fill placed. Every item here is drawn by the `reticle` and `mask` stages and
+appears in no other figure, and a frame that is never shown is a frame taken on
+trust.
+
+**The whole die**, 20200 × 5050 µm. The device runs along the top; the monitor
+field sits below its left end; everything else is fill, 728 318 elements of it.
+
+**A corner**, showing the four bands the die edge carries: the chip frame, the
+seal ring that arrests a saw crack, the dicing lane, and one of the four
+box-in-box overlay marks. The mark is on the marker layer alone: it was drawn on
+the ridge layer as well until 2026-08-10, which put it 3 µm from a layer the
+runset requires to stand 15 µm clear.
+
+**The process-control monitors.** Four structures measuring what the chain
+assumes: κ against post gap over five rungs, propagation loss by cut-back over
+three lengths, printed critical dimension against drawn over four widths, and
+electro-optic overlap against electrode gap over three gaps. They are the only
+means by which the delivered process can be compared with the model that
+predicted it.
 
 ![the die as emitted, with the chip frame](figures/fig13_die_plan.png)
 

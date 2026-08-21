@@ -8,6 +8,8 @@ from typing import Any
 
 import numpy as np
 
+from .artifacts import dump_json
+
 
 def _fmt(v: Any, nd: int = 4) -> str:
     if v is None:
@@ -175,23 +177,71 @@ def make_figures(run_dir: Path) -> list[Path]:
             out = fig_dir / "laser_dynamics.png"
             fig.savefig(out, dpi=140); plt.close(fig); figs.append(out)
 
-    for renderer in (_fig_cross_section, _fig_mask_plan,
-                     _fig_facet_route, _fig_die_plan):
+    # A drawing must never fail a run, and a drawing that fails must never do so
+    # in silence. These renderers open a die layout of tens of megabytes, so
+    # they are the first thing to fail under memory pressure or contention, and
+    # the failure removes a figure from the run rather than raising.
+    #
+    # Observed 2026-08-18. Six of nineteen figures were absent from a run of
+    # record, every renderer having raised while other work competed for the
+    # machine. Each rendered correctly when called again on the same run
+    # directory. The run reported nothing, and the published copies stayed at
+    # their previous version, so a document would have shown six drawings of an
+    # earlier device with no symptom. `tools/check_figures_current.py` is what
+    # caught it, and that check is run by hand.
+    # A renderer reports its outcome three ways and only one of them is an error.
+    # It returns a path, it raises, or it returns None. **The third is the one
+    # that was silent**, and it is the one that actually occurred: six of
+    # nineteen drawings were lost from two consecutive runs of record with no
+    # exception raised and no `figures.failed.json` written, and every one of the
+    # six rendered correctly when called again on the same run directory.
+    #
+    # A None is legitimate where the stage that feeds the renderer did not run.
+    # It is a failure where that stage's payload is present, and the two are
+    # distinguished here by looking for the payload rather than by trusting the
+    # renderer.
+    needs = {
+        "_fig_cross_section": "mode",
+        "_fig_mask_plan": "layout",
+        "_fig_mask_shot": "layout",
+        "_fig_facet_route": "layout",
+        "_fig_die_plan": "reticle",
+        "_fig_die_shot": "reticle",
+        "_fig_grating_cell": "layout",
+    }
+
+    def _record(fn, out, failed):
+        name = fn.__name__
+        stage = needs.get(name)
+        if out is None and stage and (run_dir / f"{stage}.json").exists():
+            failed.append(f"{name}: returned no figure although {stage}.json is present")
+        return out
+
+    failed: list[str] = []
+    for renderer in (_fig_cross_section, _fig_mask_plan, _fig_mask_shot,
+                     _fig_facet_route, _fig_die_plan, _fig_die_shot):
         try:
             out = renderer(run_dir, fig_dir)
-        except Exception:                     # a drawing must never fail a run
+        except Exception as exc:
+            failed.append(f"{renderer.__name__}: {type(exc).__name__}: {exc}")
             out = None
+        out = _record(renderer, out, failed)
         if out is not None:
             figs.append(out)
 
     try:
         out = _fig_grating_cell(run_dir, fig_dir, metrics)
-    except Exception:
+    except Exception as exc:
+        failed.append(f"_fig_grating_cell: {type(exc).__name__}: {exc}")
         out = None
+    out = _record(_fig_grating_cell, out, failed)
     if out is not None:
         figs.append(out)
 
-    return figs
+    if failed:
+        dump_json(run_dir / "figures.failed.json", {"failed": failed})
+
+    return figs, failed
 
 
 
@@ -318,6 +368,175 @@ def _fig_facet_route(run_dir: Path, fig_dir: Path):
     fig.savefig(out, dpi=150)
     plt.close(fig)
     return out
+
+
+def _fig_mask_shot(run_dir: Path, fig_dir: Path):
+    """The mask as the layout viewer draws it, not as this module redraws it.
+
+    The polygons were already read back from the emitted GDS, so the earlier
+    plan view was of the mask rather than of the parameters. It was still a
+    redrawing, with the window, the colours and the aspect chosen here, and those
+    choices misled: a fixed vertical window of +-1.2 um about the die axis showed
+    the tail of a routed lead-in and captioned it the input taper.
+
+    This renders through KLayout with the layer properties the run itself
+    emitted, so the colours are the process's own and the geometry is whatever
+    the file contains. Where the viewer cannot be reached the earlier plan view
+    remains and is produced alongside.
+    """
+    import json
+
+    info = _layout_info(run_dir)
+    if not info:
+        return None
+    gds = Path(info["gds"])
+    lyp = gds.with_suffix(".lyp")
+
+    try:
+        import klayout.db as kdb
+        import klayout.lay as klay
+    except ImportError:
+        return None
+
+    exc = float(info.get("facet_lead_in_excursion_um") or 0.0)
+    z0 = float(info.get("grating_start_um") or 200.0)
+    period = 1.3
+    try:
+        period = float(json.loads((run_dir / "metrics.json").read_text(
+            encoding="utf-8"))["metrics"]["grating"]["period_nm"]) / 1000.0
+    except Exception:
+        pass
+
+    gap = wid = 0.0
+    pad = 80.0
+    try:
+        d = json.loads((run_dir / "design.resolved.json").read_text(encoding="utf-8"))
+        gap = float(d["electrodes"]["gap_um"]); wid = float(d["electrodes"]["width_um"])
+        pad = float(d["layout"].get("bond_pad_um", 80.0))
+    except Exception:
+        pass
+    half = gap / 2 + wid + 4.0 if gap else 30.0
+    dev_len = float(info.get("device_length_um") or 11000.0)
+
+    views = [
+        ("shot_leadin", kdb.DBox(-8.0, -(exc + 3.0), z0 + 25.0, 3.0)),
+        ("shot_taper_tip", kdb.DBox(-6.0, -(exc + 1.2), 8.0, -(exc - 1.6))),
+        ("shot_grating", kdb.DBox(z0 - period, -2.6, z0 + 10 * period, 2.6)),
+        ("shot_electrodes",
+         kdb.DBox(dev_len / 2 - 60.0, -half, dev_len / 2 + 60.0, half)),
+        # The electrode view above is a close one and its window stops at the
+        # outer electrode edge, so it cut the bond pad off entirely. The pad is
+        # the only place a lead can be attached, which makes it worth its own
+        # view rather than an omission nobody noticed.
+        ("shot_pad",
+         kdb.DBox(dev_len / 2 - pad, gap / 2 - 12.0,
+                  dev_len / 2 + pad, gap / 2 + wid + pad + 12.0)),
+    ]
+
+    lv = klay.LayoutView()
+    lv.load_layout(str(gds), 0)
+    if lyp.exists():
+        try:
+            lv.load_layer_props(str(lyp))
+        except Exception:
+            pass
+    lv.max_hier()
+
+    out = []
+    for name, box in views:
+        shot = fig_dir / f"{name}.png"
+        lv.zoom_box(box)
+        lv.save_image(str(shot), 1200, 440)
+        out.append(shot)
+    return out[0] if out else None
+
+
+def _monitor_box(kdb, ret: dict, hw: float, hh: float):
+    """The window holding the process-control monitors.
+
+    Derived from where the reticle placed them rather than guessed. They sit
+    below the device and are shifted with everything else when the die is
+    centred on the origin, so a window written in die coordinates by hand lands
+    on the wrong side: the first attempt showed the bottom-left corner and
+    called it the monitor field.
+    """
+    dx, dy = (ret.get("chip_frame") or {}).get("translated_by_um") or [0.0, 0.0]
+    ys = [row.get("y_um", 0.0)
+          for m in (ret.get("monitors") or []) for row in (m.get("rows") or [])
+          if row.get("y_um") is not None]
+    lo = (min(ys) if ys else -520.0) + dy
+    hi = (max(ys) if ys else 0.0) + dy
+    pad = 90.0
+    return kdb.DBox(max(-hw, dx - 40.0), max(-hh, lo - pad),
+                    min(hw, dx + 720.0), min(hh, hi + pad))
+
+
+def _fig_die_shot(run_dir: Path, fig_dir: Path):
+    """The assembled die as the layout viewer draws it.
+
+    The frame, the seal ring, the dicing lane, the overlay marks, the monitor
+    field and the fill are all drawn by the reticle and mask stages and none of
+    them appears in any other figure. A die whose frame is never shown is a die
+    whose frame is taken on trust.
+    """
+    import json
+
+    p = run_dir / "reticle.json"
+    if not p.exists():
+        return None
+    ret = json.loads(p.read_text(encoding="utf-8"))
+    gds = ret.get("filled_gds") or ret.get("gds")
+    if not gds or not Path(gds).exists():
+        gds = (json.loads((run_dir / "mask.json").read_text(encoding="utf-8"))
+               .get("filled_gds") if (run_dir / "mask.json").exists() else None)
+    if not gds or not Path(gds).exists():
+        return None
+
+    try:
+        import klayout.db as kdb
+        import klayout.lay as klay
+    except ImportError:
+        return None
+
+    frame = ret.get("chip_frame") or {}
+    ow, oh = frame.get("outer_um") or [ret.get("die_width_um"), ret.get("die_height_um")]
+    if not ow:
+        return None
+    hw, hh = ow / 2.0, oh / 2.0
+
+    # Where the guide leaves the die. This is the one feature of the die that
+    # decides whether a butt-coupled part can be assembled at all, and it had no
+    # view: the die shot is too coarse to resolve it and the device shots are
+    # drawn on the device cell, which carries no frame. The window spans the
+    # exclusion ring and the seal-ring opening either side of the guide.
+    port = kdb.DBox(-hw - 10.0, -90.0, -hw + 190.0, 90.0)
+
+    views = [
+        ("shot_die", kdb.DBox(-hw * 1.02, -hh * 1.02, hw * 1.02, hh * 1.02)),
+        ("shot_die_corner", kdb.DBox(-hw - 20, hh - 260, -hw + 260, hh + 20)),
+        ("shot_monitors", _monitor_box(kdb, ret, hw, hh)),
+        ("shot_port", port),
+    ]
+
+    lv = klay.LayoutView()
+    lv.load_layout(str(gds), 0)
+    lyp = Path(gds).with_suffix(".lyp")
+    if not lyp.exists():
+        lyp = next(iter(Path(gds).parent.glob("*.lyp")), None)
+    if lyp and lyp.exists():
+        try:
+            lv.load_layer_props(str(lyp))
+        except Exception:
+            pass
+    lv.max_hier()
+
+    out = []
+    for name, box in views:
+        s = fig_dir / f"{name}.png"
+        lv.zoom_box(box)
+        lv.save_image(str(s), 1200, 420)
+        out.append(s)
+    return out[0] if out else None
 
 
 def _fig_grating_cell(run_dir: Path, fig_dir: Path, metrics: dict):
@@ -632,9 +851,22 @@ def _fig_mask_plan(run_dir: Path, fig_dir: Path):
         f"{info.get('periods_drawn')} of {info.get('periods_total')} periods drawn",
         fontsize=10)
 
+    # The window is taken from the geometry rather than fixed at +-1.2 um about
+    # the die axis. On a routed facet the guide leaves the die edge well off that
+    # axis, 23.3 um below it on the validation baseline, and climbs back only at
+    # the end of the arc. A fixed window then showed the tail of the bend and
+    # called it the taper.
     taper_len = float(info.get("taper_length_um") or 150.0)
-    draw(ax_taper, (bbox.left, bbox.left + 1.4 * taper_len), (-1.2, 1.2),
-         f"input taper over {taper_len:.0f} um, vertical scale exaggerated")
+    exc = float(info.get("facet_lead_in_excursion_um") or 0.0)
+    x_end = float(info.get("grating_start_um") or (1.4 * taper_len))
+    if exc > 1.0:
+        y_win = (-(exc + 2.0), 2.0)
+        title = (f"the routed lead-in: {taper_len:.0f} um of taper on the angled "
+                 f"run, then the arc back to the axis")
+    else:
+        y_win = (-1.2, 1.2)
+        title = f"input taper over {taper_len:.0f} um, vertical scale exaggerated"
+    draw(ax_taper, (bbox.left, bbox.left + 1.15 * x_end), y_win, title)
     # a dozen micrometres of the grating shows the posts either side of the
     # ridge at their true spacing
     g_start = float(info.get("grating_start_um") or (bbox.left + taper_len)) + 2.0

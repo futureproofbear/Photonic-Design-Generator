@@ -69,9 +69,12 @@ materials:
       form: sellmeier_zelmon_lt       # Zelmon-style 3-term fit to congruent LT
       o: {A: 3.29628, B: 0.03246, C: 0.06724, D: 0.13594, E: 1.85677, F: 244.0}
       e: {A: 3.28553, B: 0.03164, C: 0.07642, D: 0.13540, E: 1.85710, F: 244.0}
-    index_override_1550:              # used when `use_index_override: true`
-      o: 2.1188
-      e: 2.1145
+    # MEASURED ON THIN-FILM LITHIUM TANTALATE, 2026-08-14, replacing the bulk
+    # congruent values of 2.1188 and 2.1145. Wang et al., Nature 630, 784 (2024)
+    # report n_o = 2.119 and n_e = 2.123 for a 600 nm LTOI film.
+    index_override_1550:
+      o: 2.119
+      e: 2.123
     eo_tensor:
       r13: 8.4
       r22: 0.2
@@ -80,8 +83,21 @@ materials:
     eps_rf:
       perp_c: 40.9                    # eps_11
       along_c: 42.5                   # eps_33
-    loss_dB_per_cm: 0.2
-    provenance: "needs_confirmation - bulk congruent LiTaO3 (Bruner et al. Opt. Lett. 28, 194 (2003); Yamada 1990). Thin-film r33, eps_rf and loss to be replaced with foundry PCM data."
+    # MEASURED on LTOI waveguides: 5.6 dB/m, with 7.3 dB/m before reduction.
+    # Wang et al., Nature 630, 784 (2024).
+    loss_dB_per_cm: 0.056
+    provenance: >-
+      thin_film_literature - r33 30.5 pm/V is the accepted material value and is
+      corroborated in thin film by Wang et al., Nature 630, 784 (2024), whose
+      LTOI modulator measures VpiL = 1.9 V.cm at 1550 nm and 1.6 V.cm at
+      1310 nm. Indices and loss are that paper's measured thin-film figures:
+      n_o 2.119, n_e 2.123, 5.6 dB/m. The RF permittivity remains the bulk
+      congruent value of Bruner et al., Opt. Lett. 28, 194 (2003).
+      NOT THIS FOUNDRY'S PROCESS CONTROL DATA. The film thickness, the poling
+      completeness and the etch of the ltoi300 process differ from that work,
+      and PCM data is still to be obtained and placed in a project materials
+      file. What this provenance asserts is that the constants are now measured
+      on thin-film lithium tantalate somewhere, rather than assumed from bulk.
 
   Si3N4:
     kind: isotropic

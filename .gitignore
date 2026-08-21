@@ -63,3 +63,13 @@ design-chain/pdk/LXT_KLayout_DRC_Runsets/
 # knowledge and are sanitised.
 CLAUDE.md
 **/CLAUDE.md
+
+# Run logs. A convenience copy of what a run printed; the run directory beside
+# it carries the authoritative record, so these are regenerable in the same
+# sense runs/ is.
+**/logs/
+
+# Third-party simulation projects, not ours to redistribute. The same reasoning
+# as references/ above: cite the source, do not vendor the files.
+examples/Ring_Vernier_Laser/
+examples/Ring_Vernier_Laser.zip

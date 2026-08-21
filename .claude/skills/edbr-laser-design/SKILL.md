@@ -243,6 +243,87 @@ optimised away.
    bandwidth against the harmonics of the intended waveform.
 7. Layout, DRC, verify.
 
+## The Intracavity Phase Section
+
+A second electrode over passive guide moves the **comb** without moving the
+**mirror**, so the two are driven in step and the hand-over never occurs. **The
+hop is removed as a mechanism rather than positioned outside the sweep**, which
+removes the thermal commissioning step and the reliance on a thermal setting
+holding over the life of the part.
+
+### The grating cancels out of the sizing
+
+The phase the section must supply is the mirror-to-comb slip expressed as
+round-trip phase, and because `(1 - r) * tau_rt = tau_u` exactly,
+
+    phi_needed = 2*pi * drift / FSR = 2*pi * tau_u * S * V_mirror
+
+**No grating quantity appears.** Measured across four post gaps spanning
+reflectivity 0.93 to 0.76 and stop band 10.05 to 6.38 GHz, `phi_needed` did not
+move. The section is therefore sized once, from the passive delay and the mirror
+drive alone, and any mirror goes behind it. **Design the section first and choose
+the grating afterwards.**
+
+### It must cancel the slip it creates, so solve for the fixed point
+
+The section is passive cavity length, so its own delay enters `tau_u`, which is
+what sets the phase it must supply. Sizing it against the phase required without
+it understates the length. Solve self-consistently:
+
+    L = tau_0 * S * V_m / (2*dn_per_V*V_p/lambda - 2*n_g*S*V_m/c)
+
+The length diverges as the denominator closes. **The escape is an axis the
+compensator does not share with its own load**: a phase drive separate from the
+mirror's raises what the section supplies without raising what it must supply.
+At a phase drive equal to the mirror's, one design ran to 3583 um and did not fit
+the die; at twice the mirror drive it fitted in 900 um.
+
+**Where a compensator sits inside the loop it corrects, its own contribution
+belongs in the requirement before the sizing is believed.**
+
+### The sizing rule and the performance claim are one statement
+
+Differentiating the resonance condition with the section's phase included,
+
+    df/dV = r*S - (dphi_ps/dV) / (2*pi*tau_rt)
+
+reaches `S` exactly when `dphi_ps/dV = -2*pi*tau_u*S`, which is `phi_needed` per
+volt. **A section sized to cancel the slip tunes the laser at the mirror rate by
+construction.** Agreement between the closed form and a mode-tracking sweep is
+therefore the check that the section works, and not an independent result.
+
+### Grade the mechanism, not only the performance
+
+The continuous excursion with the section driven is the performance. Two
+conditions carry it and both deserve their own acceptance row:
+
+* **the phase margin** `phi_avail / phi_needed`, whose physical bound is unity;
+* **the hand-over count** with the section driven, whose bound is zero.
+
+A design graded on the excursion alone detects an insufficient section only
+through a missing value, which reads as an absent measurement rather than as a
+named condition. **The margin is also nearly process-independent**: both
+`phi_avail` and `phi_needed` scale with the mirror tuning `S`, so `S` cancels and
+the ratio reduces to a function of `tau_u` and the group index. A corner sweep
+confirms it and does not bound it. **What bounds it is the as-built passive
+length and the phase-electrode gap.**
+
+### What the section displaces
+
+A compensator often makes an earlier compromise redundant. Passive delay bought
+by lengthening a feed, to lower the active fraction and with it the linewidth, is
+supplied by the section instead. **After adding a component, re-ask what every
+earlier compromise was bought for.** Returning one such feed recovered the
+Pockels lever from 0.547 to 0.630 with the linewidth better than before.
+
+### Why the tuning is not moved entirely into the section
+
+Driving the section alone slides the comb under a stationary stop band, so the
+lasing mode walks off the reflection peak while a neighbour approaches it. The
+hand-over occurs at about half a free spectral range whatever phase is
+available. **The mirror must move to carry the frequency and the section must
+move with it to prevent the hop.** Neither electrode is redundant.
+
 ## Diagnostics
 
 | observation | probable cause |
@@ -250,6 +331,10 @@ optimised away.
 | the laser tunes at approximately half the mirror rate | r is near 0.5; the cavity is dominated by untuned length |
 | the mode hops mid-sweep | the continuous excursion is below the required span; raise r |
 | the range is short but no hop occurred in the sweep | the drive limit, not the cavity. Compare the range against the drive voltage times the tuning rate before touching the grating |
+| the swept excursion moves by tens of per cent when a passive length changes by microns | the cavity phase, which is the round-trip path modulo one wavelength and which no process holds over a centimetre cavity. Write the requirement against the phase-independent quantities and hold the swept figure at `info` |
+| the fitted tuning slope and the lever route r*S differ by more than about 15 % | the fitted slope is taken over whichever hop-free segment the sweep exposed, so it carries that segment's dispersion and its position. Name which route each downstream figure used |
+| every corner failure sits at one level of one process parameter | the finding is about the window and not the design. Establish the tolerance the design actually requires by walking that parameter until each bound is crossed, and compare it against what the process states |
+| a metric is flat across the whole process window | it is insensitive, or no declared excursion reaches it. Name the excursion that moves it before reporting it as stable |
 | the range moves when the grating length is changed, with no hop either side | the tuning rate moved, not the mode-hop boundary. The lever enters the rate, and the rate times the drive limit is what was measured |
 | SMSR is marginal | the FSR is small relative to the mirror bandwidth; shorten the grating or narrow the mirror |
 | chirp nonlinearity is high | the grating is unapodised and its sidelobes are pulling the mode |

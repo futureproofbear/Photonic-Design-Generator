@@ -71,6 +71,24 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     unconfirmed = lib.unconfirmed(used)
     blocked = bool(unconfirmed) and not design.allow_unconfirmed_materials
 
+    # --- findings, against what the design has acknowledged -----------------
+    #
+    # The acceptance verdict grades targets. A chain also raises findings that
+    # carry no threshold, and until 2026-08-17 nothing read them: a run could
+    # emit seventeen and still be reported a clean pass. They are counted here so
+    # that the verdict carries its denominator, and so that a finding appearing
+    # for the first time is visible in the same place the targets are.
+    #
+    # Enforcement is opt-in per design. Reporting first is deliberate: turning it
+    # on before the standing findings are acknowledged would fail every released
+    # design at once and teach the reader to bypass the gate.
+    acked = {a.key: a.reason for a in design.warnings.acknowledged}
+    emitted = [w for w in ctx.warning_records if w["stage"] != "verify"]
+    seen = {w["key"] for w in emitted}
+    unacknowledged = sorted(seen - set(acked))
+    stale = sorted(set(acked) - seen)
+    enforce = bool(getattr(design.warnings, "enforce", False))
+
     payload = {
         "n_targets": len(rows),
         "n_pass": sum(1 for r in rows if r["status"] == "pass"),
@@ -80,11 +98,34 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "should_failures": n_should_fail,
         "unconfirmed_materials": unconfirmed,
         "blocked_on_materials": blocked,
-        "verdict": "PASS" if (n_must_fail == 0 and not blocked) else "FAIL",
+        "findings_emitted": len(seen),
+        "findings_acknowledged": len(seen & set(acked)),
+        "findings_unacknowledged": unacknowledged,
+        "findings_acknowledged_but_absent": stale,
+        "findings_enforced": enforce,
+        "verdict": ("PASS" if (n_must_fail == 0 and not blocked
+                               and not (enforce and unacknowledged)) else "FAIL"),
         "rows": rows,
     }
     ctx.put("verify", payload)
     ctx.write_stage("verify", payload)
+    if unacknowledged:
+        ctx.warn(
+            f"{len(unacknowledged)} finding(s) this run emitted are acknowledged by "
+            f"no entry in the design file: " + ", ".join(unacknowledged)
+            + ". A finding with no threshold has no owner unless the design names "
+            "it, so each is either accepted with a reason under warnings."
+            "acknowledged or is a defect to be fixed",
+            key="verify.findings_unacknowledged",
+        )
+    if stale:
+        ctx.warn(
+            f"{len(stale)} acknowledgement(s) in the design file match no finding "
+            f"this run emitted: " + ", ".join(stale)
+            + ". Either the finding was fixed and the entry should go, or its "
+            "wording changed and the key with it",
+            key="verify.acknowledgements_stale",
+        )
     if unconfirmed:
         ctx.warn(
             "materials with unconfirmed data in this design: " + ", ".join(unconfirmed)

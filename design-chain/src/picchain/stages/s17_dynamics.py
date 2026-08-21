@@ -181,13 +181,30 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict:
         )
     else:
         ratio = P_op * 1e3 / rs.output_power_mW if rs.output_power_mW else float("inf")
-        if not 0.5 <= ratio <= 2.0:
+        # The linewidth is INVERSELY PROPORTIONAL to the declared power, so this
+        # divergence passes into it at full weight. The band was 0.5 to 2.0
+        # until 2026-08-12, which is a factor of four on a quantity whose
+        # acceptance row is commonly written at +-100 %: a divergence inside the
+        # old band could flip the verdict on its own, and did. See LESSONS T036.
+        #
+        # Tightened again the same day, from 10 % to 5 %. Raising the drive
+        # current by 20 mA moved the computed power by 7.7 % and the reported
+        # linewidth by the same, which was the whole difference between meeting
+        # a target and missing it. The band must sit below the smallest
+        # divergence that can change a verdict, and 5 % is that for a linewidth
+        # row quoted to three figures.
+        if not 0.95 <= ratio <= 1.05:
+            drift = (1.0 / ratio - 1.0) * 100.0
             ctx.warn(
                 f"the rate equations give {P_op * 1e3:.1f} mW at "
                 f"{cfg.operating_current_mA:.0f} mA against the "
                 f"{rs.output_power_mW:.1f} mW declared in cavity.rsoa.output_power_mW, "
-                f"a factor of {ratio:.2f}. The declared figure sets the linewidth, so "
-                "the two are to be reconciled before either is quoted"
+                f"a divergence of {abs(ratio - 1.0) * 100:.0f} %. The declared figure "
+                f"sets the linewidth and enters it inversely, so the reported linewidth "
+                f"is {abs(drift):.0f} % {'low' if drift > 0 else 'high'} against the "
+                f"power this design actually produces. Set "
+                f"cavity.rsoa.output_power_mW to {P_op * 1e3:.2f} and re-run before "
+                "quoting either figure"
             )
 
     if regime == "IV":

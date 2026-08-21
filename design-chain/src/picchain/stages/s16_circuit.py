@@ -89,7 +89,24 @@ def straight(wl=1.55, length_um=1000.0, neff=1.8, ng=2.2, wl0=1.55,
     neff_wl = neff - (wl - wl0) * (ng - neff) / wl0
     phase = 2 * np.pi * neff_wl * length_um / wl
     amp = 10.0 ** (-loss_dB_per_cm * (length_um * 1e-4) / 20.0)
-    return _sax.reciprocal({("in0", "out0"): amp * np.exp(1j * phase)})
+    # SIGN CORRECTED 2026-08-17. This returned exp(+i phase), whose phase rises
+    # with frequency, while the grating's stored phase falls with it. The group
+    # delay is read as -d(phase)/d(omega), so the feed entered the assembled
+    # delay with the wrong sign and was SUBTRACTED from the mirror's.
+    #
+    # It was found by scale rather than by inspection. Two designs whose modelled
+    # feeds differ by a factor of 6.4 both matched
+    #
+    #     assembled delay  =  tau_dbr - 2 * feed delay
+    #
+    # to better than 0.2 ps, and the disagreement with the expectation was twice
+    # the round-trip feed delay in each. A single design could not have
+    # distinguished this from a modelling residue; the pair did.
+    #
+    # Two elements of one assembly must share a phase convention, and the
+    # grating's is the one that arrives from the transfer-matrix solve, so the
+    # straight adopts it.
+    return _sax.reciprocal({("in0", "out0"): amp * np.exp(-1j * phase)})
 
 
 def lossy_coupler(wl=1.55, transmission=1.0, reflection=0.0):
@@ -209,7 +226,26 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # --- the netlist -----------------------------------------------------
     # facet -> taper -> feed -> grating. The taper is drawn on the mask and its
     # length is therefore taken from the layout, not declared twice.
-    feed_len = max(design.cavity.feed_length_um - 2 * design.layout.taper_length_um, 1.0)
+    #
+    # CORRECTED 2026-08-17. The subtraction was `2 * taper_length` against the
+    # ONE taper instance the netlist below carries, so the straight was short by
+    # a taper on every design. The error was invisible wherever the feed was long
+    # and catastrophic where it was not: on a 210 um feed with a 150 um taper it
+    # drove the length negative, the clamp below returned 1 um, and the stage
+    # then assembled a cavity with no feed at all. Every circuit figure for that
+    # design described a different device, and the group-delay cross-check
+    # agreed to 0.3 % because its expectation was computed from the same clamped
+    # value. **A clamp that rescues a nonsensical input turns a modelling failure
+    # into a passing check**, so the condition now raises instead.
+    feed_len = design.cavity.feed_length_um - design.layout.taper_length_um
+    if feed_len <= 0.0:
+        raise RuntimeError(
+            f"the feed is {design.cavity.feed_length_um:.1f} um and the taper drawn "
+            f"inside it is {design.layout.taper_length_um:.1f} um, so no straight "
+            f"guide remains between the taper and the grating. The circuit cannot be "
+            f"assembled from a negative length. Lengthen cavity.feed_length_um beyond "
+            f"layout.taper_length_um, or shorten the taper"
+        )
     taper_t = float(cfg.taper_transmission)
     tp = ctx.get("taper") or {}
     if cfg.use_taper_stage and tp.get("enabled") and tp.get("transmission") is not None:
@@ -270,7 +306,24 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     neff_wl = float(mode["n_eff_bare"]) - (wl_um - lam0) * (
         float(mode["n_g"]) - float(mode["n_eff_bare"])) / lam0
     phi = 2 * np.pi * neff_wl * feed_len / wl_um
-    round_trip = taper_t * (amp ** 2) * r_c * np.exp(2j * phi)
+    # SIGN CORRECTED 2026-08-17, with the `straight` model above and for the same
+    # reason. In the exp(+i omega t) convention a forward wave accumulates
+    # exp(-i beta z), so a round trip over the feed is exp(-2 i phi) and the
+    # group delay -d(phase)/d(omega) comes out positive, which is what a length
+    # of passive guide must contribute.
+    #
+    # THIS CROSS-CHECK PASSED FOR AS LONG AS BOTH SIDES WERE WRONG. The netlist
+    # and this cascade shared the convention, so the residual was exactly zero
+    # and the agreement established only that the same expression had been
+    # evaluated twice. It became visible the moment the netlist was corrected,
+    # and the residual of 2.6e-02 that then appeared is the measure of the error
+    # both had been carrying.
+    #
+    # Two implementations agreeing to numerical precision is weak evidence when
+    # they share an author and a convention. The anchor that settled it is
+    # physical rather than numerical: the assembled round-trip delay must exceed
+    # the bare mirror's, and before the correction it did not.
+    round_trip = taper_t * (amp ** 2) * r_c * np.exp(-2j * phi)
     r_closed = r_f + facet_t * round_trip / (1.0 - r_f * round_trip)
     R_closed = np.abs(r_closed) ** 2
     residual = float(np.max(np.abs(R - R_closed)))

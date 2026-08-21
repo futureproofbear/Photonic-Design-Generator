@@ -85,12 +85,40 @@ is smooth on the scale of the mode, so no accuracy is lost.
 
 ## The Gap Trade
 
-Narrowing the electrode gap raises dn as 1/G, but three penalties follow:
+Narrowing the electrode gap raises dn as 1/G, and three consequences follow.
+**Only the second and third are penalties on a high-permittivity film**, and the
+first is measured rather than assumed:
 
-* Gamma falls, the field becoming less uniform across the mode;
+* **Gamma is not necessarily lowered.** The conventional expectation is that a
+  narrower gap makes the field less uniform across the mode and lowers the
+  overlap. Measured on a 300 nm X-cut tantalate ridge, Gamma **rose** from 0.2473
+  at a 6.62 um gap to 0.2619 at 4.00 um, a gain of 5.9 %. The film draws the
+  field, so closing the gap concentrates it where the mode already is. **Measure
+  Gamma at the gap in question rather than scaling a value from another gap.**
 * optical absorption in the metal rises steeply once the evanescent tail reaches
   the electrode;
 * capacitance rises, by which the drive bandwidth is lowered.
+
+### Scaling dn by the gap ratio alone is an assumption, and it is testable
+
+A chain that takes the index change per volt of one electrode and rescales it to
+a second electrode by the inverse gap ratio is asserting that Gamma is common to
+both. **Run the electrode solve at the second geometry instead.** On the
+measurement above the 1/G scaling understated the second electrode by 5.9 %,
+which was conservative in that instance and is not conservative by construction.
+
+### A second electrode inherits the bound as well as the physics
+
+Where a design carries two electrode pairs at different gaps, **the metal-overlap
+bound applies to both and is ordinarily evaluated at one**. On the same
+cross-section the mode overlap with metal rose from 6.9e-8 at the 6.62 um mirror
+gap to 6.7e-5 at the 4.00 um phase-section gap, against a design bound of 1e-5.
+The narrow electrode breaches by nearly an order of magnitude and no acceptance
+row saw it, the metric being reported for the mirror alone.
+
+**The overlap falls exponentially with the gap**, measured here at
+d(ln overlap)/d(gap) = -2.6 /um, so the gap that restores a given bound is a
+short calculation and the section length scales with it in proportion.
 
 The optical power beyond the electrode inner edge is to be reported on every
 design. It is a geometric proxy and it is a guard rather than a measurement: a

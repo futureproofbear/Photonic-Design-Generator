@@ -28,6 +28,7 @@ import typer
 
 from .artifacts import RunContext, dump_json, load_json, new_run_id
 from .config import Design, get_dotted, set_dotted, walk_dotted
+from .preflight import assert_ready
 from .materials import MaterialLibrary
 from .stages import DEPENDENCIES, STAGES
 
@@ -144,6 +145,12 @@ def run(
     # distinguish a slow stage from a suspended one, and neither alone does.
     # Where a stage delegates to an external solver in another process, that
     # solver's own reported time is the one to believe over either.
+    # Preconditions on the design file, before any solver is started. A design
+    # whose declared fields contradict each other is knowable in milliseconds and
+    # running it first costs half an hour and returns numbers describing a
+    # different device. See picchain/preflight.py for the case that produced this.
+    assert_ready(d)
+
     status = "ok"
     timings: dict[str, float] = {}
     cpu: dict[str, float] = {}
@@ -151,6 +158,7 @@ def run(
         typer.echo(f"[{s}] ...", err=True)
         t0, c0 = time.perf_counter(), time.process_time()
         try:
+            ctx.current_stage = s
             STAGES[s](d, ctx, lib)
         except Exception as exc:
             timings[s] = round(time.perf_counter() - t0, 3)
@@ -177,7 +185,21 @@ def run(
     if figures and status == "ok":
         try:
             from .report import make_figures
-            figs = make_figures(ctx.run_dir)
+            figs, failed_figs = make_figures(ctx.run_dir)
+            # A drawing that fails removes a figure from the run and leaves the
+            # published copy at its previous version, which a reader cannot
+            # detect. Six of nineteen were lost this way on 2026-08-18 under
+            # memory pressure, and every one rendered correctly on a second
+            # call. The finding is raised so the loss is on the record.
+            if failed_figs:
+                ctx.warn(
+                    f"{len(failed_figs)} drawing(s) failed and this run's figure set is "
+                    "incomplete: " + "; ".join(failed_figs)
+                    + ". Re-render with `picchain report <design>` and confirm with "
+                    "tools/check_figures_current.py before any document is shown",
+                    key="report.figure_set_incomplete",
+                )
+            ctx.finalise(status)
         except Exception as exc:
             ctx.warn(f"figure rendering failed: {exc}")
             ctx.finalise(status)
@@ -293,7 +315,9 @@ def report(
     """(Re)render report.md and the figure set for a run."""
     mp = run_path or _latest_run(design)
     from .report import make_figures, render_markdown
-    figs = make_figures(mp.parent)
+    figs, failed_figs = make_figures(mp.parent)
+    for f in failed_figs:
+        typer.echo(f"  ! drawing failed, the figure set is incomplete: {f}", err=True)
     out = mp.parent / "report.md"
     out.write_text(render_markdown(mp, figs), encoding="utf-8")
     typer.echo(str(out))
@@ -394,6 +418,7 @@ def sweep(
         ctx = RunContext(design_dir=design.parent, run_id=new_run_id(f"sweep{i:03d}")).ensure()
         try:
             for s in chosen:
+                ctx.current_stage = s
                 STAGES[s](d, ctx, lib)
             ctx.finalise("ok", update_latest=False)
             row = {"param": param, "value": v}
@@ -442,6 +467,45 @@ def corners(
     design_targets = list(d.targets)
     metrics = cfg.metrics or [t.metric for t in d.targets]
 
+    # A corner verdict judges only the metrics named here, so a `must` row left
+    # out of the list passes every corner without being read. Two such rows were
+    # added to a design and not to this list, and the sweep reported 9 of 9 while
+    # the failing one was never evaluated; it returned 4 of 9 once they were
+    # added. Any must-target absent from the list is added and the addition is
+    # announced, because a silent pass is the failure this guards.
+    # CORRECTED 2026-08-16. The first version of this added every absent `must`
+    # target to the sweep. The corner stage list is derived from the metrics, so
+    # that pulled `layout` and `drc` into a physics sweep, and every corner then
+    # failed on rows a corner cannot move: a perturbation of film thickness does
+    # not change whether the mask is complete. Twenty-four of twenty-four corners
+    # failed for a structural reason.
+    #
+    # A `must` row is added only where the stage producing it is already being
+    # run for the metrics that were declared. The rest are named and left out,
+    # so the omission stays visible without corrupting the sweep.
+    # Reachability is the RESOLVED stage closure, not the stages the declared
+    # metrics name directly. `mode` runs as a dependency of `grating` even when
+    # no declared metric mentions it, so `mode.n_guided_modes` is evaluable and
+    # was being reported unreachable.
+    _declared = sorted({m.split(".", 1)[0] for m in metrics if "." in m} & set(STAGES))
+    declared_stages = set(_resolve_stages(_declared or list(d.stages)))
+    must_absent = [t.metric for t in d.targets
+                   if t.severity == "must" and t.metric not in metrics]
+    addable = [m for m in must_absent if m.split(".", 1)[0] in declared_stages]
+    unreachable = [m for m in must_absent if m not in addable]
+    if addable:
+        metrics = list(metrics) + addable
+        typer.echo(
+            "  ! these `must` targets were absent from corners.metrics and are produced by "
+            "stages this sweep already runs; they have been added: " + ", ".join(addable),
+            err=True)
+    if unreachable:
+        typer.echo(
+            "  ! these `must` targets are not evaluated at any corner, their stages being "
+            "outside this sweep: " + ", ".join(unreachable)
+            + ". They are properties of the mask rather than of the process point, so the "
+            "corner verdict says nothing about them", err=True)
+
     # A corner sweep runs the chain once per corner, so it inherits every cost
     # the stage list carries, multiplied. Defaulting it to the whole design is
     # therefore wrong in a way that a single run is not: with the external solver
@@ -468,6 +532,45 @@ def corners(
             )
     names = list(cfg.parameters)
     use_mode = mode or cfg.mode
+
+    # A sweep run at a mode the design file does not declare is a sweep that
+    # cannot be reproduced from the design file. One design's every
+    # process-window claim rested on an 81-corner factorial while its file read
+    # `onefactor`, so `picchain corners <design>` returned nine corners and the
+    # report's own reproduction section gave no override. The divergence is
+    # knowable at exactly this point and nowhere later, `corners.md` recording
+    # the mode that ran and the design file recording the mode that was meant.
+    if mode and mode != cfg.mode:
+        typer.echo(
+            f"  ! this sweep runs `{mode}` and the design declares `{cfg.mode}`. The result "
+            f"cannot be reproduced from the design file alone. Set `corners.mode: {mode}` in "
+            "the design, or record the override beside every figure this sweep produces",
+            err=True,
+        )
+
+    # A corner excursion must be one a fabrication run can deliver on its own.
+    # Bragg posts and the ridge they sit beside are drawn on one layer and
+    # printed by one exposure and one etch, so a lithographic excursion moves
+    # the gap between them and their own dimensions together, and on a grating
+    # of order above one the two terms oppose through the duty cycle. Declaring
+    # the gap alone reported a 63.6 % spread in kappa for an excursion that
+    # produces a small fraction of it, and omitted the duty term entirely.
+    #
+    # `process.bias_um` is the field that expresses the excursion the process
+    # actually delivers: a width grows by the full bias and a gap between two
+    # features on the same layer shrinks by the same amount.
+    _drawn = [n for n in names
+              if n.startswith(("grating.post_", "waveguide.")) and n.endswith("_um")]
+    if _drawn and not any(n.startswith("process.bias_um") for n in names):
+        typer.echo(
+            "  ! this window varies a drawn dimension without varying the process bias: "
+            + ", ".join(_drawn)
+            + ". Features on one layer move together under a lithographic excursion, so an "
+            "excursion on one of them alone is not one the process delivers. Consider "
+            "`process.bias_um.<layer>`, which moves every dimension on that layer coherently. "
+            "See rules/generic/parameter-scans.md",
+            err=True,
+        )
 
     if use_mode == "factorial":
         combos = list(itertools.product(*[(-1, 0, 1)] * len(names)))
@@ -509,6 +612,7 @@ def corners(
         status = "ok"
         for s in chosen:
             try:
+                ctx.current_stage = s
                 STAGES[s](dc, ctx, lib)
             except Exception as exc:
                 status = f"failed:{s}"
@@ -527,20 +631,38 @@ def corners(
         # like an answer.
         ver = ctx.get("verify") or {}
         by_metric = {tg.metric: tg for tg in design_targets}
-        outside, judged = [], 0
-        for m in metrics:
+        # Severity decides the verdict here exactly as it does in `verify`, and
+        # it did not until 2026-08-12. Every unmet row was counted, so a target
+        # carried at `info` failed the corner. `info` exists to be reported
+        # without blocking, and a sweep that blocks on it reports a process
+        # window narrower than the design has. The corner that exposed this was
+        # judged on the mode-hop-free range from zero bias, which is set by
+        # where the mode comb happens to sit and is placed by thermal tuning at
+        # commissioning; it is carried at `info` for that reason.
+        #
+        # Each metric is judged once. The list was built by iterating the
+        # declared metrics without deduplicating them, so a metric named twice
+        # in `corners.metrics` appeared twice in the failure list.
+        outside_must, outside_should, judged = [], [], 0
+        for m in dict.fromkeys(metrics):
             tg = by_metric.get(m)
             if tg is None:
                 continue
             judged += 1
-            if _evaluate_target(tg, ctx.get(m))["status"] != "pass":
-                outside.append(m)
+            if _evaluate_target(tg, ctx.get(m))["status"] == "pass":
+                continue
+            if tg.severity == "must":
+                outside_must.append(m)
+            elif tg.severity == "should":
+                outside_should.append(m)
+        outside = outside_must + outside_should
         verdict = ver.get("verdict") or (
-            None if not judged else ("PASS" if not outside else "FAIL"))
+            None if not judged else ("PASS" if not outside_must else "FAIL"))
         row = {"corner": label, "combo": list(combo), "status": status,
                "run_id": ctx.run_id, "verdict": verdict,
                "metrics_judged": judged, "metrics_outside": outside,
-               "must_failures": ver.get("must_failures") or outside,
+               "must_failures": ver.get("must_failures") or outside_must,
+               "should_failures": outside_should,
                "metrics": {m: ctx.get(m) for m in metrics}}
         rows.append(row)
         typer.echo(f"  [{n + 1}/{len(combos)}] {label:38s} {row['verdict']}", err=True)
@@ -549,7 +671,16 @@ def corners(
     for m in metrics:
         vals = [r["metrics"].get(m) for r in rows
                 if isinstance(r["metrics"].get(m), (int, float))]
-        nom = rows[0]["metrics"].get(m) if rows else None
+        # The nominal row by name, not by position. In onefactor mode the
+        # nominal is generated first and rows[0] happened to be right; in
+        # factorial mode rows[0] is a corner combination, so the column headed
+        # "nominal" carried a corner's value and every spread percentage was
+        # taken against it. On a niobate design the table printed a nominal
+        # reflectivity of 0.9260 where the design gives 0.8549.
+        nom_row = next((r for r in rows if r["corner"] == "nominal"), None)
+        if nom_row is None and rows:
+            nom_row = rows[0]
+        nom = nom_row["metrics"].get(m) if nom_row else None
         if vals:
             summary[m] = {"nominal": nom, "min": min(vals), "max": max(vals),
                           "spread": max(vals) - min(vals),
@@ -593,10 +724,12 @@ def _corners_markdown(doc: dict) -> str:
         pct = f" ({s['spread_pct_of_nominal']:.1f} %)" if s["spread_pct_of_nominal"] else ""
         L.append(f"| `{m}` | {s['nominal']:.6g} | {s['min']:.6g} | {s['max']:.6g} | "
                  f"{s['spread']:.6g}{pct} |")
-    L += ["", "## Verdict at each corner", "", "| corner | verdict | unmet at severity must |",
-          "|---|---|---:|"]
+    L += ["", "## Verdict at each corner", "",
+          "| corner | verdict | unmet at `must` | unmet at `should` |",
+          "|---|---|---:|---:|"]
     for r in doc["rows"]:
-        L.append(f"| {r['corner']} | {r['verdict']} | {r['must_failures']} |")
+        L.append(f"| {r['corner']} | {r['verdict']} | {r['must_failures']} "
+                 f"| {r.get('should_failures', [])} |")
     L.append("")
     return chr(10).join(L)
 
@@ -635,6 +768,7 @@ def golden(
 
     ctx = RunContext(design_dir=design.parent, run_id=new_run_id("golden")).ensure()
     for s in _resolve_stages(["layout"]):
+        ctx.current_stage = s
         STAGES[s](d, ctx, lib)
     emitted = Path((ctx.get("layout") or {})["gds"])
 
@@ -806,6 +940,7 @@ def search(
                          run_id=new_run_id(f"{tag}{budget['n']:03d}")).ensure()
         try:
             for st in chosen:
+                ctx.current_stage = st
                 STAGES[st](d, ctx, lib)
             ctx.finalise("ok", update_latest=False)
             return ctx.metrics
@@ -1072,6 +1207,7 @@ def sensitivity(
         ctx = RunContext(design_dir=design.parent, run_id=new_run_id(f"{tag}{n['i']:03d}")).ensure()
         try:
             for st in chosen:
+                ctx.current_stage = st
                 STAGES[st](d, ctx, lib)
             ctx.finalise("ok", update_latest=False)
             return ctx.metrics

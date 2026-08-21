@@ -26,6 +26,17 @@ from ._target import resolve_target
 MARKER_LAYER = (1000, 0)
 
 
+class DeckPlatformMismatch(RuntimeError):
+    """The rule deck belongs to a different process stack than the design.
+
+    Distinct from the failures that make a deck merely unrunnable, such as a
+    missing KLayout or an unreadable file. Those are conditions of the machine
+    and are reported as warnings, leaving the release gate to refuse on the
+    condition that no deck was executed. This one is a property of the design:
+    the deck would run perfectly and report on the wrong process.
+    """
+
+
 def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]:
     cfg = design.drc
     if not cfg.enabled or (not cfg.rules and not cfg.deck):
@@ -127,6 +138,10 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     if cfg.deck:
         try:
             deck_result = run_deck(design, ctx, gds_path)
+        except DeckPlatformMismatch:
+            # not an environment problem, and not a weaker check: it is a check
+            # of another process. It stops the stage.
+            raise
         except Exception as exc:
             deck_result = {"deck": cfg.deck, "error": str(exc)}
             ctx.warn(f"the foundry rule deck could not be executed: {exc}")
@@ -238,6 +253,97 @@ def deck_script(deck, run_dir) -> tuple[object, list[str]]:
     return prepared, added
 
 
+def deck_identity(deck_text: str) -> str | None:
+    """The stack a runset declares, read from its own text.
+
+    Both KLayout runsets seen so far name themselves twice, in the macro
+    description and in the `report(...)` call, as `LN-CORE lnoi400 DRC` and
+    `LT-PRO ltoi300 DRC`. Either is enough to tell one stack from the other.
+    """
+    import re
+
+    for pat in (r"<description>\s*([^<]+?)\s*</description>",
+                r"report\(\s*[\"']([^\"']+)[\"']"):
+        m = re.search(pat, deck_text)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def check_deck_matches_platform(design, deck_text: str) -> None:
+    """Refuse a rule deck that belongs to another process stack.
+
+    `platform.stack` carries the foundry's identifier for the stack this design
+    is drawn on. Where it is set, it must appear in the deck's own declared
+    identity. This raises rather than warning: a deck for the wrong stack does
+    not produce a weaker check, it produces a check of a different process whose
+    clean result means nothing about this one.
+    """
+    want = getattr(design.platform, "stack", None)
+    if not want:
+        return
+    ident = deck_identity(deck_text)
+    if ident is None:
+        raise DeckPlatformMismatch(
+            f"the design declares platform.stack '{want}' and the rule deck names no stack of "
+            "its own, so the two cannot be matched. Confirm the deck is for this process, then "
+            "clear platform.stack to proceed without the check"
+        )
+    if want.lower() not in ident.lower():
+        raise DeckPlatformMismatch(
+            f"the rule deck declares itself '{ident}' and this design declares platform.stack "
+            f"'{want}'. A deck for another stack reads different layer numbers, so a clean "
+            "report from it establishes nothing about this design. Point drc.deck at the deck "
+            "for this process, and correct layout.layer_map to its layer numbers at the same "
+            "time: the two must be changed together"
+        )
+
+
+def deck_layers(deck_text: str) -> dict[str, tuple[int, int]]:
+    """The layers a runset names, as {name: (layer, datatype)}.
+
+    A deck reads its geometry through `NAME = input(layer, datatype)`. Those
+    numbers are the contract between the deck and the mask, and they are the
+    part most easily got wrong: two stacks from the same foundry differ in
+    datatype, and a deck pointed at a layer the mask does not use finds nothing
+    and reports clean.
+    """
+    import re
+
+    out: dict[str, tuple[int, int]] = {}
+    for m in re.finditer(r"^([A-Z_0-9]+)\s*=\s*input\(\s*(\d+)\s*,\s*(\d+)\s*\)",
+                         deck_text, re.M):
+        out[m.group(1)] = (int(m.group(2)), int(m.group(3)))
+    return out
+
+
+def deck_layer_coverage(deck_text: str, gds_path) -> dict:
+    """Which layers the deck reads, and whether the mask carries any of them.
+
+    A rule evaluated against an empty layer cannot fail, so a clean report on a
+    deck whose layers are absent from the mask says nothing at all. This was not
+    hypothetical: a tantalate design was drawn on the niobate stack's layer
+    numbers and checked with the niobate deck, and the correct deck would have
+    found its metal layer empty and passed every metal rule silently.
+    """
+    import gdstk
+
+    lib = gdstk.read_gds(str(gds_path))
+    present: set[tuple[int, int]] = set()
+    for cell in lib.cells:
+        for poly in cell.get_polygons(depth=None):
+            present.add((poly.layer, poly.datatype))
+
+    named = deck_layers(deck_text)
+    empty = {n: ld for n, ld in named.items() if ld not in present}
+    return {
+        "layers_named_by_deck": {n: list(ld) for n, ld in named.items()},
+        "layers_named_and_empty": {n: list(ld) for n, ld in empty.items()},
+        "layers_exercised": len(named) - len(empty),
+        "layers_named": len(named),
+    }
+
+
 def run_deck(design, ctx, gds_path) -> dict:
     """Execute a foundry runset against the emitted mask."""
     import subprocess
@@ -250,6 +356,11 @@ def run_deck(design, ctx, gds_path) -> dict:
         deck = (base / deck).resolve()
     if not deck.is_file():
         raise RuntimeError(f"the rule deck {deck} was not found")
+
+    # Before anything is executed: a deck belonging to another stack is refused
+    # outright. Running it first and judging afterwards would spend the solve
+    # and produce a clean report that means nothing.
+    check_deck_matches_platform(design, deck.read_text(encoding="utf-8", errors="replace"))
 
     exe = find_klayout(cfg.klayout_exe)
     if not exe:
@@ -280,6 +391,49 @@ def run_deck(design, ctx, gds_path) -> dict:
         raise RuntimeError(f"the runset produced no report database\n{tail}")
 
     counts = parse_report(report)
+
+    # A clean report is worth only as much as the geometry the deck could see.
+    # Every layer the runset names is checked against the mask, and any that
+    # carries no polygon is reported: its rules were evaluated against nothing.
+    deck_text = deck.read_text(encoding="utf-8", errors="replace")
+    cov = deck_layer_coverage(deck_text, gds_abs)
+    cov["deck_declares"] = deck_identity(deck_text)
+    cov["platform_stack"] = getattr(design.platform, "stack", None)
+
+    # Which of the design's own layers land on each layer the deck reads. A
+    # layer map written against one stack carries auxiliary layers chosen
+    # because that stack ignored them, and another stack does not. The seal
+    # ring, the dicing lane and the facet marks sat on 20/0, 22/0 and 23/0,
+    # unread by the niobate deck and read as M1, M2 and HRL by the tantalate
+    # one, which reported the dicing lane as circuit metal fourteen times.
+    lmap = getattr(design.layout, "layer_map", None) or {}
+    by_ld: dict[tuple[int, int], list[str]] = {}
+    for name, ld in lmap.items():
+        try:
+            by_ld.setdefault((int(ld[0]), int(ld[1])), []).append(str(name))
+        except (TypeError, ValueError, IndexError):
+            continue
+    sources = {dn: sorted(by_ld.get(tuple(ld), []))
+               for dn, ld in cov["layers_named_by_deck"].items()}
+    cov["deck_layer_sources"] = {k: v for k, v in sources.items() if v}
+    shared = {k: v for k, v in sources.items() if len(v) > 1}
+    if shared:
+        detail = "; ".join(f"{k} <- {', '.join(v)}" for k, v in sorted(shared.items()))
+        ctx.warn(
+            "more than one design layer lands on a layer this deck reads, so the rules for it "
+            f"are evaluated over their union: {detail}. Confirm each is intended to be checked "
+            "as that layer"
+        )
+    if cov["layers_named_and_empty"]:
+        names = ", ".join(f"{n} ({d[0]}/{d[1]})"
+                          for n, d in sorted(cov["layers_named_and_empty"].items()))
+        ctx.warn(
+            f"the rule deck names {cov['layers_named']} layers and {len(cov['layers_named_and_empty'])} "
+            f"of them carry no geometry on this mask: {names}. Every rule on those layers was "
+            "evaluated against nothing and cannot have failed. Confirm the deck matches this "
+            "process and that layout.layer_map uses its layer numbers"
+        )
+
     return {
         "deck": str(deck),
         "deck_io_bound": bound,
@@ -288,4 +442,5 @@ def run_deck(design, ctx, gds_path) -> dict:
         "violations_by_category": counts,
         "violations_total": int(sum(counts.values())),
         "clean": bool(sum(counts.values()) == 0),
+        **cov,
     }

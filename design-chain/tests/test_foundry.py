@@ -522,3 +522,149 @@ def test_the_floor_plan_encloses_the_bond_pads(tmp_path):
     pads = _region(m["gds"], d.layout.layer_map["PAD"])
     assert not pads.is_empty()
     assert (pads - fp).is_empty()
+
+
+# --- a check that cannot fail has established nothing -----------------------
+#
+# Every error of one working session had the same shape: a check was confirmed
+# to have RUN, and never confirmed to have been CAPABLE OF FAILING. The deck
+# returned zero violations against a mask whose layers it did not read; the
+# corner sweep returned nine of nine on a list that did not contain the failing
+# row. Both are guarded here.
+
+
+def test_deck_layers_are_read_from_the_runset():
+    from picchain.stages.s06_drc import deck_layers
+
+    text = (
+        "RIDGE = input(2, 10) # LT etch\n"
+        "SLAB = input(3, 10) # LT etch full\n"
+        "M1 = input(20, 0) # first metal\n"
+        "not_a_layer = something_else(1, 2)\n"
+    )
+    assert deck_layers(text) == {"RIDGE": (2, 10), "SLAB": (3, 10), "M1": (20, 0)}
+
+
+def test_the_two_luxtelligence_decks_differ_in_the_numbers_that_matter():
+    """The niobate and tantalate runsets are near-identical in rule values and
+    differ in layer numbers, which is why pointing a design at the wrong one
+    yields a clean report rather than an obvious failure."""
+    import pathlib
+
+    from picchain.stages.s06_drc import deck_layers
+
+    pdk = pathlib.Path(__file__).resolve().parents[1] / "pdk" / "LXT_KLayout_DRC_Runsets"
+    ln = deck_layers((pdk / "LN_CORE_lnoi400.lydrc").read_text(encoding="utf-8", errors="replace"))
+    lt = deck_layers((pdk / "LT_PRO_ltoi300.lydrc").read_text(encoding="utf-8", errors="replace"))
+    assert ln["RIDGE"] == (2, 0) and lt["RIDGE"] == (2, 10)
+    assert ln["SLAB"] == (3, 0) and lt["SLAB"] == (3, 10)
+    # the metal move is the silent one: 21/0 holds no rule on the LT deck
+    assert ln["M1"] == (21, 0) and lt["M1"] == (20, 0)
+
+
+def test_the_deck_runner_reports_layers_it_could_not_see():
+    import inspect
+
+    from picchain.stages import s06_drc
+
+    src = inspect.getsource(s06_drc)
+    assert "layers_named_and_empty" in src
+    assert "cannot have failed" in src
+
+
+def test_a_must_target_absent_from_the_corner_list_is_added_where_reachable():
+    """Updated 2026-08-16. The first version of this guard added every absent
+    `must` row, which dragged layout and drc into a physics sweep and failed 24
+    of 24 corners on rows a corner cannot move. Reachability is the resolved
+    stage closure: `mode` runs as a dependency of `grating` whether or not a
+    metric names it, so `mode.n_guided_modes` is evaluable."""
+    import inspect
+
+    from picchain import cli
+
+    src = inspect.getsource(cli)
+    assert "must_absent" in src
+    # reachable ones are added
+    assert "addable" in src and "they have been added" in src
+    # the rest are named, not forced in and not dropped
+    assert "unreachable" in src
+    assert "properties of the mask rather than of the process point" in src
+    # reachability uses the closure, not the directly named stages
+    assert "_resolve_stages(_declared" in src
+
+
+def test_the_deck_runner_names_what_occupies_each_layer_it_reads():
+    """A layer map written for one stack carries auxiliary layers chosen because
+    that stack ignored them. The seal ring, dicing lane and facet marks sat on
+    20/0, 22/0 and 23/0: unread by the niobate deck, read as M1, M2 and HRL by
+    the tantalate one."""
+    import inspect
+
+    from picchain.stages import s06_drc
+
+    src = inspect.getsource(s06_drc)
+    assert "deck_layer_sources" in src
+    assert "more than one design layer lands on" in src
+
+
+# --- the platform is bound to its deck ---------------------------------------
+#
+# A tantalate design was drawn on the niobate stack's layer numbers and checked
+# against the niobate deck. It returned zero violations, ten of ten release
+# conditions and a signed manifest. Nothing connected the declared platform to
+# the deck, so nothing could contradict it.
+
+
+def test_a_deck_declares_its_own_stack():
+    import pathlib
+
+    from picchain.stages.s06_drc import deck_identity
+
+    pdk = pathlib.Path(__file__).resolve().parents[1] / "pdk" / "LXT_KLayout_DRC_Runsets"
+    ln = deck_identity((pdk / "LN_CORE_lnoi400.lydrc").read_text(encoding="utf-8", errors="replace"))
+    lt = deck_identity((pdk / "LT_PRO_ltoi300.lydrc").read_text(encoding="utf-8", errors="replace"))
+    assert "lnoi400" in ln and "ltoi300" in lt
+
+
+def test_a_deck_for_another_stack_is_refused_before_it_runs():
+    import pytest
+
+    from picchain.config import Design
+    from picchain.stages.s06_drc import DeckPlatformMismatch, check_deck_matches_platform
+
+    d = Design(meta={"name": "x"}, grating={"period_um": 1.417},
+               platform={"stack": "ltoi300"})
+    # the deck it belongs to
+    check_deck_matches_platform(d, "<description>LT-PRO ltoi300 DRC</description>")
+    # a deck from the other stack of the same foundry
+    with pytest.raises(DeckPlatformMismatch):
+        check_deck_matches_platform(d, "<description>LN-CORE lnoi400 DRC</description>")
+    # a deck that names no stack at all cannot be matched, so it is refused too
+    with pytest.raises(DeckPlatformMismatch):
+        check_deck_matches_platform(d, "# a runset with no identity")
+
+
+def test_an_undeclared_stack_leaves_the_check_off():
+    """The bind is opt-in, so existing designs are not broken by adding it."""
+    from picchain.config import Design
+    from picchain.stages.s06_drc import check_deck_matches_platform
+
+    d = Design(meta={"name": "x"}, grating={"period_um": 1.417})
+    assert d.platform.stack is None
+    check_deck_matches_platform(d, "<description>LN-CORE lnoi400 DRC</description>")
+
+
+def test_a_stack_mismatch_is_not_filed_as_an_environment_failure():
+    """`run` downgrades an unrunnable deck to a warning and lets the release gate
+    refuse on 'no deck executed'. A wrong-stack deck would run perfectly, so it
+    must not take that path."""
+    import inspect
+
+    from picchain.stages import s06_drc
+
+    src = inspect.getsource(s06_drc.run)
+    # scope to the deck block: `run` has an earlier generic handler inside the
+    # per-rule loop, so a whole-function index comparison tests nothing
+    block = src[src.index("deck_result = run_deck"):]
+    assert "except DeckPlatformMismatch:" in block
+    assert block.index("except DeckPlatformMismatch:") < block.index("except Exception as exc:")
