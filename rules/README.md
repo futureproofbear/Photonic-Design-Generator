@@ -92,6 +92,7 @@ the run invokes.
 | generic | [corrections-and-fits.md](generic/corrections-and-fits.md) | adopting, testing and withdrawing a correction factor |
 | generic | [expensive-solves.md](generic/expensive-solves.md) | scoping, launching and reading a solve that costs hours |
 | generic | [slides-and-figures.md](generic/slides-and-figures.md) | a slide that overflows loses its conclusion silently |
+| generic | [prose-and-register.md](generic/prose-and-register.md) | the register every document takes; a house standard, adopted by decision rather than derived from evidence |
 | platform | [thin_film_pockels/](platform/thin_film_pockels/) | thin-film lithium niobate and lithium tantalate |
 | tool | [klayout/](tool/klayout/) | the rule-check engine and foundry runsets |
 | tool | [gdsfactory/](tool/gdsfactory/) | the second layout backend |
