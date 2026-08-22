@@ -864,7 +864,7 @@ def doctor(
         lines.append("               on Windows this is WSL: set fdtd.wsl_distro and "
                      "fdtd.environment to match your install")
         lines.append("               a band structure costs about 3 hours; see "
-                     "'Running the Chain Efficiently' in CLAUDE.md")
+                     "'Running the Chain Efficiently' in PICCHAIN_REFERENCE.md")
 
     if lines:
         typer.echo("", err=True)

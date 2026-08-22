@@ -165,6 +165,9 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 # --------------------------------------------------------------------------
 DEFAULT_KLAYOUT = [
     r"%LOCALAPPDATA%\KLayout\klayout-0.30.10-win64\klayout_app.exe",
+    # The per-user Windows installer's actual target, confirmed against a real
+    # install: unversioned, and under Roaming rather than Local.
+    r"%APPDATA%\KLayout\klayout_app.exe",
     r"C:\Program Files\KLayout\klayout_app.exe",
     "/usr/bin/klayout",
     "/usr/local/bin/klayout",

@@ -1,29 +1,52 @@
 #!/usr/bin/env python3
 """IP boundary check.
 
-Project-specific information is required to remain within
-``projects/<project>/``. This script enforces that requirement mechanically so
-that the boundary is not dependent on recollection.
+Project-specific information is required to remain outside the tree that this
+script scans. This script enforces that requirement mechanically so that the
+boundary is not dependent on recollection.
+
+Two arrangements are supported
+-------------------------------
+**The framework holding its own scopes.** A project lives inside this
+repository at ``projects/<scope>/`` and declares
+``projects/<scope>/proprietary_terms.txt``. This is the arrangement the
+repository was built around, and it remains the default.
+
+**The framework mounted as a submodule of an application repository**, at
+``<app>/.framework/`` per the standard two-repository layout. Here the
+proprietary content is the application repository itself, one level above the
+framework root, and it declares a single ``proprietary_terms.txt`` at its own
+root. The framework tree is what is about to be pushed upstream, so it is what
+gets scanned; the application tree outside ``.framework/`` is never scanned,
+because it never leaves its own repository.
+
+The submodule arrangement is detected automatically: a linked ``.git`` file
+(the marker Git leaves in a submodule checkout) or a framework directory named
+``.framework`` triggers it. ``--app-root`` overrides detection where neither
+holds.
 
 How the term lists are handled
 ------------------------------
 The terms that identify a project are themselves proprietary to it, so they
-cannot be held in a shared list at the repository root. Each project therefore carries its
-own ``proprietary_terms.txt``. Every such file is read, and the union of the
-terms is searched for across the *generic* tree only. A term never appears
-outside its own project by construction.
+cannot be held in a shared list at the repository root. Each project therefore
+carries its own ``proprietary_terms.txt``. Every such file is read, and the
+union of the terms is searched for across the *generic* tree only. A term
+never appears outside its own project by construction.
 
 Scope of the scan
 -----------------
-Scanned:      everything outside ``projects/``
+Scanned:      the framework tree, excluding ``projects/``
 Not scanned:  ``projects/`` itself, ``.git``, ``.venv``, ``__pycache__``,
-              ``runs/``, and binary files
+              ``runs/``, binary files, and — under the submodule arrangement —
+              everything in the enclosing application repository
 
 Usage
 -----
-    python tools/check_ip_boundary.py            # scan, report, set exit code
-    python tools/check_ip_boundary.py --list     # show the loaded term count only
-    python tools/check_ip_boundary.py --root .   # explicit repository root
+    python tools/check_ip_boundary.py                # scan, report, set exit code
+    python tools/check_ip_boundary.py --list          # show the loaded term count only
+    python tools/check_ip_boundary.py --root .        # explicit framework root
+    python tools/check_ip_boundary.py --app-root ..   # explicit application root,
+                                                       # for the submodule arrangement
 
 Exit codes
 ----------
@@ -65,6 +88,40 @@ def load_terms(projects_dir: Path) -> dict[str, list[str]]:
     return out
 
 
+def load_app_terms(app_root: Path) -> dict[str, list[str]]:
+    """Return {app_root.name: [term, ...]} for the submodule arrangement, where
+    the application repository enclosing the framework declares one term list
+    at its own root rather than one per ``projects/<scope>/`` folder."""
+    f = app_root / TERMS_FILENAME
+    if not f.is_file():
+        return {}
+    terms = []
+    for raw in f.read_text(encoding="utf-8").splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line:
+            terms.append(line)
+    return {app_root.name: terms} if terms else {}
+
+
+def detect_app_root(root: Path, override: str | None) -> Path | None:
+    """Return the enclosing application repository root where the framework is
+    mounted as its submodule, or None where it is not.
+
+    A linked ``.git`` file is the marker Git itself leaves in a submodule
+    checkout (an ordinary clone has a ``.git`` directory), so it is checked
+    first and trusted unconditionally. The directory name ``.framework`` is
+    the convention the layout is built on and is checked as a fallback, for
+    the window before ``git submodule add`` has run.
+    """
+    if override:
+        return Path(override).resolve()
+    if (root / ".git").is_file():
+        return root.parent
+    if root.name == ".framework":
+        return root.parent
+    return None
+
+
 def iter_scannable(root: Path, projects_dir: Path):
     for path in root.rglob("*"):
         if not path.is_file():
@@ -78,9 +135,8 @@ def iter_scannable(root: Path, projects_dir: Path):
         yield path
 
 
-def scan(root: Path) -> list[tuple[Path, int, str, str, str]]:
+def scan(root: Path, terms_by_project: dict[str, list[str]]) -> list[tuple[Path, int, str, str, str]]:
     projects_dir = root / "projects"
-    terms_by_project = load_terms(projects_dir)
     if not terms_by_project:
         return []
 
@@ -110,30 +166,44 @@ def scan(root: Path) -> list[tuple[Path, int, str, str, str]]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--root", default=None, help="repository root (default: parent of this script)")
+    ap.add_argument("--root", default=None, help="framework root (default: parent of this script)")
+    ap.add_argument("--app-root", default=None,
+                    help="application repository root, for the submodule arrangement "
+                         "(default: auto-detected)")
     ap.add_argument("--list", action="store_true", help="report the loaded term count and exit")
     args = ap.parse_args()
 
     root = Path(args.root).resolve() if args.root else Path(__file__).resolve().parents[1]
     if not (root / "design-chain").is_dir():
-        print(f"error: {root} does not look like the repository root", file=sys.stderr)
+        print(f"error: {root} does not look like the framework root", file=sys.stderr)
         return 2
 
     projects_dir = root / "projects"
     terms_by_project = load_terms(projects_dir)
+
+    app_root = detect_app_root(root, args.app_root)
+    if app_root is not None:
+        terms_by_project.update(load_app_terms(app_root))
 
     if args.list:
         if not terms_by_project:
             print("no project term lists found")
         for project, terms in terms_by_project.items():
             print(f"{project}: {len(terms)} terms declared")
+        if app_root is not None:
+            print(f"submodule arrangement detected; application root: {app_root}")
         return 0
 
     if not terms_by_project:
-        print("no project term lists found; nothing to enforce")
+        if app_root is not None:
+            print(f"WARNING  submodule arrangement detected at {app_root}, but "
+                  f"{app_root / TERMS_FILENAME} does not exist; nothing is enforced "
+                  f"until it is declared", file=sys.stderr)
+        else:
+            print("no project term lists found; nothing to enforce")
         return 0
 
-    hits = scan(root)
+    hits = scan(root, terms_by_project)
     n_terms = sum(len(t) for t in terms_by_project.values())
     scanned = sum(1 for _ in iter_scannable(root, projects_dir))
 

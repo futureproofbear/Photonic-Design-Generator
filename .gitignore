@@ -19,8 +19,12 @@ __pycache__/
 #
 # The files remain on disk where they are: tools/check_ip_boundary.py reads
 # projects/<scope>/proprietary_terms.txt in place, so excluding the tree from
-# version control does not weaken the check. The intended arrangement is a
-# separate private repository per scope, mounted at projects/<scope>/.
+# version control does not weaken the check. Two arrangements are supported.
+# A separate private repository per scope may be mounted at projects/<scope>/,
+# which is what this exclusion covers. Alternatively this framework may be
+# mounted, as a submodule, inside a private application repository at
+# <app>/.framework/; there the application root itself declares one
+# proprietary_terms.txt, detected automatically by check_ip_boundary.py.
 projects/*
 !projects/_template/
 !projects/README.md
