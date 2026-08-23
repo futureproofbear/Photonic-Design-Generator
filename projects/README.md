@@ -65,7 +65,14 @@ Then, at the new repository's own root:
    client and programme identifiers, declared before any analysis is written.
 3. Create `designs/<design-name>/`, with `requirements/` before `design.yaml`
    exists, so that what the design is required to do is reviewed before it is
-   baselined.
+   baselined. **Invoke the `requirements-reviewer` sub-agent on that set before
+   baselining it.** It recomputes every derived value, registers the
+   contradictions within the source document, tests each requirement against
+   the platform constraints and the selected parts, and checks whether a
+   requirement inherited from a reference device still measures what limits
+   this architecture. Those errors are committed before a design file exists
+   and they survive every later check, because the run is faithful to a
+   requirement set that was already wrong.
 4. Run the chain from inside the submodule, pointing back at the design:
 
    ```bash
