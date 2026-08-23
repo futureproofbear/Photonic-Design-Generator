@@ -196,9 +196,15 @@ def main() -> int:
 
     if not terms_by_project:
         if app_root is not None:
+            terms_file = app_root / TERMS_FILENAME
+            if terms_file.is_file():
+                reason = (f"{terms_file} exists but declares no active terms "
+                          f"(every line is blank or commented)")
+            else:
+                reason = f"{terms_file} does not exist"
             print(f"WARNING  submodule arrangement detected at {app_root}, but "
-                  f"{app_root / TERMS_FILENAME} does not exist; nothing is enforced "
-                  f"until it is declared", file=sys.stderr)
+                  f"{reason}; nothing is enforced until a term is declared",
+                  file=sys.stderr)
         else:
             print("no project term lists found; nothing to enforce")
         return 0

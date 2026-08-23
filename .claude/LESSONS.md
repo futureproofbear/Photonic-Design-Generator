@@ -216,6 +216,78 @@ coherence design item and not a packaging afterthought.
 
 ---
 
+### L024 — The scope of a platform limit belongs in the record beside its value
+*Recorded 2026-08. Class: procedural. Confidence: high, both readings were
+worked through and they produce different architectures.*
+
+A material limit is ordinarily reported against the structure where it was
+noticed. A power ceiling observed in a resonator gets written down as a ceiling
+"in the cavity". That phrase carries an ambiguity the number does not: it may be
+a property of resonant buildup, where circulating intensity greatly exceeds what
+is launched, or a property of any waveguide in that material.
+
+**The two readings are not a matter of degree. They select different
+architectures.** Under the resonant reading the constraint binds one element and
+the rest of the circuit distributes power freely. Under the material reading
+every passive splitter, every modulator and every feed is bound by the same
+number, and a circuit that routes more than the ceiling anywhere cannot be built
+on that material alone. In the case that produced this entry the second reading
+forced a partition across two materials, changed a splitter ratio, introduced
+interface transitions that no component list carried, and propagated into the
+linewidth budget through the output-power term.
+
+An architecture had been drafted against the first reading, and a resolution
+accepted, before the question was asked. The resolution was void.
+
+**Record the scope when the value is recorded.** A one-line qualifier — this
+element, this material, this wavelength, this intensity, this average power —
+costs nothing at the time and decides what the number governs. Where the scope
+is unknown, record that it is unknown and treat the constraint as blocking
+rather than as satisfied: the permissive reading is the one that silently
+produces an unbuildable design.
+
+**Ask for the mechanism as well.** Damage, absorption-driven heating and a
+foundry handling statement scale differently and carry different margin. A
+number without a mechanism cannot be extrapolated to another wavelength, duty
+cycle or geometry, and it cannot be argued with.
+
+---
+
+### L025 — A specification tighter than its own justifying analysis is slack
+*Recorded 2026-08. Class: procedural. Confidence: high, the mechanism is plain
+and one worked case is given.*
+
+A component specification and the system analysis that justifies it are written
+at different times, often by different hands, and they drift apart in one
+direction: the specification tightens. A system analysis performed with a
+conservative placeholder is not revisited when the component target is later set
+at a firmer value, so the requirement ends up demanding performance the analysis
+never asked for.
+
+In the case that produced this entry a linewidth requirement stood three times
+tighter than the per-source figure the system budget had assumed when computing
+the very quantity that requirement exists to protect. Relaxing the requirement
+to the assumed figure cost nothing measurable at system level, and it released a
+design freedom that a coupled requirement needed.
+
+**The test is mechanical and is worth running over every requirement set.** For
+each component specification, find the value the system analysis actually
+substituted. Where the analysis used a looser number and still closed, the
+difference is free performance available to be spent elsewhere. Where the
+analysis used a tighter number than the specification, the specification does
+not protect the system and the conflict is real.
+
+The same comparison catches the opposite error, which is more dangerous because
+it is less visible: a figure quoted in a design table that the analysis never
+used, or used under a different convention. A quantity carried at unit overlap,
+in a different band, or before a derating is not the quantity the component must
+meet.
+
+**A specification is not evidence about a system until it is shown to be the
+number that system's analysis consumed.**
+
+---
+
 ## Toolchain Defects Found and Corrected
 
 Recorded because each represents a class of error that recurs.
