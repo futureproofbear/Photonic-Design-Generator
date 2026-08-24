@@ -43,6 +43,14 @@ The toolset is selected from
 [joamatab/awesome_photonics](https://github.com/joamatab/awesome_photonics). Four
 status values are used, and they are to be read strictly.
 
+**The licence of a candidate is examined before its capability.** This framework
+is distributed under the MIT licence, so a copyleft library imported by a stage
+would propagate its terms to the whole tree. A copyleft *executable* invoked as a
+separate process does not, no linking occurring, and that is the arrangement
+already used for the time-domain solver. The distinction decides the form an
+adoption may take rather than whether it may occur, and it is recorded in the
+tables below wherever it applies.
+
 | status | meaning |
 |---|---|
 | **now** | imported by a stage and exercised on every run |
@@ -70,7 +78,9 @@ status values are used, and they are to be read strictly.
 | RF link budget and cascades | **scikit-rf** | declared | installed with the circuit extras and imported by no stage. The receiver noise-figure cascade and a matching network for the electrode, whose impedance the chain now computes |
 | the same, when wired | **scikit-rf** | next | the receiver noise-figure cascade, and matching networks for the electrode now that its impedance is known |
 | lab automation | **pymeasure** / **autosweep** / **LabExT** | next | for device characterisation; the same YAML target lists become test limits |
-| system-level DSP | numpy/scipy | external | supplied by the project; device parameters are provided to it by the chain |
+| system-level DSP | numpy/scipy | external | supplied by the scope; device parameters are provided to it by the chain |
+| eigenmode expansion, second implementation | **meow** | declared | Apache 2.0, installed and importable. The in-chain local-mode expansion is presently checked against nothing. A second implementation of the same method would establish whether the adiabaticity margin rests on the method or on one coding of it, in the way femwell established that for the mode solve |
+| time-domain, native to Windows | **fdtdx** | declared | MIT, installed and importable, JAX-native, and it carries no external environment. The time-domain solver in use has no Windows build and is reached through a bridge into a second operating system, which is the single heaviest installation requirement the chain places on a machine. A solver that installs by `pip` removes that requirement, and being differentiable it also admits gradients the present one does not |
 
 ### 2.2 Surveyed and Not Adopted
 
@@ -92,6 +102,12 @@ mistaken for an oversight.
 | **optiCommPy**, **QAMpy** | optical communications DSP | the DSP chain is presently marked external. Two maintained options exist in the catalogue | a requirement for the chain to close the loop from device parameters to a range-Doppler result |
 | **lumopt**, **angler**, **SPLayout**, **ceviche-challenges** | inverse design | taper and coupler optimisation | availability of a propagation solver, which is a precondition |
 | **Luxtelligence `lxt_pdk_gf`** | foundry process design kit for thin-film lithium niobate (LNOI400) and thin-film lithium tantalate (LTOI300) | the only open process kit found for either platform. MIT licensed, installed with pip, native to gdsfactory, which the layout stage already carries. It supplies a component library, KLayout layer properties and a downloadable rule runset | adopt when a design is taken toward a fabrication run. It replaces the five hand-declared geometric rules with the foundry deck and fixes the layer stack, at which point the platform file must be reconciled with the process the kit describes |
+| **emepy** | eigenmode expansion | the same capability as **meow** above, under the MIT licence. **Not adopted on maintenance grounds**: the last commit to its repository is dated October 2022, so it is unmaintained by any ordinary reading. Recorded so that it is not proposed again | resumption of maintenance, or a defect in meow that emepy is found to handle |
+| **Xyce** | circuit simulation, SPICE | the chain computes an electrode capacitance and a lumped bandwidth, and it models no driver at all. Where a design is bounded by its drive rather than by its optics, the driver and the electrode form one circuit and neither alone answers the question. Xyce is GPLv3 and is therefore to be **invoked as a separate process against a netlist**, in the manner of the time-domain bridge, and never imported | a design whose acceptance set carries a drive-voltage row, or a ramp whose fidelity is specified |
+| **PySpice** | Python bindings to SPICE engines | the convenient route to the above, and **it may not be taken**. PySpice is GPLv3 and a stage importing it would place the whole framework under that licence. The netlist route above obtains the same result and preserves the MIT terms | it does not become adoptable by any technical development; only a relicensing would change this |
+| **lcapy** | symbolic linear circuit analysis | the RC and transmission-line algebra the electrode stage performs by hand, done symbolically. LGPL 2.1, which for a pure-Python import is a weaker obligation than the GPL and is not a settled question | a decision on the LGPL position, which is to be taken before the import and not after |
+| **openVAF** | Verilog-A compilation | compact models for the gain chip and the photodiodes, in the form a circuit simulator consumes. GPL 3.0, and a compiler, so it is invoked as a process | adoption of Xyce together with a need for a device model beyond its built-in set |
+| **SiPANN** | neural surrogates for photonic components | the staged search of section 3 exists because the expensive model cannot sit inside it, so the search runs on closed form and the solver runs afterwards. A surrogate trained on the solver would collapse that separation. MIT | a search whose closed-form stage is found to mis-rank candidates that the solver then re-orders |
 | **rii_pandas** | refractive index database | a candidate source for clearing entries tagged `needs_confirmation` | preferred only where foundry process control monitor data is unavailable |
 | **simphony**, **photontorch**, **opics**, **lekkersim** | circuit solvers | alternatives to SAX, of which photontorch adds time domain | a requirement for time-domain circuit behaviour |
 | **lytest** | layout regression testing | the layout stage carries no test, whereas the solvers carry eleven | any change to the layout stage beyond the present fixed floor plan |
@@ -134,6 +150,14 @@ analytic slab alone. The result is recorded in
 The list of items awaiting adoption is thereby exhausted. What follows is
 **SAX**, for circuit-level assembly, and a thermal and mechanical stage, for
 which the finite-element libraries are now present.
+
+**Two libraries were installed on 2026-08-24 and neither is yet imported by a
+stage**, so both stand at `declared` and the distinction the status table draws is
+to be respected: their availability is reported and their use is not. **meow**
+supplies a second implementation of the eigenmode expansion, and **fdtdx**
+supplies a time-domain solve that installs natively. The case for each is a
+dependence that the chain presently carries on a single implementation, and
+in the second instance on a second operating system.
 
 The eigenmode expansion and the time-domain solve answer different questions and
 are both retained. The expansion reports conversion between guided modes and the
