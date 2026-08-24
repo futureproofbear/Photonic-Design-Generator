@@ -1,4 +1,4 @@
-"""Headless CLI for the photonic-radar design chain.
+"""Headless CLI for the PIC design chain.
 
     picchain run     <design.yaml> [--stages ...] [--tag ...] [--json]
     picchain verify  <design.yaml> [--run latest]

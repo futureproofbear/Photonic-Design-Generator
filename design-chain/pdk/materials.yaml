@@ -1,4 +1,4 @@
-# Material database for the photonic-radar design chain.
+# Material database for the PIC design chain.
 #
 # Every entry carries a `provenance` field. Anything tagged `needs_confirmation`
 # must be replaced with foundry- or measurement-derived data before a tape-out

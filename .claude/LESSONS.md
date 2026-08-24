@@ -2296,3 +2296,137 @@ Enforced by `test_a_geometric_precondition_respects_a_disabled_stage`, which
 confirms the widened guide passes with the electrodes off and still fails with
 them on. A guard relaxed without the second half of that test would have removed
 the check rather than corrected it.
+
+### L026 — The collapse of a worst-case search to box corners is verified, not assumed
+*Recorded 2026-08. Class: method. Confidence: high, verified against 200 000
+interior samples in two boxes on one design.*
+
+Choosing a design point against the worst outcome over an interval of unknown
+parameters is a semi-infinite problem, one constraint per point of a continuous
+set. It becomes finite where every constraint is monotone in every uncertain
+parameter, because a monotone function over a box attains its extremum at a
+vertex, and four unknowns then cost sixteen evaluations rather than a search.
+
+Monotonicity is a property of the particular constraint set and is ordinarily
+asserted. In the case that produced this entry it was checked: the worst margin
+over the sixteen corners was compared against 200 000 uniformly sampled interior
+points, in a wide box and in a narrow one, and the corner bound was the lower of
+each pair. The check cost seconds.
+
+Where an interior point beats the corners the inner problem is not monotone, the
+corner set is not a bound, and every margin computed from it is optimistic by an
+unknown amount. The verification is what distinguishes a bound from a hope, and
+it is cheap enough that omitting it is never justified by cost.
+
+### L027 — An interval labelled as measured before anything was measured
+*Recorded 2026-08. Class: procedural. Confidence: high, one design, measured.*
+
+A worst-case design point is only as good as the interval box it was chosen
+against, and the box is written before the measurement it anticipates. Naming
+that interval after the measurement is the error, because the label then travels
+into every margin computed from it and into every document that quotes one.
+
+In the case that produced this entry a box was declared in two variants, one
+described as the unmeasured case and one as the measured case, and the design was
+reported feasible against the second. The parameters were later measured by a
+mode solve and an electrostatic solve. Two of the three axes came back **wider**
+than the assumed interval, the electro-optic overlap by a factor of 2.7 and the
+coupling constant by 3.7, and only the group index came back narrower. The
+worst-case margin with realisation error included fell from +8.89 per cent to
++1.13 per cent on that correction alone.
+
+The design had not changed. What changed was the accuracy of the box. Label an
+assumed interval as assumed in the file where it is declared, and re-run the
+search whenever the box moves, which costs seconds where the solve that narrowed
+it cost hours.
+
+### L028 — An inherited target that the reference device never demonstrated
+*Recorded 2026-08. Class: procedural. Confidence: high, one design, and the
+framework reproduction of the reference device records the failure.*
+
+A requirement elicited from a scope document may have entered that document from
+a cited device rather than from the system it is meant to serve. Where the
+architecture then differs from that device, the figure is inherited twice over
+and is anchored to nothing.
+
+In the case that produced this entry a mode-hop-free tuning range of at least
+8 GHz was elicited, and the operational requirement derived from the system
+bandwidth was 3.0 GHz, a factor of 2.7 lower. The 8 GHz had come from a reference
+device with a different cavity architecture, and the framework reproduction of
+that device returns 3.85 GHz against the row and records a fail: **it had not
+been demonstrated even there.** The scope document blanket justification, that
+its targets sat below demonstrated performance, did not reach a row that was
+never demonstrated.
+
+Re-derive from the level above rather than adjusting the inherited figure, and
+check whether the source of an inherited number ever met it. Where a goal above
+the derived requirement is retained by decision, hold both rows and mark which is
+which, since a goal recorded as a requirement sizes the design against a number
+nobody asked for. Here that decision cost fifteen volts of drive, which is a
+legitimate price and an illegitimate accident.
+
+### L029 — An architecture statement contradicted by the datasheet of its own part
+*Recorded 2026-08. Class: procedural. Confidence: high, one design.*
+
+An architecture is ordinarily recorded as a diagram and as prose, and neither
+can be contradicted by evidence. A numbered statement in the requirement set
+carrying a source can be, and the difference is not cosmetic.
+
+In the case that produced this entry an architecture row asserted a
+high-reflectivity back facet on a purchased gain chip. The datasheet for the
+part actually selected gives approximately ten per cent, which is a partial
+reflector. The lasing condition, the threshold gain and the output extraction
+all follow from the actual value. The error survived elicitation and one review,
+and was found only when the part number was checked against the row that
+described it.
+
+Write the architecture as rows with sources, and check each row against the
+datasheet of the part it describes at the point the part is selected. A part
+substitution invalidates every row that described the part it replaced, and the
+rows are not adjacent to the substitution in any document.
+
+### L030 — A lumped variable that the mask makes conditional on another
+*Recorded 2026-08. Class: method. Confidence: high, one design, measured.*
+
+An early-stage search treats lumped quantities as independent because in closed
+form they are. Geometry may couple them, and the coupling is invisible to a
+stage that never draws a polygon.
+
+In the case that produced this entry a search chose a coupling constant and an
+electrode gap from independent lists. Realising the coupling constant required a
+post gap, and weakening the grating opened that gap, which moved the posts
+outward, which forced the electrode to retreat to hold a metal-to-ridge
+separation rule, which lowered the tuning rate as one over the gap. The tuning
+rate fell from the assumed 587 MHz/V to 494, and its margin from +30.5 per cent
+to +9.8, on a row that was already the binding one.
+
+The remedy is to carry the dependency into the early stage as a function rather
+than to discover it later: the electrode floor became a function of the coupling
+constant, fitted from the same mode solves that performed the inversion. A
+search over a variable the mask cannot vary independently is exploring
+geometries that cannot be built.
+
+### L031 — An instrument whose discretisation error exceeded the quantity measured
+*Recorded 2026-08. Class: method. Confidence: high, one design, quantified by
+the convergence guard.*
+
+An independent method is run to check a model, and the check may be beneath the
+resolution of that method. Where the quantity is a small difference of two large
+numbers, that outcome is likely rather than exotic.
+
+In the case that produced this entry a band-structure solve was run to check a
+coupling constant obtained from coupled-mode theory. The band gap is the
+difference of two nearly degenerate bands, and at a coupling constant of
+1.5 cm⁻¹ that gap is a split in the fifth decimal of normalised frequency.
+Between two mesh densities the method moved the coupling constant by 0.613 cm⁻¹
+against a disagreement with the model of 0.339 cm⁻¹, so the error of the
+instrument stood at 1.8 times the signal. The band pair carrying the gap was
+itself identified differently at the two meshes.
+
+Two consequences. **The difficulty scales inversely with the quantity the design
+deliberately made small**, so a result obtained on a strongly coupled reference
+structure does not establish that the same check is available on a weakly
+coupled one. And a comparison that cannot resolve the question establishes
+nothing: report the mesh shift beside the disagreement, so that a later reader
+sees which exceeded which, and record the outcome as a finding about the
+instrument rather than quoting a number from it.

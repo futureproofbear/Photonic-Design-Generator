@@ -1,4 +1,4 @@
-"""Material database access for the photonic-radar design chain.
+"""Material database access for the PIC design chain.
 
 Loads ``pdk/materials.yaml`` and exposes dispersive refractive indices, the
 electro-optic tensor and the RF permittivity tensor in the *device* frame.

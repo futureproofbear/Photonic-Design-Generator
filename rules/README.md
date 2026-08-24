@@ -59,6 +59,24 @@ admissible where the platform is publicly offered. A platform-tier file does not
 name a project, an application, a deliverable code or the parameter set of a
 delivered design.
 
+## Where the method rules sit relative to each other
+
+Three files describe the conduct of a design from its requirements to its mask,
+and they are written to be read in that order.
+
+[`requirements-before-design.md`](generic/requirements-before-design.md) covers
+the layer above the chain: elicitation, recomputation of the source, the
+conflict and decision registers, the open questions, the re-derivation of an
+inherited target, the architecture rows and the review that precedes baselining.
+
+[`staged-design.md`](generic/staged-design.md) covers the ordering of the design
+itself, from the algebra that refutes an architecture before anything is run to
+the layout that ends it, and states what each stage exists to refute.
+
+[`design-under-uncertainty.md`](generic/design-under-uncertainty.md) covers the
+method by which a design point is chosen when parameters are unmeasured, which
+is what the second stage of that ordering performs.
+
 ## Contribution discipline
 
 **State the mechanism, and not the symptom alone.** A rule earns its place by
