@@ -808,15 +808,30 @@ def golden(
 
 @app.command()
 def doctor(
+    design: Optional[Path] = typer.Argument(
+        None, help="probe using this design's own fdtd settings rather than the defaults"),
     fdtd: bool = typer.Option(True, "--fdtd/--no-fdtd",
                               help="probe the external meep environment as well"),
 ):
-    """Report which optional backends are available."""
+    """Report which optional backends are available.
+
+    Without a design, the external solver is probed at the DEFAULT distribution
+    and environment names. A design that names its own reports unavailable here
+    while running correctly, so pass the design to probe what it will actually
+    use.
+    """
     from .artifacts import environment_fingerprint
     env = environment_fingerprint()
     if fdtd:
         from .fdtd import bridge
-        env["fdtd"] = bridge.probe()
+        backend = None
+        if design is not None:
+            d = Design.load(design)
+            backend = bridge.default_backend(processes=1)
+            backend.distro = d.fdtd.wsl_distro
+            backend.env = d.fdtd.environment
+            env["fdtd_probed_from"] = str(design)
+        env["fdtd"] = bridge.probe(backend)
     typer.echo(json.dumps(env, indent=2))
 
     # What is absent, and what to do about it.

@@ -65,11 +65,37 @@ def default_backend(processes: int = 1) -> Backend:
     return Backend(kind=kind, processes=processes)
 
 
+def _decode(raw) -> str:
+    """wsl.exe writes its own errors as UTF-16LE while the guest writes UTF-8.
+
+    A guest message therefore arrives readable and a wrapper message arrives
+    with a NUL between every character, which renders as `T\x00h\x00e\x00...`
+    and is unreadable in a report. The two are distinguished by the NULs.
+    """
+    if isinstance(raw, bytes):
+        try:
+            raw = raw.decode("utf-16-le" if b"\x00" in raw[:40] else "utf-8", "replace")
+        except Exception:
+            raw = raw.decode("utf-8", "replace")
+    return raw.replace("\x00", "") if isinstance(raw, str) else ""
+
+
 def probe(backend: Backend | None = None) -> dict:
-    """Report whether the solver can be reached, and its version."""
+    """Report whether the solver can be reached, and its version.
+
+    The report names the environment that was PROBED as well as the outcome.
+    Without it a wrong distribution name returns WSL_E_DISTRO_NOT_FOUND, which
+    reads as WSL being absent from the machine and sends the reader to install
+    what is already installed.
+    """
     backend = backend or default_backend()
+    where = {"kind": backend.kind, "environment": backend.env,
+             "launcher": backend.micromamba}
+    if backend.kind == "wsl":
+        where["distro"] = backend.distro
     if backend.kind == "wsl" and shutil.which("wsl.exe") is None:
-        return {"available": False, "reason": "wsl.exe is not on PATH"}
+        return {"available": False, "probed": where,
+                "reason": "wsl.exe is not on PATH"}
 
     # the version is printed with a marker, meep itself writing an elapsed-time
     # line to stdout on exit that would otherwise be mistaken for the answer
@@ -77,13 +103,29 @@ def probe(backend: Backend | None = None) -> dict:
     quoted = f'"{snippet}"' if backend.kind == "wsl" else snippet
     cmd = backend.command("-c", quoted, parallel=False)
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        out = subprocess.run(cmd, capture_output=True, timeout=300)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return {"available": False, "reason": str(exc)}
-    for line in (out.stdout or "").splitlines():
+        return {"available": False, "probed": where, "reason": str(exc)}
+    stdout, stderr = _decode(out.stdout), _decode(out.stderr)
+    for line in stdout.splitlines():
         if line.startswith("MEEP_VERSION="):
-            return {"available": True, "version": line.split("=", 1)[1].strip()}
-    return {"available": False, "reason": (out.stderr or out.stdout).strip()[-400:]}
+            return {"available": True, "probed": where,
+                    "version": line.split("=", 1)[1].strip()}
+    reason = (stderr or stdout).strip()[-400:]
+    hint = None
+    if "WSL_E_DISTRO_NOT_FOUND" in reason or "no distribution" in reason.lower():
+        hint = (f"WSL is reachable but carries no distribution named "
+                f"{backend.distro!r}. Run `wsl.exe -l -v` for the names actually "
+                f"present and set `fdtd.wsl_distro` to one of them. This is a "
+                f"name mismatch and not a missing installation.")
+    elif "micromamba" in reason and "No such file" in reason:
+        hint = (f"The distribution is reachable and the launcher is absent at "
+                f"{backend.micromamba}. Install micromamba there, or point "
+                f"MAMBA_ROOT_PREFIX at an existing environment root.")
+    res = {"available": False, "probed": where, "reason": reason}
+    if hint:
+        res["hint"] = hint
+    return res
 
 
 def run_taper(job: dict, work_dir: Path, backend: Backend | None = None,
