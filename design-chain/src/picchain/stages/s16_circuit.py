@@ -246,14 +246,46 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             f"assembled from a negative length. Lengthen cavity.feed_length_um beyond "
             f"layout.taper_length_um, or shorten the taper"
         )
+    # KEY NAMES CORRECTED 2026-08-27. Both look-ups below read keys that the
+    # stages they name do not write, so both guards failed and the declared
+    # placeholder was used instead. Neither substitution was reported. A stage
+    # that silently prefers a placeholder to a solved value is the failure mode
+    # the rest of this chain exists to prevent: on the design that exposed it
+    # the facet placeholder of 0.7 stood against a solved 0.777.
+    #
+    # `facet` writes `total_coupling`, not `total_efficiency`.
+    # `taper`  writes `transmission_fundamental`, not `transmission`.
+    #
+    # The old names are still accepted, so a stage that later emits them keeps
+    # working, and the provenance of each value is now recorded in the payload
+    # rather than left to be inferred.
     taper_t = float(cfg.taper_transmission)
+    taper_t_source = "cfg.taper_transmission"
     tp = ctx.get("taper") or {}
-    if cfg.use_taper_stage and tp.get("enabled") and tp.get("transmission") is not None:
-        taper_t = float(tp["transmission"])
+    tp_val = tp.get("transmission_fundamental")
+    if tp_val is None:
+        tp_val = tp.get("transmission")
+    # THE TAPER FIGURE IS USED ONLY WHERE IT MEANS SOMETHING. Eigenmode
+    # expansion reports loss as power leaving the fundamental for other GUIDED
+    # modes. Where the taper carries one guided mode along its whole length
+    # there is no second state to lose power to, the computed loss is zero by
+    # construction, and what the stage returns is its staircase residue. Reading
+    # that as a transmission imports a discretisation artefact as though it were
+    # physics, which is worse than the declared value it would replace.
+    single_moded = (tp.get("guided_modes_max") or 0) <= 1
+    if cfg.use_taper_stage and tp.get("enabled") and tp_val is not None and not single_moded:
+        taper_t = float(tp_val)
+        taper_t_source = "taper.transmission_fundamental"
+
     facet_t = float(cfg.facet_transmission)
+    facet_t_source = "cfg.facet_transmission"
     fc = ctx.get("facet") or {}
-    if cfg.use_facet_stage and fc.get("enabled") and fc.get("total_efficiency") is not None:
-        facet_t = float(fc["total_efficiency"])
+    fc_val = fc.get("total_coupling")
+    if fc_val is None:
+        fc_val = fc.get("total_efficiency")
+    if cfg.use_facet_stage and fc.get("enabled") and fc_val is not None:
+        facet_t = float(fc_val)
+        facet_t_source = "facet.total_coupling"
 
     netlist = {
         "instances": {
@@ -380,7 +412,9 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "connections": len(netlist["connections"]),
         "feed_length_um": feed_len,
         "facet_transmission": facet_t,
+        "facet_transmission_source": facet_t_source,
         "taper_transmission": taper_t,
+        "taper_transmission_source": taper_t_source,
         "peak_reflectivity_at_chip": peak_chip,
         "peak_reflectivity_of_mirror": peak_mirror,
         "closed_form_max_residual": residual,
