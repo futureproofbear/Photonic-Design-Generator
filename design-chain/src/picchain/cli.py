@@ -5,6 +5,7 @@
     picchain report  <design.yaml> [--run latest]
     picchain sweep   <design.yaml> --param a.b.c --values 1,2,3 --metric x.y
     picchain show    <design.yaml> [--metric dotted.path]
+    picchain history <design.yaml> [--prune]
     picchain doctor
 
 Exit codes (this is the contract an agent or CI iterates against):
@@ -393,6 +394,124 @@ def show(
         for p in metric.split("."):
             node = node[p]
     typer.echo(json.dumps(node, indent=2))
+
+
+@app.command()
+def history(
+    design: Path = typer.Argument(..., exists=True),
+    prune: bool = typer.Option(False, "--prune",
+        help="delete the regenerable artefacts of every run but the newest complete one"),
+    out: Optional[Path] = typer.Option(None, "--out",
+        help="directory for the summary; default is `history/` beside the design"),
+):
+    """Roll the run tree up into one summary, and optionally prune it.
+
+    THE CHAIN WRITES A RUN DIRECTORY PER INVOCATION AND NOTHING ROLLS IT UP. On
+    a design of any age the findings therefore exist only as a pile of
+    timestamped directories, and the pile is mostly field data: on the tree that
+    prompted this command, 912 MB of 931 was `.npz`, another 103 MB was repeated
+    copies of the same mask, and everything carrying a conclusion came to about
+    four megabytes spread over 67 `metrics.json` files.
+
+    That shape has two costs. Nobody can see what a hundred runs established
+    without opening a hundred files, and the tree cannot be pruned without
+    losing the findings, so it is not pruned and it grows.
+
+    This writes `RUNS.md` and `runs.json`, one row per run that produced a
+    metric. `--prune` then deletes what regenerates: the field arrays, the
+    figures and every mask but the newest complete run's. Each run keeps its
+    `design.resolved.json`, so any of them can be rebuilt.
+    """
+    runs_dir = design.parent / "runs"
+    if not runs_dir.is_dir():
+        typer.echo(f"no run tree under {runs_dir}", err=True)
+        raise typer.Exit(EXIT_USAGE)
+    dest = out or (design.parent / "history")
+    dest.mkdir(parents=True, exist_ok=True)
+
+    def dig(doc: dict, *path: str) -> Any:
+        node: Any = doc
+        for k in path:
+            if not isinstance(node, dict):
+                return None
+            node = node.get(k)
+        return node
+
+    FIELDS = [
+        ("kappa", ("grating", "kappa_per_cm")),
+        ("R", ("grating", "peak_reflectivity")),
+        ("fwhm", ("grating", "fwhm_GHz")),
+        ("fsr", ("cavity", "fsr_GHz")),
+        ("lever", ("cavity", "pockels_lever")),
+        ("sync", ("cavity", "mode_hop_free_range_synchronous_GHz")),
+        ("smsr", ("cavity", "smsr_dB")),
+        ("linewidth", ("cavity", "schawlow_townes_henry_linewidth_kHz")),
+        ("tuning", ("eo", "tuning_MHz_per_V")),
+        ("gamma", ("eo", "eo_overlap_gamma")),
+        ("adiabaticity", ("taper", "min_adiabaticity")),
+        ("facet_dB", ("facet", "total_loss_dB")),
+        ("drc", ("drc", "error_violations")),
+    ]
+    rows: list[dict] = []
+    for mp in sorted(runs_dir.glob("*/metrics.json")):
+        try:
+            doc = load_json(mp)
+        except Exception:
+            continue
+        met = doc.get("metrics", {})
+        vp = mp.parent / "verify.json"
+        ver = {}
+        if vp.exists():
+            try:
+                ver = load_json(vp)
+            except Exception:
+                ver = {}
+        row = {"run": mp.parent.name, "verdict": ver.get("verdict")}
+        row.update({name: dig(met, *path) for name, path in FIELDS})
+        # The external solver is the expensive one and its disagreements are the
+        # point, so it is carried separately rather than averaged into a column.
+        row["fdtd_structure"] = dig(met, "fdtd", "structure")
+        row["fdtd_kappa"] = dig(met, "fdtd", "kappa_per_cm")
+        rows.append(row)
+
+    dump_json(dest / "runs.json", rows)
+    names = ["run", "verdict"] + [n for n, _ in FIELDS]
+    fmt = lambda v: "" if v is None else (f"{v:.4g}" if isinstance(v, float) else str(v))
+    lines = [
+        "# Every run that produced a metric",
+        "",
+        "Written by `picchain history`. The run tree holds the field data, which is",
+        "large and regenerable; this is what the runs established, so that pruning",
+        "the tree costs nothing. `runs.json` carries the same rows as data.",
+        "",
+        "| " + " | ".join(names) + " |",
+        "|" + "---|" * len(names),
+    ]
+    lines += ["| " + " | ".join(fmt(r[n]) for n in names) + " |" for r in rows]
+    fd = [r for r in rows if r["fdtd_kappa"] is not None]
+    if fd:
+        lines += ["", "## Runs of the external solver", "",
+                  "| run | structure | kappa /cm |", "|---|---|---|"]
+        lines += [f"| {r['run']} | {r['fdtd_structure']} | {fmt(r['fdtd_kappa'])} |" for r in fd]
+    (dest / "RUNS.md").write_text(chr(10).join(lines) + chr(10), encoding="utf-8")
+    typer.echo(f"{len(rows)} runs summarised into {dest}")
+
+    if not prune:
+        return
+    complete = [mp.parent for mp in sorted(runs_dir.glob("*/metrics.json"))]
+    keep = complete[-1].name if complete else ""
+    freed = removed = 0
+    for path in runs_dir.rglob("*"):
+        if not path.is_file() or path.parent.name == keep:
+            continue
+        regenerable = path.suffix in {".npz", ".png"} or (
+            path.suffix in {".gds", ".oas"} and "markers" not in path.name)
+        if regenerable:
+            freed += path.stat().st_size
+            path.unlink()
+            removed += 1
+    typer.echo(f"pruned {removed} regenerable files, {freed / 1e6:.0f} MB; "
+               f"field data retained for {keep or 'no complete run'}")
 
 
 @app.command()
