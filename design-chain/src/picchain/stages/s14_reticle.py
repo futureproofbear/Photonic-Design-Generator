@@ -592,6 +592,37 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             ),
         }
 
+    # --- every ridge on the die carries slab under it ---------------------
+    #
+    # The device draws its own, on the centre lines of its guides. The process
+    # monitors draw none: a die released from this chain put sixty of its
+    # sixty-two ridge regions outside the slab, the loss cutback and the
+    # electrode ladder among them. Those structures exist to measure the
+    # process the device runs in, and a ridge on bare oxide is a different
+    # waveguide from the one the device carries, so all four monitor
+    # quantities described something the die does not contain.
+    #
+    # What is added here is the slab for whatever ridge is not yet on one, so
+    # a structure added to the die in future carries its slab without anyone
+    # having to remember. The monitors are straight and rectangular, so sizing
+    # their ridges is exact.
+    slab_offset_um = design.platform.slab_offset_um
+    monitor_slab_um2 = 0.0
+    if slab_offset_um is not None:
+        li_wg, li_slab = lmap.get("WG"), lmap.get("SLAB")
+        if li_wg is not None and li_slab is not None:
+            iw = layout.layer(*li_wg)
+            isl = layout.layer(*li_slab)
+            ridges = db.Region(die.begin_shapes_rec(iw)).merged()
+            slab = db.Region(die.begin_shapes_rec(isl)).merged()
+            uncovered = (ridges - slab).merged()
+            if not uncovered.is_empty():
+                extra = uncovered.sized(
+                    int(round(float(slab_offset_um) / DBU))).merged()
+                monitor_slab_um2 = float(extra.area()) * DBU * DBU
+                die.shapes(isl).insert(extra)
+                counts["SLAB"] = counts.get("SLAB", 0) + int(extra.count())
+
     gds = ctx.run_dir / f"{design.meta.name}.die.gds"
     ctx.ensure()
     layout.write(str(gds))

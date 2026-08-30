@@ -32,6 +32,21 @@ class Platform(BaseModel):
     film_material: str = "LiNbO3"
     film_thickness_um: float = 0.400
     etch_depth_um: float = 0.200
+    #: how far the unetched slab extends either side of a guide, um.
+    #:
+    #: Left unset the slab is a blanket, unbroken across the whole cross-section
+    #: and across the whole die. That is what a design released from this chain
+    #: drew: one polygon 19326 by 1669 um spanning both modulators and both
+    #: facets. A slab of index above the cladding guides, so an unbroken sheet
+    #: offers a facet-to-facet path that bypasses the device, couples the arms of
+    #: an interferometer along their whole length, and carries a strong signal
+    #: across to a weak one. It also puts high-permittivity material under every
+    #: conductor, which the microwave solve then reports.
+    #:
+    #: Set, the slab is drawn as a strip of `width + 2 * offset` around each
+    #: guide and the conductors sit on the buried oxide outside those strips.
+    #: `lxt_pdk_gf` uses 6.0 um.
+    slab_offset_um: float | None = None
     sidewall_deg: float = 90.0
     box_material: str = "SiO2"
     box_thickness_um: float = 4.7
@@ -864,6 +879,10 @@ class LayoutCfg(BaseModel):
     #: stations at which the taper's profile is sampled when it is drawn. The
     #: curve itself is `taper.profile`, shared with the stage that evaluates it
     taper_segments: int = 64
+    #: the narrowest slab feature the process allows, um. The slab derived from
+    #: the ridges is opened by half of this, which removes the spikes sizing
+    #: leaves at the acute tip of a facet taper
+    slab_min_width_um: float = 0.30
     input_facet_angle_deg: float = 8.0
     output_facet_angle_deg: float = 0.0
     #: Side of the square bond pad on each electrode, in micrometres. This was a

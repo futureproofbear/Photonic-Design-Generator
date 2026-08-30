@@ -261,6 +261,15 @@ def _sbend_peak_radius(dy: float, length: float) -> float:
     return float("inf") if kappa <= 0 else 1.0 / kappa
 
 
+def _cos_sbend_path(x0: float, y0: float, y1: float, length: float,
+                    n_seg: int = 96) -> list[tuple[float, float]]:
+    """The centre line of a raised-cosine S-bend, as points."""
+    dy = y1 - y0
+    return [(x0 + length * i / n_seg,
+             y0 + dy * (1.0 - math.cos(math.pi * i / n_seg)) / 2.0)
+            for i in range(n_seg + 1)]
+
+
 def _slot_trajectory(scale_a: float, scale_b: float, n: int) -> list[float]:
     """A raised cosine from one cross-section scale to another.
 
@@ -316,6 +325,40 @@ def _strip_on_path(path: list[tuple[float, float]], width: float,
     for (xa, ya), (xb, yb) in zip(path, path[1:]):
         out.append([(xa, sgn * ya - half), (xb, sgn * yb - half),
                     (xb, sgn * yb + half), (xa, sgn * ya + half)])
+    return out
+
+
+def slab_from_ridges(polys: dict, offset_um: float, dbu: float = DBU,
+                     min_width_um: float = 0.30) -> list:
+    """The unetched slab, as a strip of `offset_um` around every drawn ridge.
+
+    Derived from the ridges rather than declared, so a structure added to the
+    mask carries its slab whether or not whoever added it remembered. A die
+    released from this chain drew one blanket slab under the devices and left
+    sixty of its sixty-two ridge regions outside it: the loss cutback and the
+    electrode ladder, whose whole purpose is to measure the process the device
+    runs in, sat on bare oxide and measured a different waveguide.
+
+    A blanket slab is the other failure. It guides, so it offers a path from
+    facet to facet that bypasses the device and couples everything on the die.
+    """
+    import klayout.db as db
+
+    ridges = db.Region()
+    for poly in polys.get("WG", []):
+        ridges.insert(db.Polygon([db.Point(int(round(x / dbu)), int(round(y / dbu)))
+                                  for x, y in poly]))
+    grown = ridges.merged().sized(int(round(float(offset_um) / dbu))).merged()
+    # Sizing mitres the corners, and at the acute tip of a facet taper that
+    # leaves a spike narrower than the minimum width. An opening, an erosion
+    # followed by a dilation of the same amount, removes anything thinner than
+    # twice it and leaves the body of the strip where it was.
+    t = int(round(0.5 * float(min_width_um) / dbu))
+    if t > 0:
+        grown = grown.sized(-t).sized(t).merged()
+    out = []
+    for poly in grown.each():
+        out.append([(pt.x * dbu, pt.y * dbu) for pt in poly.each_point_hull()])
     return out
 
 
@@ -448,6 +491,31 @@ def build_mzm_polygons(design: Design, ctx: RunContext) -> tuple[dict, dict]:
     else:
         _pad_metal_all = []
 
+    # The centre line of each arm, from the splitter to the combiner. The slab
+    # strip is drawn on this same path, so it follows the guide exactly rather
+    # than being derived from the drawn ridge by sizing, which mitres every
+    # corner of a curved strip and leaves slivers below the minimum width.
+    arm_paths: dict[float, list[tuple[float, float]]] = {}
+    for sgn in (-1.0, 1.0):
+        yc = sgn * y_mmi
+        path: list[tuple[float, float]] = [(x_port_out, yc), (x_sb_out, yc)]
+        path += _cos_sbend_path(x_sb_out, yc, sgn * y_entry,
+                                m.sbend_length_um, m.sbend_segments)
+        if m.pads:
+            path += [(x_pad0, sgn * y_entry), (x_padtap0, sgn * y_entry)]
+            path += [(px, sgn * py) for px, py in pad_in_path]
+        path += [(x_elec0, sgn * arm_y), (x_elec1, sgn * arm_y)]
+        if m.pads:
+            path += [(px, sgn * py) for px, py in pad_out_path]
+            path += [(x_padtap1, sgn * y_entry), (x_pad1, sgn * y_entry)]
+        path += _cos_sbend_path(x_pad1, sgn * y_entry, yc,
+                                m.sbend_length_um, m.sbend_segments)
+        path += [(x_port_in, yc), (x_mmi_out, yc)]
+        # drop repeated stations so the strip carries no zero-length segment
+        arm_paths[sgn] = [pt for i, pt in enumerate(path)
+                          if i == 0 or abs(pt[0] - path[i - 1][0]) > 1e-9
+                          or abs(pt[1] - path[i - 1][1]) > 1e-9]
+
     for sgn in (-1.0, 1.0):
         yc = sgn * y_mmi
         out["WG"].append([(x_port_out, yc - port_w / 2.0), (x_sb_out, yc - wg / 2.0),
@@ -471,9 +539,14 @@ def build_mzm_polygons(design: Design, ctx: RunContext) -> tuple[dict, dict]:
     out["WG"].append(_rect(x_mmi_out, -m.mmi_width_um / 2.0,
                            x_mmi_out + m.mmi_length_um, m.mmi_width_um / 2.0))
     out["WG"].append(_rect(x_mmi_out + m.mmi_length_um, -wg / 2.0, x_taper_out, wg / 2.0))
+    # Reversed about its own start, so the full width meets the guide at
+    # `x_taper_out` and the tip reaches the polish line at `z_end`. Anchoring it
+    # at `z_end` instead put the whole taper beyond the end of the device, which
+    # left it outside the slab and made the drawn cell 250 um longer than
+    # `device_length_um` reported.
     out["WG"].append(taper_profile.outline(tip, wg, tl, prof,
                                           segments=lay.taper_segments,
-                                          x0=z_end, reverse=True))
+                                          x0=x_taper_out, reverse=True))
 
     # ---- METAL: signal between two grounds, over the straight arms -------
     out["METAL"] += _pad_metal_all
@@ -525,10 +598,27 @@ def build_mzm_polygons(design: Design, ctx: RunContext) -> tuple[dict, dict]:
                 out["METAL"].append(_rect(xc - hw, g_lo, xc + hw, sh_lo))
                 out["METAL"].append(_rect(xc - hw, sh_hi, xc + hw, g_hi))
 
-    # ---- the blanket slab and the floor plan -----------------------------
+    # ---- the slab and the floor plan -------------------------------------
     span = (max(y_dev) - min(y_dev)) / 2.0
     pad_y = span + sig / 2.0 + gap + gnd + 20.0
-    out["SLAB"].append(_rect(-5.0, -pad_y, z_end + 5.0, pad_y))
+    slab_offset = design.platform.slab_offset_um
+    if slab_offset is None:
+        out["SLAB"].append(_rect(-5.0, -pad_y, z_end + 5.0, pad_y))
+    else:
+        sw = wg + 2.0 * float(slab_offset)
+        # the two arms, on their own centre lines
+        arm_slab: list = []
+        for sgn, path in arm_paths.items():
+            arm_slab += _strip_on_path(path, sw)
+        # the axis at each end: the facet taper, the lead and the multimode
+        # section, which is wider than a guide and takes the slab with it
+        aw = max(m.mmi_width_um, wg) + 2.0 * float(slab_offset)
+        head = _rect(-float(slab_offset), -aw / 2.0, x_port_out, aw / 2.0)
+        tail = _rect(x_mmi_out, -aw / 2.0, z_end + float(slab_offset), aw / 2.0)
+        arm_slab += [head, tail]
+        # one device's slab, placed once per modulator like its guides
+        for dy in y_dev:
+            out["SLAB"] += [[(px, py + dy) for px, py in poly] for poly in arm_slab]
     out["FLOORPLAN"].append(_rect(-5.0, -pad_y - 5.0, z_end + 5.0, pad_y + 5.0))
 
     if lay.draw_facets:

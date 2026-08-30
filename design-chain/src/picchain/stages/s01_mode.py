@@ -82,6 +82,7 @@ def _build(design: Design, *, with_posts: bool, electrodes: bool, name: str,
         # optical cross-section, which carries one guide either way
         electrode_topology=(e.topology if electrodes else "slot"),
         ground_width_um=e.ground_width_um,
+        slab_offset_um=p.slab_offset_um,
         include_substrate=electrodes,
         # The buried oxide is modelled to its declared thickness for the RF
         # problem and truncated for the optical one.
