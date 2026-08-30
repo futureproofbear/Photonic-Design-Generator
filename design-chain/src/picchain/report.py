@@ -217,9 +217,27 @@ def make_figures(run_dir: Path) -> list[Path]:
         "_fig_grating_cell": "layout",
     }
 
+    # Which figures describe a structure only one device carries. A renderer that
+    # declines because the device has no such feature is not a failed drawing,
+    # and reporting it as one buries the failures that matter.
+    device_specific = {
+        "_fig_facet_route": {"edbr"},
+        "_fig_grating_cell": {"edbr"},
+    }
+    _device = None
+    _lp = run_dir / "layout.json"
+    if _lp.exists():
+        try:
+            _device = json.loads(_lp.read_text(encoding="utf-8")).get("device")
+        except Exception:
+            _device = None
+
     def _record(fn, out, failed):
         name = fn.__name__
         stage = needs.get(name)
+        applies = device_specific.get(name)
+        if applies is not None and _device is not None and _device not in applies:
+            return                      # the device carries no such structure
         if out is None and stage and (run_dir / f"{stage}.json").exists():
             failed.append(f"{name}: returned no figure although {stage}.json is present")
         return out
@@ -318,6 +336,19 @@ def _fig_facet_route(run_dir: Path, fig_dir: Path):
     with the facet rather than stay square. Both were defects before they were
     drawings.
     """
+    # Skipped where the device does not carry the structure this draws. A
+    # renderer that returns nothing is reported as a failed drawing, and a
+    # failed drawing on a device that has no such feature is noise that
+    # hides a real failure.
+    import json as _json
+    _lp = run_dir / "layout.json"
+    if _lp.exists():
+        try:
+            if _json.loads(_lp.read_text(encoding="utf-8")).get("device") == "mach_zehnder":
+                return None
+        except Exception:
+            pass
+
     import matplotlib.pyplot as plt
     from matplotlib.patches import Polygon
 
@@ -554,6 +585,19 @@ def _fig_grating_cell(run_dir: Path, fig_dir: Path, metrics: dict):
     a process window at all. It is drawn from the mask so that the gap the model
     used and the gap the mask carries can be compared by eye.
     """
+    # Skipped where the device does not carry the structure this draws. A
+    # renderer that returns nothing is reported as a failed drawing, and a
+    # failed drawing on a device that has no such feature is noise that
+    # hides a real failure.
+    import json as _json
+    _lp = run_dir / "layout.json"
+    if _lp.exists():
+        try:
+            if _json.loads(_lp.read_text(encoding="utf-8")).get("device") == "mach_zehnder":
+                return None
+        except Exception:
+            pass
+
     import matplotlib.pyplot as plt
     from matplotlib.patches import Polygon
 

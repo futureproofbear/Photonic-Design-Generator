@@ -211,6 +211,227 @@ def snap_polygons(polys: dict, grid_nm: float) -> tuple[dict, dict]:
     }
 
 
+# ---------------------------------------------------------------------------
+# The Mach-Zehnder modulator
+# ---------------------------------------------------------------------------
+def _cos_sbend(x0: float, y0: float, y1: float, length: float, width: float,
+               n_seg: int = 96) -> list[list[tuple[float, float]]]:
+    """A raised-cosine S-bend of constant width, as a strip of quadrilaterals.
+
+        y(s) = y0 + (y1 - y0) * (1 - cos(pi s / L)) / 2
+
+    The raised cosine is used rather than two circular arcs because its
+    curvature falls to zero at both ends, so the bend meets a straight guide
+    with no step in curvature and no mode mismatch at the junction. Its peak
+    curvature is pi^2 |dy| / (2 L^2), and the tightest radius the bend stage
+    solves is the bound that has to be met.
+
+    Emitted as segments rather than as one polygon, so that a long bend reaches
+    no vertex limit and every piece is a simple convex quadrilateral.
+    """
+    dy = y1 - y0
+    pts = []
+    for i in range(n_seg + 1):
+        s = length * i / n_seg
+        y = y0 + dy * (1.0 - math.cos(math.pi * s / length)) / 2.0
+        # the centre line's normal, so the strip holds its width through the bend
+        slope = dy * math.pi * math.sin(math.pi * s / length) / (2.0 * length)
+        norm = math.hypot(1.0, slope)
+        pts.append((x0 + s, y, -slope / norm, 1.0 / norm))
+    half = width / 2.0
+    out = []
+    for (xa, ya, na, nb), (xb, yb, nc, nd) in zip(pts, pts[1:]):
+        out.append([
+            (xa + na * half, ya + nb * half),
+            (xb + nc * half, yb + nd * half),
+            (xb - nc * half, yb - nd * half),
+            (xa - na * half, ya - nb * half),
+        ])
+    return out
+
+
+def _sbend_peak_radius(dy: float, length: float) -> float:
+    """The tightest radius of curvature a raised-cosine S-bend reaches."""
+    if length <= 0:
+        return float("inf")
+    kappa = (math.pi ** 2) * abs(dy) / (2.0 * length ** 2)
+    return float("inf") if kappa <= 0 else 1.0 / kappa
+
+
+def build_mzm_polygons(design: Design, ctx: RunContext) -> tuple[dict, dict]:
+    """A push-pull Mach-Zehnder on a coplanar ground-signal-ground line.
+
+    The device, along x from the input facet:
+
+        taper - straight - MMI splitter - S-bend - [ arms under the electrode ]
+        - S-bend - MMI combiner - straight - taper
+
+    An arm sits centred in each of the two gaps of the line, so the two see
+    opposite fields and the interferometer is driven push-pull. The metal spans
+    the straight section only, the arms having bent clear of it at either end.
+
+    Returns the polygons and a record of the geometry, so that every dimension a
+    document quotes is one this function placed.
+    """
+    lay, e, m = design.layout, design.electrodes, design.mzm
+    geom = process.geometry(design, "drawn")
+    wg = geom.wg_top_width_um
+    gap = geom.electrode_gap_um
+    sig = geom.electrode_width_um
+    gnd = float(e.ground_width_um or sig)
+
+    arm_y = sig / 2.0 + gap / 2.0          # the arm on its gap's centre line
+    L_elec = float(e.length_um)
+
+    out: dict[str, list] = {k: [] for k in
+                            ("WG", "SLAB", "METAL", "PAD", "LABEL", "FACET",
+                             "ORIENT", "FLOORPLAN")}
+    texts: list[dict] = []
+    # the modulators sit symmetrically about the cell axis
+    n_dev = max(1, int(m.count))
+    y_dev = [(i - (n_dev - 1) / 2.0) * m.pitch_um for i in range(n_dev)]
+
+    # ---- the run of the device along x -----------------------------------
+    x = 0.0
+    x += lay.taper_length_um
+    x += m.lead_straight_um
+    x_mmi_in = x
+    x += m.mmi_length_um
+    x_port_out = x
+    x += m.port_taper_um
+    x_sb_out = x
+    x += m.sbend_length_um
+    x_elec0 = x
+    x += L_elec
+    x_elec1 = x
+    x += m.sbend_length_um
+    x_port_in = x
+    x += m.port_taper_um
+    x_mmi_out = x
+    x += m.mmi_length_um
+    x += m.lead_straight_um
+    x_taper_out = x
+    x += lay.taper_length_um
+    z_end = x
+
+    y_mmi = m.mmi_width_um / 4.0          # where a 1x2 multimode section splits
+
+    # ---- WG and METAL, once per modulator --------------------------------
+    tip = lay.taper_tip_width_um
+    tl = lay.taper_length_um
+    _wg_one: list = []
+    _metal_one: list = []
+    out_wg, out_metal = out["WG"], out["METAL"]
+    out["WG"], out["METAL"] = _wg_one, _metal_one
+    out["WG"].append([(0.0, -tip / 2.0), (tl, -wg / 2.0), (tl, wg / 2.0), (0.0, tip / 2.0)])
+    out["WG"].append(_rect(tl, -wg / 2.0, x_mmi_in, wg / 2.0))
+    out["WG"].append(_rect(x_mmi_in, -m.mmi_width_um / 2.0,
+                           x_mmi_in + m.mmi_length_um, m.mmi_width_um / 2.0))
+    # The access ports. Each leaves the multimode section a quarter-width either
+    # side of the axis and half the section wide, so the two together fill its
+    # end face and the junction carries no re-entrant step. They then taper to
+    # the guide width, and the gap between them opens from zero as they do.
+    port_w = m.mmi_width_um / 2.0
+    for sgn in (-1.0, 1.0):
+        yc = sgn * y_mmi
+        out["WG"].append([(x_port_out, yc - port_w / 2.0), (x_sb_out, yc - wg / 2.0),
+                          (x_sb_out, yc + wg / 2.0), (x_port_out, yc + port_w / 2.0)])
+        out["WG"] += _cos_sbend(x_sb_out, yc, sgn * arm_y,
+                                m.sbend_length_um, wg, m.sbend_segments)
+        out["WG"].append(_rect(x_elec0, sgn * arm_y - wg / 2.0,
+                               x_elec1, sgn * arm_y + wg / 2.0))
+        out["WG"] += _cos_sbend(x_elec1, sgn * arm_y, yc,
+                                m.sbend_length_um, wg, m.sbend_segments)
+        out["WG"].append([(x_port_in, yc - wg / 2.0), (x_mmi_out, yc - port_w / 2.0),
+                          (x_mmi_out, yc + port_w / 2.0), (x_port_in, yc + wg / 2.0)])
+    out["WG"].append(_rect(x_mmi_out, -m.mmi_width_um / 2.0,
+                           x_mmi_out + m.mmi_length_um, m.mmi_width_um / 2.0))
+    out["WG"].append(_rect(x_mmi_out + m.mmi_length_um, -wg / 2.0, x_taper_out, wg / 2.0))
+    out["WG"].append([(x_taper_out, -wg / 2.0), (z_end, -tip / 2.0),
+                      (z_end, tip / 2.0), (x_taper_out, wg / 2.0)])
+
+    # ---- METAL: signal between two grounds, over the straight arms -------
+    out["METAL"].append(_rect(x_elec0, -sig / 2.0, x_elec1, sig / 2.0))
+    for sgn in (-1.0, 1.0):
+        y_in = sgn * (sig / 2.0 + gap)
+        y_out = y_in + sgn * gnd
+        out["METAL"].append(_rect(x_elec0, min(y_in, y_out), x_elec1, max(y_in, y_out)))
+
+    # replicate the device at each y, and label it
+    out["WG"], out["METAL"] = out_wg, out_metal
+    for i, dy in enumerate(y_dev):
+        out["WG"] += [[(px, py + dy) for px, py in poly] for poly in _wg_one]
+        out["METAL"] += [[(px, py + dy) for px, py in poly] for poly in _metal_one]
+        name = m.labels[i] if i < len(m.labels) else f"MOD{i + 1}"
+        texts.append({"text": name, "x_um": x_elec0 + 200.0,
+                      "y_um": dy + sig / 2.0 + gap + gnd + 8.0})
+
+    # the grounded shield between them, on the same metal
+    if m.shield and n_dev > 1:
+        for a, b in zip(y_dev, y_dev[1:]):
+            yc = 0.5 * (a + b)
+            out["METAL"].append(_rect(x_elec0, yc - m.shield_width_um / 2.0,
+                                      x_elec1, yc + m.shield_width_um / 2.0))
+
+    # ---- the blanket slab and the floor plan -----------------------------
+    span = (max(y_dev) - min(y_dev)) / 2.0
+    pad_y = span + sig / 2.0 + gap + gnd + 20.0
+    out["SLAB"].append(_rect(-5.0, -pad_y, z_end + 5.0, pad_y))
+    out["FLOORPLAN"].append(_rect(-5.0, -pad_y - 5.0, z_end + 5.0, pad_y + 5.0))
+
+    if lay.draw_facets:
+        ko = lay.facet_keepout_um
+        for xf in (0.0, z_end):
+            out["FACET"].append(_rect(xf - ko / 2.0, -pad_y, xf + ko / 2.0, pad_y))
+
+    base_half = wg / 2.0 + geom.etch_depth_um / math.tan(math.radians(design.platform.sidewall_deg)) \
+        if design.platform.sidewall_deg < 89.999 else wg / 2.0
+    out["LABEL"] = out.get("LABEL", [])
+    record = {
+        "device_length_um": z_end,
+        "modulators": n_dev,
+        "modulator_pitch_um": m.pitch_um,
+        "modulator_centres_um": y_dev,
+        "shield_width_um": m.shield_width_um if (m.shield and n_dev > 1) else 0.0,
+        "labels": list(m.labels[:n_dev]),
+        "arm_offset_um": arm_y,
+        "arm_separation_um": 2.0 * arm_y,
+        "electrode_from_um": x_elec0,
+        "electrode_to_um": x_elec1,
+        "electrode_length_drawn_um": x_elec1 - x_elec0,
+        "electrode_length_declared_um": L_elec,
+        "signal_width_um": sig,
+        "ground_width_um": gnd,
+        "gap_um": gap,
+        "metal_span_um": 2.0 * (sig / 2.0 + gap + gnd),
+        "mmi_width_um": m.mmi_width_um,
+        "mmi_length_um": m.mmi_length_um,
+        "mmi_output_offset_um": y_mmi,
+        "sbend_length_um": m.sbend_length_um,
+        "sbend_excursion_um": arm_y - y_mmi,
+        "sbend_peak_radius_um": _sbend_peak_radius(arm_y - y_mmi, m.sbend_length_um),
+        "port_taper_um": m.port_taper_um,
+        "port_width_um": port_w,
+        # A 1x2 splitter separates two guides from one, so the gap between them
+        # necessarily passes through every value from zero upward. The length
+        # over which it is below the declared minimum space is stated here so
+        # that the exception is a measured quantity and not a surprise.
+        "port_gap_below_min_space_um": (
+            m.port_taper_um * (port_w - (2.0 * y_mmi - m.min_space_um)) / (port_w - wg)
+            if port_w > wg else 0.0),
+        "min_space_um": m.min_space_um,
+        "taper_length_um": tl,
+        "taper_tip_um": tip,
+        # the clearance the metal-to-ridge rule is measured against, from the
+        # drawn edges and the sidewall rather than from the nominal width
+        "ridge_base_half_width_um": base_half,
+        "metal_to_ridge_clearance_um": (sig / 2.0 + gap) - (arm_y + base_half),
+        "half_height_um": pad_y,
+    }
+    record["texts"] = texts
+    return out, record
+
+
 def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple[float, float]]]]:
     """Return {layer_name: [polygon, ...]} in um.
 
@@ -809,23 +1030,65 @@ def compare_backends(gds_a, gds_b, layer_map) -> dict[str, Any]:
     }
 
 
+def _payload(design, ctx, polys, snap, derived, gds, oasis, gds_gf, gf_ok,
+             xor, geometry, fidelity, complete, counts) -> dict[str, Any]:
+    """The layout payload, shared by both devices.
+
+    Held in one place so that a field added for one device cannot go missing
+    from the other, which is how two paths reporting the same thing diverge.
+    """
+    lay = design.layout
+    return {
+        "enabled": True,
+        "gds": str(gds),
+        "oasis": str(oasis) if oasis else None,
+        "gds_gdsfactory": str(gds_gf) if gf_ok else None,
+        "backend_gdsfactory_available": gf_ok,
+        "backend_xor": xor,
+        "fidelity": fidelity,
+        "mask_is_complete": complete,
+        "grid": snap,
+        "derived_layers": derived,
+        "geometry": geometry,
+        "geometry_issues": geometry.get("total_issues"),
+        "orientation": (ctx.get("layout") or {}).get("orientation"),
+        "process": process.summary(design),
+        "polygon_counts": counts,
+        "layer_map": lay.layer_map,
+        **{k: v for k, v in (ctx.get("layout") or {}).items() if not isinstance(v, dict)},
+    }
+
 def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]:
     lay = design.layout
     if not lay.enabled:
         ctx.put("layout", {"enabled": False})
         return {"enabled": False}
 
-    polys = build_polygons(design, ctx)
+    # Which device is drawn. Everything after this line is common to both: the
+    # derived layers, the grid snap, both backends, the geometry check and the
+    # layer table. Only the polygons differ.
+    mzm_record: dict[str, Any] = {}
+    if lay.device == "mach_zehnder":
+        polys, mzm_record = build_mzm_polygons(design, ctx)
+        # the label text is placed by the builder, and the writer reads it from
+        # the context in the same way for either device
+        ctx.put("layout", {**(ctx.get("layout") or {}),
+                           "texts": mzm_record.get("texts") or []})
+    else:
+        polys = build_polygons(design, ctx)
     derived: list[dict] = []
     if lay.derived_layers:
         polys, derived = apply_derived_layers(polys, lay.layer_map, lay.derived_layers)
     polys, snap = snap_polygons(polys, design.process.grid_nm)
     info0 = ctx.get("layout") or {}
-    snap.update(period_dither(
-        float((ctx.get("grating") or {}).get("period_um") or design.grating.period_um or 1.0),
-        int(info0.get("periods_drawn") or 1),
-        design.process.grid_nm,
-    ))
+    if lay.device != "mach_zehnder":
+        # a grating's period need not be an integer number of grid steps, and the
+        # residue is a weak chirp. An interferometer carries no period
+        snap.update(period_dither(
+            float((ctx.get("grating") or {}).get("period_um") or design.grating.period_um or 1.0),
+            int(info0.get("periods_drawn") or 1),
+            design.process.grid_nm,
+        ))
     ctx.ensure()
     gds = ctx.run_dir / f"{design.meta.name}.gds"
     _write_klayout(polys, lay.layer_map, gds, lay.cell_name, design.process.grid_nm,
@@ -870,6 +1133,35 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 
     # --- is the emitted mask the device that was simulated ---------------
     info = ctx.get("layout") or {}
+    if lay.device == "mach_zehnder":
+        # There is no period count to draw a fraction of. What can differ is the
+        # electrode: the length drawn against the length the electro-optic stage
+        # solved. The mask is complete when those agree.
+        drawn_l = float(mzm_record.get("electrode_length_drawn_um") or 0.0)
+        declared_l = float(mzm_record.get("electrode_length_declared_um") or 0.0)
+        complete = bool(declared_l) and abs(drawn_l - declared_l) <= 1e-6
+        fidelity = {
+            "electrode_length_drawn_um": drawn_l,
+            "electrode_length_simulated_um": declared_l,
+            "mask_is_complete": complete,
+        }
+        if not complete:
+            ctx.warn(
+                f"the drawn electrode is {drawn_l:.1f} um against the {declared_l:.1f} um "
+                "the electro-optic stage solved, so every figure that scales with "
+                "length describes a device other than the one emitted",
+                key="layout.electrode_length_disagrees",
+            )
+        counts = {k: len(v) for k, v in polys.items() if v}
+        payload = _payload(design, ctx, polys, snap, derived, gds, oasis, gds_gf,
+                           gf_ok, xor, geometry, fidelity, complete, counts)
+        payload["mzm"] = mzm_record
+        payload["device"] = "mach_zehnder"
+        payload["device_length_um"] = mzm_record.get("device_length_um")
+        ctx.put("layout", payload)
+        ctx.write_stage("layout", payload)
+        return payload
+
     drawn, total_p = int(info.get("periods_drawn", 0)), int(info.get("periods_total", 0))
     complete = bool(total_p and drawn >= total_p)
     fidelity = {
@@ -882,25 +1174,10 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     }
 
     counts = {k: len(v) for k, v in polys.items() if v}
-    payload = {
-        "enabled": True,
-        "gds": str(gds),
-        "oasis": str(oasis) if oasis else None,
-        "gds_gdsfactory": str(gds_gf) if gf_ok else None,
-        "backend_gdsfactory_available": gf_ok,
-        "backend_xor": xor,
-        "fidelity": fidelity,
-        "mask_is_complete": complete,
-        "grid": snap,
-        "derived_layers": derived,
-        "geometry": geometry,
-        "geometry_issues": geometry.get("total_issues"),
-        "orientation": (ctx.get("layout") or {}).get("orientation"),
-        "process": process.summary(design),
-        "polygon_counts": counts,
-        "layer_map": lay.layer_map,
-        **{k: v for k, v in (ctx.get("layout") or {}).items() if not isinstance(v, dict)},
-    }
+    counts = {k: len(v) for k, v in polys.items() if v}
+    payload = _payload(design, ctx, polys, snap, derived, gds, oasis, gds_gf,
+                       gf_ok, xor, geometry, fidelity, complete, counts)
+    payload["device"] = "edbr"
     ctx.put("layout", {**(ctx.get("layout") or {}), **payload})
     ctx.write_stage("layout", payload)
 

@@ -747,6 +747,46 @@ class ReleaseCfg(BaseModel):
     strict: bool = True
 
 
+class MzmCfg(BaseModel):
+    """The geometry of a Mach-Zehnder, beyond what the electrode already fixes.
+
+    The arm separation is not declared: it follows from the line, an arm sitting
+    on the centre line of each gap, so it is `electrode_width/2 + gap/2` and
+    cannot drift from the electrode the electro-optic stage solved.
+    """
+    #: the multimode section of the 1x2 splitter. Its outputs emerge at
+    #: plus and minus a quarter of its width, which is where a 1x2 splits
+    mmi_width_um: float = 6.0
+    mmi_length_um: float = 28.0
+    #: the S-bend that carries each arm from the splitter out to its gap. A
+    #: raised cosine, so the curvature is zero where it meets a straight guide
+    sbend_length_um: float = 220.0
+    sbend_segments: int = 96
+    #: how many modulators the cell carries. Mod 1 and Mod 2 are the same design
+    #: and differ only in what drives them, so the pair is one cell rather than a
+    #: parameter ladder: they must share a die, a process run and a thermal
+    #: environment, their outputs being combined coherently
+    count: int = 2
+    #: centre-to-centre spacing of the modulators, um
+    pitch_um: float = 1500.0
+    #: a grounded strip between them. Mod 1 carries the transmit reference at
+    #: full drive and Mod 2 the received echo, so a copy of the reference
+    #: crossing into the echo path lands in band and coherent
+    shield: bool = True
+    shield_width_um: float = 60.0
+    #: names drawn beside each modulator, in order
+    labels: list[str] = Field(default_factory=lambda: ["MOD1-TX-REF", "MOD2-RX-ECHO"])
+    #: the access taper from the multimode section to the guide width. Each port
+    #: leaves the section half its width, so the two together fill its end face
+    #: and no re-entrant step is drawn at the junction
+    port_taper_um: float = 60.0
+    #: the minimum same-layer space the process declares, used only to report how
+    #: far the splitting region falls below it
+    min_space_um: float = 0.30
+    #: straight guide between the taper and the splitter
+    lead_straight_um: float = 50.0
+
+
 class LayoutCfg(BaseModel):
     enabled: bool = True
     #: how many grating periods to draw. None draws the whole device, which is
@@ -756,6 +796,12 @@ class LayoutCfg(BaseModel):
     #: the die-level work: a split ladder multiplies the polygons by the number
     #: of copies and the fill placer and the netlist extraction scale with them
     draw_periods: int | None = None
+    #: which device is drawn. "edbr" is a gain chip butt-coupled to a passive
+    #: circuit terminated in a distributed reflector; "mach_zehnder" is a
+    #: push-pull interferometer on a coplanar ground-signal-ground line. The
+    #: emission, the grid snap, the geometry check and the backend comparison are
+    #: common to both, and only the polygons differ
+    device: Literal["edbr", "mach_zehnder"] = "edbr"
     taper_length_um: float = 150.0
     taper_tip_width_um: float = 0.4
     input_facet_angle_deg: float = 8.0
@@ -1084,6 +1130,7 @@ class Design(BaseModel):
     waveguide: Waveguide = Field(default_factory=Waveguide)
     grating: Grating = Field(default_factory=Grating)
     electrodes: Electrodes = Field(default_factory=Electrodes)
+    mzm: MzmCfg = Field(default_factory=MzmCfg)
     modulator: ModulatorCfg = Field(default_factory=ModulatorCfg)
     cavity: Cavity = Field(default_factory=Cavity)
     chirp: ChirpDrive = Field(default_factory=ChirpDrive)

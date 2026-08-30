@@ -396,6 +396,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     for layer, plist in mon_polys.items():
         add(layer, plist, mon_dx, mon_dy)
 
+    monitor_field_box = None   # measured from the written die, below
+
     # --- optical ports for the monitors, added 2026-08-16 -----------------
     #
     # This block replaced a comment reading "they carry no optical port", which
@@ -594,6 +596,54 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     ctx.ensure()
     layout.write(str(gds))
 
+    # Where the deliberate sub-minimum shapes of the critical-dimension vernier
+    # landed, MEASURED FROM THE WRITTEN DIE.
+    #
+    # The placement offsets were computed here and recorded nowhere, so a
+    # rule-deck driver that has to set those shapes aside carried one die's
+    # geometry written in by hand: on a die of another size the vernier fell
+    # outside the box and its shapes were counted against the design. Deriving
+    # the box from the offsets was tried and disagreed with the mask, so it is
+    # measured from the polygons instead, which is the only frame that cannot
+    # drift from what was drawn.
+    monitor_field_box = None
+    try:
+        _wl = lmap.get(design.mask.label_layer if False else "WG")
+        if _wl:
+            _idx = layout.layer(_wl[0], _wl[1])
+            _reg = db.Region(die.begin_shapes_rec(_idx))
+            _floor = _min_space(design)
+            _sub = _reg.width_check(int(round(design.drc_min_width_um / layout.dbu))
+                                    if hasattr(design, "drc_min_width_um") else
+                                    int(round(0.25 / layout.dbu)),
+                                    False, db.Metrics.Projection, 3, None, None)
+            if _sub.count():
+                _b = _sub.polygons().bbox()
+                # Padded by the vernier's own recorded height, not by a token
+                # margin. Only its sub-minimum ROWS are found by a width check,
+                # and the rows at and above the floor sit below them: the 0.30 um
+                # row's spaces are at the limit and fail on tolerance, and a box
+                # drawn round the sub-minimum rows alone leaves that row outside
+                # and counts a monitor against the design.
+                _vh = 0.0
+                for _st_ in mon_desc:
+                    if _st_.get("structure") == "cd_vernier":
+                        _vh = float(_st_.get("height_um") or 0.0)
+                # Asymmetric on purpose. The vernier's rows step DOWNWARD from
+                # its origin, so the rows a width check does not find lie below
+                # the ones it does. Padding symmetrically reached to within 9 um
+                # of a device, and a box that touches a device would declare a
+                # real violation as a monitor, which is the one thing this must
+                # never do.
+                monitor_field_box = [_b.left * layout.dbu - 40.0,
+                                     _b.bottom * layout.dbu - (_vh + 40.0),
+                                     _b.right * layout.dbu + 40.0,
+                                     _b.top * layout.dbu + 40.0]
+    except Exception as _exc:      # pragma: no cover - backend specific
+        ctx.warn("the monitor field could not be measured from the die "
+                 f"({_exc}); a rule-deck driver cannot set the vernier aside",
+                 key="reticle.monitor_field_not_measured")
+
     payload = {
         "enabled": True,
         "gds": str(gds),
@@ -618,6 +668,11 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         },
         "devices_on_die": 1 + len(split_desc),
         "monitors": mon_desc,
+        # the field's bounding box in die coordinates, so a rule-deck driver
+        # can locate the deliberate sub-minimum shapes rather than carrying
+        # one die's geometry written in by hand
+        "monitor_field_box_um": monitor_field_box,
+        "monitor_offset_um": [mon_dx, mon_dy],
         "monitor_structures": len(mon_desc),
         "fill_placed": False,
     }

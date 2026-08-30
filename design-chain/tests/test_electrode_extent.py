@@ -138,3 +138,62 @@ def test_the_finite_element_stage_skips_a_post_comparison_it_cannot_make():
     src = inspect.getsource(s13_fem)
     assert "cfg.with_posts and not design.grating.enabled" in src
     assert "dn_eff_posts_skipped" in src
+
+
+def test_the_layout_offers_both_devices_and_defaults_to_the_laser():
+    """A device selector, so the emission machinery is shared and not copied."""
+    from picchain.config import LayoutCfg
+    from picchain.stages.s05_layout import build_mzm_polygons
+
+    assert LayoutCfg().device == "edbr"
+    assert LayoutCfg(device="mach_zehnder").device == "mach_zehnder"
+    assert callable(build_mzm_polygons)
+
+
+def test_an_arm_sits_on_the_centre_line_of_its_gap():
+    """The arm separation follows from the line and is not declared separately.
+
+    Declaring it would let it drift from the electrode the electro-optic stage
+    solved, and the push-pull factor of two rests on each arm seeing the field of
+    one gap.
+    """
+    import pathlib
+
+    from picchain.config import Design
+    from picchain.stages.s05_layout import build_mzm_polygons
+
+    d = Design.load(pathlib.Path(__file__).resolve().parents[2]
+                    / "examples" / "edbr_tfln_baseline" / "design.yaml")
+    d.layout.device = "mach_zehnder"
+    d.grating.enabled = False
+    d.electrodes.length_um = 5000.0
+    d.electrodes.topology = "gsg"
+    _, rec = build_mzm_polygons(d, None)
+
+    expected = d.electrodes.width_um / 2.0 + d.electrodes.gap_um / 2.0
+    assert abs(rec["arm_offset_um"] - expected) < 1e-9
+    assert abs(rec["arm_separation_um"] - 2 * expected) < 1e-9
+    # and the metal clears the ridge by the amount the rule is measured against
+    assert rec["metal_to_ridge_clearance_um"] > 0
+
+
+def test_the_splitting_region_is_reported_rather_than_hidden():
+    """A 1x2 splitter cannot hold a minimum-space rule through its junction.
+
+    The two outputs separate from one guide, so the gap between them passes
+    through every value from zero upward. The extent over which it is below the
+    declared minimum is reported, so the exception is a measured quantity.
+    """
+    import pathlib
+
+    from picchain.config import Design
+    from picchain.stages.s05_layout import build_mzm_polygons
+
+    d = Design.load(pathlib.Path(__file__).resolve().parents[2]
+                    / "examples" / "edbr_tfln_baseline" / "design.yaml")
+    d.layout.device = "mach_zehnder"
+    d.grating.enabled = False
+    d.electrodes.length_um = 5000.0
+    _, rec = build_mzm_polygons(d, None)
+    assert rec["port_gap_below_min_space_um"] > 0.0
+    assert rec["min_space_um"] > 0.0
