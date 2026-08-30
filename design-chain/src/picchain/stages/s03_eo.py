@@ -43,6 +43,7 @@ from ..materials import MaterialLibrary
 from ..solvers.electrostatic import eo_overlap, solve_potential
 from .s01_mode import _build
 
+_INTERP = "linear"  # cubic was tried and moved Gamma by 0.06 per cent
 C0 = 299792458.0
 EPS0 = 8.8541878128e-12  # F/m
 
@@ -180,6 +181,24 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 
     fx = _interfaces(0, x0, x1)
     fy = _interfaces(1, y0, y1)
+
+    # The window the overlap integral is taken over is a fixed region too.
+    #
+    # Gamma is the electrostatic field interpolated onto the optical mesh and
+    # integrated over it. That mesh reaches `ox` either side of each guide, and
+    # the fine cells reached only `rf_mesh_fine_margin_um` either side of the
+    # ridge, so the tails of the mode were sampled on the coarse cell and
+    # interpolated linearly from it. The capacitance did not notice, being an
+    # integral over the whole domain; the overlap moved by several per cent
+    # between meshes while the guard reported two tenths of one.
+    _arm = (geom.electrode_width_um / 2 + geom.electrode_gap_um / 2
+            if str(e.topology).lower() == "gsg" else 0.0)
+    for sgn in ((-1.0, 1.0) if _arm else (1.0,)):
+        for edge in (float(ox.min()), float(ox.max())):
+            v = sgn * _arm + edge
+            if x0 < v < x1:
+                fx.append(v)
+    fx = sorted(set(fx))
     eps_rf = {m: lib[m].eps_rf_device(p.cut) for m in xs_rf.materials_used()}
 
     def _rf_solve(d_fine: float, d_coarse: float):
@@ -234,11 +253,29 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # ---- interpolate E_x onto the optical mesh --------------------------
     # The optical mesh is centred on its own guide, so the field is sampled
     # about that guide's position in the line rather than about the axis.
+    # The interpolation order was investigated and is not the limitation.
+    #
+    # Gamma converges as roughly the 0.8 power of the cell while the capacitance
+    # converges cleanly, and the natural suspect was this interpolant carrying a
+    # first-order error. Solving at 50, 35 and 25 nm with a cubic interpolant
+    # instead moved Gamma by 0.06 per cent and left the convergence order
+    # unchanged. What converges slowly is the field itself at the conductor
+    # corner, where it is singular, and Gamma integrates that field 1.8 um away
+    # from it.
     interp = RegularGridInterpolator(
-        (grid.x, grid.y), es.Ex, bounds_error=False, fill_value=0.0
+        (grid.x, grid.y), es.Ex, method=_INTERP, bounds_error=False, fill_value=0.0
     )
     OX, OY = np.meshgrid(ox + arm_offset_um, oy, indexing="ij")
     Ex_opt = interp(np.stack([OX.ravel(), OY.ravel()], axis=-1)).reshape(OX.shape)
+
+    def _gamma_from(solution) -> float:
+        """The electro-optic overlap from one electrostatic solution."""
+        f = RegularGridInterpolator((solution.x, solution.y), solution.Ex,
+                                    method=_INTERP, bounds_error=False,
+                                    fill_value=0.0)
+        ex = f(np.stack([OX.ravel(), OY.ravel()], axis=-1)).reshape(OX.shape)
+        return eo_overlap(ex, intensity, mask_film_opt, ox, oy,
+                          geom.electrode_gap_um, V)
 
     gamma = eo_overlap(Ex_opt, intensity, mask_film_opt, ox, oy, geom.electrode_gap_um, V)
 
@@ -330,14 +367,29 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         d_coarse_r = d_coarse_rf * float(e.refinement)
         gr, exr, eyr, drr, _sr, C_ref = _rf_solve(d_fine_r, d_coarse_r)
         rel = abs(C_ref - C_per_m) / C_per_m if C_per_m else float("inf")
+        # The overlap is recomputed on the refined mesh as well.
+        #
+        # It was not, and the omission was the whole of what the guard missed.
+        # The capacitance is an integral of the field energy over the domain and
+        # converges as the square of the cell; the overlap is that field
+        # interpolated linearly onto the optical mesh, through a region holding a
+        # ridge corner and the metal edge singularity, so it converges as the
+        # first power. A guard reporting 0.21 per cent on the capacitance was
+        # read as authorising a Vpi whose overlap was still moving by several per
+        # cent between meshes.
+        gamma_ref = _gamma_from(_sr)
+        g_rel = abs(gamma_ref - gamma) / abs(gamma) if gamma else float("inf")
         convergence = {
             "performed": True,
             "d_fine_um": d_fine_r,
             "nx": int(len(gr.x)), "ny": int(len(gr.y)),
             "capacitance_pF_per_cm": C_ref * 1e12 / 100,
             "capacitance_rel_shift": rel,
+            "eo_overlap_gamma_refined": gamma_ref,
+            "eo_overlap_gamma_rel_shift": g_rel,
             "tolerance": float(e.convergence_tolerance),
-            "resolved": bool(rel <= float(e.convergence_tolerance)),
+            "resolved": bool(rel <= float(e.convergence_tolerance)
+                             and g_rel <= float(e.convergence_tolerance)),
         }
         if e.travelling_wave:
             tw_r = travelling_wave(gr, exr, eyr, drr, V, C_ref, e, n_g,
@@ -354,10 +406,12 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         if not convergence["resolved"]:
             ctx.warn(
                 "the electrostatic solve is not converged: halving the cell moves "
-                "the capacitance by %.1f per cent and the 3 dB bandwidth by %.1f "
-                "per cent, against a tolerance of %.1f. Every microwave figure "
-                "this stage reports carries at least that uncertainty, and a "
-                "margin smaller than it is not a margin" % (
+                "the electro-optic overlap by %.1f per cent, the capacitance by "
+                "%.1f per cent and the 3 dB bandwidth by %.1f per cent, against a "
+                "tolerance of %.1f. Every figure this stage reports carries at "
+                "least that uncertainty, and a margin smaller than it is not a "
+                "margin" % (
+                    g_rel * 100,
                     rel * 100,
                     100 * (convergence.get("electro_optic_3dB_GHz_rel_shift") or 0.0),
                     100 * float(e.convergence_tolerance)))
