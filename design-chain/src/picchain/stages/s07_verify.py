@@ -71,6 +71,17 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     unconfirmed = lib.unconfirmed(used)
     blocked = bool(unconfirmed) and not design.allow_unconfirmed_materials
 
+    # Raised here rather than at the end of the stage, so that the accounting
+    # below counts it. It is a finding about the DESIGN and not about the
+    # accounting, and it was previously invisible to the very mechanism that
+    # exists to leave no finding unowned.
+    if unconfirmed:
+        ctx.warn(
+            "materials with unconfirmed data in this design: " + ", ".join(unconfirmed)
+            + " - results are indicative until foundry PCM data replaces them",
+            key="verify.materials_unconfirmed_data_design",
+        )
+
     # --- findings, against what the design has acknowledged -----------------
     #
     # The acceptance verdict grades targets. A chain also raises findings that
@@ -83,7 +94,18 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # on before the standing findings are acknowledged would fail every released
     # design at once and teach the reader to bypass the gate.
     acked = {a.key: a.reason for a in design.warnings.acknowledged}
-    emitted = [w for w in ctx.warning_records if w["stage"] != "verify"]
+    # Only the two findings that are ABOUT this accounting are held out of it.
+    # Counting them would be self-referential: reporting an unacknowledged
+    # finding is itself a finding, which would never reach zero.
+    #
+    # The filter was previously by stage, which excluded every finding the verify
+    # stage raises whatever it was about. The unconfirmed-material finding is a
+    # statement about the design rather than about the count, and it was dropped
+    # with the rest, so the standing caveat that a design's material data is not
+    # the foundry's went unowned and unreported in the one place the denominator
+    # is quoted.
+    META = {"verify.findings_unacknowledged", "verify.acknowledgements_stale"}
+    emitted = [w for w in ctx.warning_records if w["key"] not in META]
     seen = {w["key"] for w in emitted}
     unacknowledged = sorted(seen - set(acked))
     stale = sorted(set(acked) - seen)
@@ -125,10 +147,5 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             + ". Either the finding was fixed and the entry should go, or its "
             "wording changed and the key with it",
             key="verify.acknowledgements_stale",
-        )
-    if unconfirmed:
-        ctx.warn(
-            "materials with unconfirmed data in this design: " + ", ".join(unconfirmed)
-            + " - results are indicative until foundry PCM data replaces them"
         )
     return payload
