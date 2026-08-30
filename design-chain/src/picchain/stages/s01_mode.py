@@ -79,6 +79,22 @@ def _build(design: Design, *, with_posts: bool, electrodes: bool, name: str,
         electrode_thickness_um=e.thickness_um,
         electrode_material=e.material,
         include_substrate=electrodes,
+        # The buried oxide is modelled to its declared thickness for the RF
+        # problem and truncated for the optical one.
+        #
+        # The truncation exists for the mode solve, where the handle wafer is
+        # excluded entirely and a shallow oxide costs nothing, the real oxide
+        # already isolating the mode. The RF problem is the opposite case: it
+        # includes the handle, and the oxide is what holds the silicon away from
+        # the electrodes. Truncating it there moves a permittivity of 11.7 to
+        # within 1.8 um of the film whatever the platform declares.
+        #
+        # Measured on a 7.0 um oxide: the microwave index read 2.5422 against
+        # 2.3220, and the bandwidth of a 13 mm electrode read 18.2 GHz against
+        # 33.0 GHz. The error is a factor of 1.81 and it is in the unsafe
+        # direction, a design being shortened to escape a limit that is an
+        # artefact of the truncation.
+        box_model_depth_um=(p.box_thickness_um if electrodes else 1.8),
         window_pad_x_um=(e.rf_window_pad_um if electrodes else 3.0),
         window_pad_y_um=(e.rf_window_pad_um if electrodes else 0.0),
         name=name,
