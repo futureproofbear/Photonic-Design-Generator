@@ -71,8 +71,22 @@ def _readiness(design: Design, ctx: RunContext) -> list[dict[str, Any]]:
     ret = ctx.get("reticle") or {}
     geom = lay.get("geometry") or {}
     grid = lay.get("grid") or {}
+    env = environment_fingerprint()
 
     rows = [
+        # A mask produced by a modified working tree cannot be regenerated from
+        # any commit, so the manifest's revision identifies nothing. The stamp
+        # was previously taken from whichever repository the command was invoked
+        # in, which for a design directory is the application and never the
+        # chain, so this condition could not have been evaluated at all.
+        {"condition": "the chain that produced this is a committed revision",
+         "met": bool((env.get("chain") or {}).get("revision"))
+                and not (env.get("chain") or {}).get("dirty", True),
+         "detail": (f"{(env.get('chain') or {}).get('revision')}, "
+                    + (f"{(env.get('chain') or {}).get('modified_files')} uncommitted files"
+                       if (env.get("chain") or {}).get("dirty")
+                       else "clean")),
+         "field": "environment.chain"},
         {"condition": "every grating period is drawn",
          "met": bool(lay.get("mask_is_complete")),
          "detail": f"{(lay.get('fidelity') or {}).get('periods_drawn')} of "
@@ -232,7 +246,15 @@ def _markdown(doc: dict[str, Any]) -> str:
     L.append(f"| resolved design SHA-256 | `{doc['resolved_design_sha256']}` |")
     env = doc["environment"]
     L.append(f"| python | {env['python']} on {env['platform']} |")
-    L.append(f"| git revision | `{env['git_rev']}` |")
+    chain = env.get("chain") or {}
+    L.append(f"| chain revision | `{chain.get('revision')}`"
+             + (f" **plus {chain.get('modified_files')} uncommitted files**"
+                if chain.get("dirty") else " (clean)") + " |")
+    inv = env.get("invocation_repo") or {}
+    if inv.get("root") and inv.get("root") != chain.get("root"):
+        L.append(f"| design repository | `{inv.get('revision')}`"
+                 + (f" plus {inv.get('modified_files')} uncommitted files"
+                    if inv.get("dirty") else " (clean)") + " |")
     pk = ", ".join(f"{k} {v}" for k, v in env["packages"].items() if v)
     L.append(f"| packages | {pk} |")
     L += ["", "## Files", "", "| file | bytes | SHA-256 |", "|---|---:|---|"]
