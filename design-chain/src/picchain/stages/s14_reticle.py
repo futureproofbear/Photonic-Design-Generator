@@ -373,7 +373,21 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             tb = reg.bbox()
             polys = [[(pt.x * DBU, pt.y * DBU) for pt in poly.each_point_hull()]
                      for poly in reg.each_merged()]
-            add("LABEL", polys, -box.left - tb.left * DBU - 260.0,
+            # PLACED INSIDE THE COPY'S OWN FOOTPRINT, not 260 um to the left
+            # of it. Corrected 2026-08-28.
+            #
+            # A label to the left of the copy is outside the die whenever
+            # `align_facet_to_edge` is set, because that puts the copy's left
+            # edge on the inner chip boundary and there is nothing to the left
+            # of it but the exclusion ring and the saw. On a five-copy ladder it
+            # put 25 text polygons up to 105 um beyond the die edge, and the
+            # foundry deck reports them: the label layer is a drawn level of the
+            # process, so text outside the usable area is an etched feature in
+            # the kerf rather than an annotation.
+            #
+            # The label now starts just inside the copy's left edge and still
+            # sits in the gap above it, so it reads the same and is on the die.
+            add("LABEL", polys, -box.left - tb.left * DBU + 8.0,
                 dy + box.top - tb.bottom * DBU + 8.0)
 
     # monitors below the ladder
