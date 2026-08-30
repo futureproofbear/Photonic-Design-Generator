@@ -207,7 +207,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         c_per_m = 2.0 * (sol.energy(ex, ey) * EPS0) / (V ** 2)
         return g, ex, ey, dr, sol, c_per_m
 
-    grid, eps_x, eps_y, _drive_unused, _es_unused, _C_unused = _rf_solve(d_fine_rf, d_coarse_rf)
+    grid, eps_x, eps_y, _drive_unused, _es_nominal, _C_unused = _rf_solve(d_fine_rf, d_coarse_rf)
 
     metal = material_mask(xs_rf, grid, e.material, subsample=2)
     gsg = str(e.topology).lower() == "gsg"
@@ -283,6 +283,46 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                          L_electrode_m, geom, n_conductors) if e.travelling_wave \
         else {"enabled": False}
 
+    # ---- where the microwave energy sits, by material --------------------
+    #
+    # The handle wafer is modelled as a lossless dielectric. Whether that is
+    # defensible depends on its resistivity and on how much of the field it
+    # carries, and the second the solve already knows. It was quoted in one
+    # design as "about 18 per cent", taken from the stack geometry and from no
+    # computation. It is computed here.
+    dens = _es_nominal.energy_density(eps_x, eps_y)
+    w_total = float(np.sum(dens))
+    energy_by_material: dict[str, float] = {}
+    if w_total > 0:
+        for mat in sorted(xs_rf.materials_used()):
+            mk = material_mask(xs_rf, grid, mat, subsample=2)
+            energy_by_material[mat] = float(np.sum(dens * (mk > 0.5))) / w_total
+
+    # The dielectric loss the handle would add, given a resistivity for it.
+    # tan d = 1 / (w eps0 eps_r rho), and a quasi-TEM line carries
+    # alpha_d = (w / 2c) n_m sum_i f_i tan d_i over the materials it passes.
+    substrate_loss: dict = {
+        "resistivity_ohm_cm": None,
+        "reason": "platform.substrate_resistivity_ohm_cm is unset, so the handle "
+                  "is modelled lossless and this term is absent from the bandwidth",
+    }
+    rho = getattr(design.platform, "substrate_resistivity_ohm_cm", None)
+    f_sub = energy_by_material.get(design.platform.substrate_material, 0.0)
+    if rho and tw.get("enabled") and f_sub > 0:
+        f_ref = 1e10
+        eps_sub = float(np.mean(lib[design.platform.substrate_material]
+                                .eps_rf_device(p.cut)))
+        tan_d = 1.0 / (2 * math.pi * f_ref * EPS0 * eps_sub * (float(rho) * 1e-2))
+        alpha_d = (2 * math.pi * f_ref / (2 * C0)) * tw["microwave_index"] * f_sub * tan_d
+        substrate_loss = {
+            "resistivity_ohm_cm": float(rho),
+            "energy_fraction": f_sub,
+            "loss_tangent_at_10GHz": tan_d,
+            "dielectric_loss_dB_per_cm_at_10GHz": alpha_d * 8.685590811 / 100,
+            "conductor_loss_dB_per_cm_at_10GHz":
+                tw.get("conductor_loss_dB_per_cm_at_10GHz"),
+        }
+
     # ---- the convergence guard on the electrostatic solve ----------------
     convergence: dict = {"performed": False, "reason": "not requested"}
     if e.convergence_check:
@@ -348,6 +388,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "rf_mesh": {"nx": int(len(grid.x)), "ny": int(len(grid.y)),
                     "d_fine_um": d_fine_rf, "d_coarse_um": d_coarse_rf},
         "convergence": convergence,
+        "microwave_energy_by_material": energy_by_material,
+        "substrate_dielectric_loss": substrate_loss,
         "n_g_used": n_g,
         "note_group_index": "tuning uses dlambda/lambda = dn/n_g (dispersive Bragg condition)",
         "note_metal_overlap": "reported as the fraction of |E|^2 beyond the electrode inner edge",

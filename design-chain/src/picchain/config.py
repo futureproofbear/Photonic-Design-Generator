@@ -47,6 +47,13 @@ class Platform(BaseModel):
     #: guide and the conductors sit on the buried oxide outside those strips.
     #: `lxt_pdk_gf` uses 6.0 um.
     slab_offset_um: float | None = None
+    #: the handle wafer's resistivity, ohm.cm. Left unset the handle is modelled
+    #: as a lossless dielectric and no dielectric-loss term enters the
+    #: bandwidth. The outcome is a binary rather than a tolerance: at 10 ohm.cm
+    #: the loss tangent at 15 GHz is of order unity and the line is unusable
+    #: over centimetres, and at 1 kohm.cm it is negligible. The energy fraction
+    #: the handle carries is computed and reported either way
+    substrate_resistivity_ohm_cm: float | None = None
     sidewall_deg: float = 90.0
     box_material: str = "SiO2"
     box_thickness_um: float = 4.7
