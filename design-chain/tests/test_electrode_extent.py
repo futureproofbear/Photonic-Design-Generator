@@ -122,3 +122,19 @@ def test_the_baseline_laser_is_unaffected_by_any_of_this():
     assert d.grating.enabled is True
     assert d.electrodes.length_um is None
     assert_ready(d)
+
+
+def test_the_finite_element_stage_skips_a_post_comparison_it_cannot_make():
+    """A device with no grating produces no post perturbation to compare against.
+
+    The finite-difference stage returns null for `dn_eff_posts` rather than a
+    number describing posts the device does not carry, and the cross-check read
+    that null as a float and raised. The stage had never been run on a device
+    without a grating, so nothing caught it.
+    """
+    import inspect
+
+    from picchain.stages import s13_fem
+    src = inspect.getsource(s13_fem)
+    assert "cfg.with_posts and not design.grating.enabled" in src
+    assert "dn_eff_posts_skipped" in src

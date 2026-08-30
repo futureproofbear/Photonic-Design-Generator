@@ -1021,8 +1021,8 @@ PROVENANCE: list[tuple[str, str, Any, list[tuple[str, str]]]] = [
     ("modulator", "what drive does the interferometer demand, and across what band",
      "the single-arm electro-optic solve converted for the two arms it sits in, "
      "and the travelling-wave response evaluated at the edges of the declared band",
-     [("Vpi_V", "Vpi", " V"), ("VpiL_device_V_cm", "Vpi.L device", " V.cm"),
-      ("worst_in_band_dB", "worst in band", " dB")]),
+     [("Vpi_V", "Vpi"), ("VpiL_device_V_cm", "Vpi.L device"),
+      ("worst_in_band_dB", "worst in band")]),
     ("cavity", "what does the laser do",
      "closed-form composite-cavity analysis, with the lasing mode followed numerically against applied voltage",
      [("pockels_lever", "Pockels lever"), ("mode_hop_free_range_GHz", "mode-hop-free range"),

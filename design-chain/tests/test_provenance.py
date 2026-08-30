@@ -76,3 +76,22 @@ def test_the_release_manifest_demands_a_committed_chain():
     # and the condition must read the chain's own state, not the caller's
     assert 'env.get("chain")' in src
     assert "environment.chain" in src
+
+
+def test_every_provenance_row_has_the_shape_the_renderer_reads():
+    """A malformed row breaks the report and nothing else.
+
+    The `modulator` row was added with three-element metric tuples where the
+    renderer unpacks two, so every run of that design emitted
+    "report rendering failed: too many values to unpack" and produced no
+    report.md. The verdict, the metrics and the mask were all unaffected, which
+    is why it went unnoticed.
+    """
+    from picchain.report import PROVENANCE
+
+    for entry in PROVENANCE:
+        assert len(entry) == 4, f"provenance row is not a 4-tuple: {entry[0]}"
+        stage, question, tool, metrics = entry
+        assert isinstance(stage, str) and isinstance(question, str)
+        for m in metrics:
+            assert len(m) == 2, f"metric tuple in {stage!r} is not a pair: {m}"
