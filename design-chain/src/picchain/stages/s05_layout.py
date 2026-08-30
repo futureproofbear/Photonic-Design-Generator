@@ -666,6 +666,7 @@ def build_mzm_polygons(design: Design, ctx: RunContext) -> tuple[dict, dict]:
         "arm_offset_at_pad_um": pad_slot_y if m.pads else arm_y,
         "shield_straps_drawn": int(n_straps),
         "shield_strap_pitch_um": strap_pitch,
+        "port_separation_um": float(m.port_separation_um),
         "port_gap_at_mmi_um": port_gap,
         # The gap between the two access tapers is at its narrowest where they
         # leave the multimode section and widens along them, so the whole

@@ -125,28 +125,46 @@ def graded_axis(
     passed at the next. Inserting the breakpoints instead makes refinement
     monotone, because every interface stays put and only the cell count grows.
     """
-    feats = sorted({float(f) for f in features if lo + 1e-12 < f < hi - 1e-12})
+    # Two breakpoints a floating-point epsilon apart leave a cell of zero
+    # width, and `np.unique` keeps both because they differ in the last bit.
+    # The energy integral over such a mesh diverges: one electrode thickness in
+    # a sweep returned a capacitance of 6.7e26 pF/cm and an impedance of
+    # 1.7e-12 ohm, between two neighbouring thicknesses that were both sound.
+    # A margin edge landing on a feature is the way it arises, `f - margin`
+    # rarely being bit-identical to the feature it lands on.
+    tol = max(1e-9, 1e-12 * abs(hi - lo))
+
+    def _merge(values: list[float]) -> list[float]:
+        out: list[float] = []
+        for v in sorted(values):
+            if not out or v - out[-1] > tol:
+                out.append(v)
+        return out
+
+    feats = _merge([float(f) for f in features if lo + tol < f < hi - tol])
     if not feats:
         n = max(1, int(math.ceil((hi - lo) / d_coarse - 1e-9)))
         return np.linspace(lo, hi, n + 1)
 
-    marks = {float(lo), float(hi)}
+    marks = [float(lo), float(hi)]
     for f in feats:
-        marks.add(f)
-        marks.add(max(lo, f - fine_margin))
-        marks.add(min(hi, f + fine_margin))
-    edges = sorted(marks)
+        marks.append(f)
+        marks.append(max(lo, f - fine_margin))
+        marks.append(min(hi, f + fine_margin))
+    edges = _merge(marks)
 
     parts: list[np.ndarray] = []
     for a, b in zip(edges, edges[1:]):
-        if b - a <= 1e-12:
+        if b - a <= tol:
             continue
         mid = 0.5 * (a + b)
-        near = any(abs(mid - f) <= fine_margin + 1e-12 for f in feats)
+        near = any(abs(mid - f) <= fine_margin + tol for f in feats)
         d = d_fine if near else d_coarse
         n = max(1, int(math.ceil((b - a) / d - 1e-9)))
         parts.append(np.linspace(a, b, n + 1))
-    return np.unique(np.concatenate(parts))
+    axis = np.concatenate(parts)
+    keep = np.concatenate(([True], np.diff(axis) > tol))
+    return axis[keep]
 
 def _point_in_poly(px: np.ndarray, py: np.ndarray, poly: list[tuple[float, float]]) -> np.ndarray:
     """Vectorised even-odd point-in-polygon test."""
