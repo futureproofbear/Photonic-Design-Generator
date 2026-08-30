@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import math
+
 import numpy as np
 
 
@@ -106,35 +108,46 @@ def graded_axis(
     d_coarse: float,
     fine_margin: float = 0.4,
 ) -> np.ndarray:
-    """Piecewise-uniform axis: fine spacing across the feature span (padded by
-    ``fine_margin``), coarse spacing outside.  Feature coordinates are snapped
-    onto the grid so material boundaries land on nodes."""
-    if not features:
-        return np.arange(lo, hi + 0.5 * d_coarse, d_coarse)
-    f_lo = max(lo, min(features) - fine_margin)
-    f_hi = min(hi, max(features) + fine_margin)
+    """Piecewise-uniform axis with every feature coordinate on a node.
 
-    def _uniform(a: float, b: float, d: float) -> np.ndarray:
-        n = max(1, int(round((b - a) / d)))
-        return np.linspace(a, b, n + 1)
+    The feature coordinates are breakpoints of the mesh, so each is a node
+    exactly and each interval between consecutive breakpoints is uniform. An
+    interval within ``fine_margin`` of a feature is meshed at ``d_fine`` and the
+    rest at ``d_coarse``.
 
-    parts = []
-    if f_lo > lo + 1e-9:
-        parts.append(_uniform(lo, f_lo, d_coarse))
-    parts.append(_uniform(f_lo, f_hi, d_fine))
-    if hi > f_hi + 1e-9:
-        parts.append(_uniform(f_hi, hi, d_coarse))
-    axis = np.unique(np.concatenate(parts))
-    # snap the nearest node onto each feature coordinate
-    for f in features:
-        if lo <= f <= hi:
-            axis[np.argmin(np.abs(axis - f))] = f
-    return np.unique(axis)
+    The earlier form laid a uniform axis and then moved the nearest node onto
+    each feature. That displaces the two cells either side of every interface by
+    an amount depending on where the uniform mesh happened to fall, so the
+    discretisation error moves with the mesh instead of falling with it. On a
+    thin-film stack the effect was large: refining the electrostatic mesh in
+    four steps moved the microwave index non-monotonically and the bandwidth
+    between 19.6 and 31.3 GHz, and two `must` rows failed at one refinement and
+    passed at the next. Inserting the breakpoints instead makes refinement
+    monotone, because every interface stays put and only the cell count grows.
+    """
+    feats = sorted({float(f) for f in features if lo + 1e-12 < f < hi - 1e-12})
+    if not feats:
+        n = max(1, int(math.ceil((hi - lo) / d_coarse - 1e-9)))
+        return np.linspace(lo, hi, n + 1)
 
+    marks = {float(lo), float(hi)}
+    for f in feats:
+        marks.add(f)
+        marks.add(max(lo, f - fine_margin))
+        marks.add(min(hi, f + fine_margin))
+    edges = sorted(marks)
 
-# --------------------------------------------------------------------------
-# rasterisation
-# --------------------------------------------------------------------------
+    parts: list[np.ndarray] = []
+    for a, b in zip(edges, edges[1:]):
+        if b - a <= 1e-12:
+            continue
+        mid = 0.5 * (a + b)
+        near = any(abs(mid - f) <= fine_margin + 1e-12 for f in feats)
+        d = d_fine if near else d_coarse
+        n = max(1, int(math.ceil((b - a) / d - 1e-9)))
+        parts.append(np.linspace(a, b, n + 1))
+    return np.unique(np.concatenate(parts))
+
 def _point_in_poly(px: np.ndarray, py: np.ndarray, poly: list[tuple[float, float]]) -> np.ndarray:
     """Vectorised even-odd point-in-polygon test."""
     inside = np.zeros(px.shape, dtype=bool)

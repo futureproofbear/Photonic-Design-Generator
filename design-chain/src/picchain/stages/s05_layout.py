@@ -25,6 +25,9 @@ partial mask outright.
 from __future__ import annotations
 
 import math
+
+from picchain import taper_profile
+
 from typing import Any
 
 from .. import process
@@ -258,6 +261,74 @@ def _sbend_peak_radius(dy: float, length: float) -> float:
     return float("inf") if kappa <= 0 else 1.0 / kappa
 
 
+def _slot_trajectory(scale_a: float, scale_b: float, n: int) -> list[float]:
+    """A raised cosine from one cross-section scale to another.
+
+    The pad tapers the whole coplanar cross-section by one scale factor, so the
+    ratio of gap to conductor is held and the characteristic impedance with it.
+    The scale follows a raised cosine, whose derivative vanishes at both ends,
+    so the optical arm riding the slot centre meets the straight line and the
+    straight pad with no step in curvature.
+    """
+    return [scale_a + (scale_b - scale_a) * (1.0 - math.cos(math.pi * i / n)) / 2.0
+            for i in range(n + 1)]
+
+
+def _gsg_pad(x0: float, length: float, sig: float, gap: float, gnd: float,
+             scale_a: float, scale_b: float, n_seg: int,
+             reverse: bool = False) -> tuple[list, list]:
+    """One tapered ground-signal-ground pad, and the path its two slots take.
+
+    Returns the metal polygons and the slot-centre trajectory. The optical arms
+    are drawn on that same trajectory by the caller, so an arm sits on its
+    slot's centre line at every station and metal never crosses a guide.
+
+    The three conductors and the two gaps are scaled together. At scale 1 the
+    cross-section is the line the electro-optic stage solved; at the pad face it
+    is whatever scale carries the slots out to the probe pitch.
+    """
+    scales = _slot_trajectory(scale_a, scale_b, n_seg)
+    if reverse:
+        scales = scales[::-1]
+    xs = [x0 + length * i / n_seg for i in range(n_seg + 1)]
+    slot = [(sig / 2.0 + gap / 2.0) * k for k in scales]
+
+    sig_edge = [(sig / 2.0) * k for k in scales]
+    gnd_in = [(sig / 2.0 + gap) * k for k in scales]
+    gnd_out = [(sig / 2.0 + gap + gnd) * k for k in scales]
+
+    metal: list = []
+    for i in range(n_seg):
+        xa, xb = xs[i], xs[i + 1]
+        metal.append([(xa, -sig_edge[i]), (xb, -sig_edge[i + 1]),
+                      (xb, sig_edge[i + 1]), (xa, sig_edge[i])])
+        for sgn in (-1.0, 1.0):
+            metal.append([(xa, sgn * gnd_in[i]), (xb, sgn * gnd_in[i + 1]),
+                          (xb, sgn * gnd_out[i + 1]), (xa, sgn * gnd_out[i])])
+    return metal, list(zip(xs, slot))
+
+
+def _strip_on_path(path: list[tuple[float, float]], width: float,
+                   sgn: float = 1.0) -> list[list[tuple[float, float]]]:
+    """A constant-width strip following a centre-line path, as quadrilaterals."""
+    half = width / 2.0
+    out = []
+    for (xa, ya), (xb, yb) in zip(path, path[1:]):
+        out.append([(xa, sgn * ya - half), (xb, sgn * yb - half),
+                    (xb, sgn * yb + half), (xa, sgn * ya + half)])
+    return out
+
+
+def _taper_profile_name(design: Design) -> str:
+    """The taper profile the mask is to draw.
+
+    The `taper` stage evaluates `taper.profile`, and where that stage is
+    disabled the layout still needs a curve. The declared profile is used in
+    both cases, so enabling the stage never changes what is drawn.
+    """
+    return str(getattr(design.taper, "profile", "linear") or "linear")
+
+
 def build_mzm_polygons(design: Design, ctx: RunContext) -> tuple[dict, dict]:
     """A push-pull Mach-Zehnder on a coplanar ground-signal-ground line.
 
@@ -301,9 +372,17 @@ def build_mzm_polygons(design: Design, ctx: RunContext) -> tuple[dict, dict]:
     x += m.port_taper_um
     x_sb_out = x
     x += m.sbend_length_um
+    x_pad0 = x                              # the probe landing, at pad scale
+    x += m.pad_straight_um if m.pads else 0.0
+    x_padtap0 = x                           # tapering down to the line
+    x += m.pad_taper_um if m.pads else 0.0
     x_elec0 = x
     x += L_elec
     x_elec1 = x
+    x += m.pad_taper_um if m.pads else 0.0  # tapering back up
+    x_padtap1 = x
+    x += m.pad_straight_um if m.pads else 0.0
+    x_pad1 = x
     x += m.sbend_length_um
     x_port_in = x
     x += m.port_taper_um
@@ -314,7 +393,19 @@ def build_mzm_polygons(design: Design, ctx: RunContext) -> tuple[dict, dict]:
     x += lay.taper_length_um
     z_end = x
 
-    y_mmi = m.mmi_width_um / 4.0          # where a 1x2 multimode section splits
+    # Where the two access tapers leave the multimode section. Both are declared
+    # rather than derived from the section width, so the gap between them is a
+    # drawn dimension: `port_separation_um - port_width_um`, open by construction.
+    # The scale the pad face is drawn at. The probe pitch is the signal centre
+    # to a ground centre, which on this cross-section is `sig/2 + gap + gnd/2`,
+    # so the scale that reaches a declared pitch follows directly.
+    pitch_at_line = sig / 2.0 + gap + gnd / 2.0
+    pad_scale = (float(m.pad_probe_pitch_um) / pitch_at_line) if m.pads else 1.0
+    pad_slot_y = (sig / 2.0 + gap / 2.0) * pad_scale
+
+    y_mmi = m.port_separation_um / 2.0
+    port_w = m.port_width_um
+    port_gap = m.port_separation_um - port_w
 
     # ---- WG and METAL, once per modulator --------------------------------
     tip = lay.taper_tip_width_um
@@ -323,34 +414,69 @@ def build_mzm_polygons(design: Design, ctx: RunContext) -> tuple[dict, dict]:
     _metal_one: list = []
     out_wg, out_metal = out["WG"], out["METAL"]
     out["WG"], out["METAL"] = _wg_one, _metal_one
-    out["WG"].append([(0.0, -tip / 2.0), (tl, -wg / 2.0), (tl, wg / 2.0), (0.0, tip / 2.0)])
+    # The facet taper, drawn on the profile the taper stage evaluates. Both call
+    # `picchain.taper_profile`, so the structure solved and the structure drawn
+    # are the same curve.
+    prof = _taper_profile_name(design)
+    out["WG"].append(taper_profile.outline(tip, wg, tl, prof, segments=lay.taper_segments))
     out["WG"].append(_rect(tl, -wg / 2.0, x_mmi_in, wg / 2.0))
     out["WG"].append(_rect(x_mmi_in, -m.mmi_width_um / 2.0,
                            x_mmi_in + m.mmi_length_um, m.mmi_width_um / 2.0))
-    # The access ports. Each leaves the multimode section a quarter-width either
-    # side of the axis and half the section wide, so the two together fill its
-    # end face and the junction carries no re-entrant step. They then taper to
-    # the guide width, and the gap between them opens from zero as they do.
-    port_w = m.mmi_width_um / 2.0
+    # The access ports. Each leaves the multimode section at half the declared
+    # port separation and at the declared port width, so the gap between them
+    # starts at `port_separation - port_width` and widens from there. Drawing
+    # them to meet at the end face would force that gap through zero and break
+    # the minimum-space rule over the whole access taper.
+    # The arm enters the pad structure at its slot centre and rides that slot
+    # down to the line, so metal never crosses a guide.
+    y_entry = pad_slot_y if m.pads else arm_y
+    pad_in_path: list = []
+    pad_out_path: list = []
+    if m.pads:
+        pad_in_metal, pad_in_path = _gsg_pad(x_padtap0, m.pad_taper_um, sig, gap, gnd,
+                                             pad_scale, 1.0, m.pad_taper_segments)
+        pad_out_metal, pad_out_path = _gsg_pad(x_elec1, m.pad_taper_um, sig, gap, gnd,
+                                               1.0, pad_scale, m.pad_taper_segments)
+        _pad_metal_all = pad_in_metal + pad_out_metal
+        # the constant-width landings the probes sit on
+        for xa, xb in ((x_pad0, x_padtap0), (x_padtap1, x_pad1)):
+            k = pad_scale
+            _pad_metal_all.append(_rect(xa, -(sig / 2.0) * k, xb, (sig / 2.0) * k))
+            for sgn in (-1.0, 1.0):
+                a, b = sgn * (sig / 2.0 + gap) * k, sgn * (sig / 2.0 + gap + gnd) * k
+                _pad_metal_all.append(_rect(xa, min(a, b), xb, max(a, b)))
+    else:
+        _pad_metal_all = []
+
     for sgn in (-1.0, 1.0):
         yc = sgn * y_mmi
         out["WG"].append([(x_port_out, yc - port_w / 2.0), (x_sb_out, yc - wg / 2.0),
                           (x_sb_out, yc + wg / 2.0), (x_port_out, yc + port_w / 2.0)])
-        out["WG"] += _cos_sbend(x_sb_out, yc, sgn * arm_y,
+        out["WG"] += _cos_sbend(x_sb_out, yc, sgn * y_entry,
                                 m.sbend_length_um, wg, m.sbend_segments)
+        if m.pads:
+            out["WG"].append(_rect(x_pad0, sgn * y_entry - wg / 2.0,
+                                   x_padtap0, sgn * y_entry + wg / 2.0))
+            out["WG"] += _strip_on_path(pad_in_path, wg, sgn)
         out["WG"].append(_rect(x_elec0, sgn * arm_y - wg / 2.0,
                                x_elec1, sgn * arm_y + wg / 2.0))
-        out["WG"] += _cos_sbend(x_elec1, sgn * arm_y, yc,
+        if m.pads:
+            out["WG"] += _strip_on_path(pad_out_path, wg, sgn)
+            out["WG"].append(_rect(x_padtap1, sgn * y_entry - wg / 2.0,
+                                   x_pad1, sgn * y_entry + wg / 2.0))
+        out["WG"] += _cos_sbend(x_pad1, sgn * y_entry, yc,
                                 m.sbend_length_um, wg, m.sbend_segments)
         out["WG"].append([(x_port_in, yc - wg / 2.0), (x_mmi_out, yc - port_w / 2.0),
                           (x_mmi_out, yc + port_w / 2.0), (x_port_in, yc + wg / 2.0)])
     out["WG"].append(_rect(x_mmi_out, -m.mmi_width_um / 2.0,
                            x_mmi_out + m.mmi_length_um, m.mmi_width_um / 2.0))
     out["WG"].append(_rect(x_mmi_out + m.mmi_length_um, -wg / 2.0, x_taper_out, wg / 2.0))
-    out["WG"].append([(x_taper_out, -wg / 2.0), (z_end, -tip / 2.0),
-                      (z_end, tip / 2.0), (x_taper_out, wg / 2.0)])
+    out["WG"].append(taper_profile.outline(tip, wg, tl, prof,
+                                          segments=lay.taper_segments,
+                                          x0=z_end, reverse=True))
 
     # ---- METAL: signal between two grounds, over the straight arms -------
+    out["METAL"] += _pad_metal_all
     out["METAL"].append(_rect(x_elec0, -sig / 2.0, x_elec1, sig / 2.0))
     for sgn in (-1.0, 1.0):
         y_in = sgn * (sig / 2.0 + gap)
@@ -366,12 +492,38 @@ def build_mzm_polygons(design: Design, ctx: RunContext) -> tuple[dict, dict]:
         texts.append({"text": name, "x_um": x_elec0 + 200.0,
                       "y_um": dy + sig / 2.0 + gap + gnd + 8.0})
 
-    # the grounded shield between them, on the same metal
+    # The shield between them, on the same metal, and tied to the ground planes
+    # on either side of it. A shield open at both ends is a resonator of length
+    # L, whose modes fall at multiples of c/(2 n_m L); the straps hold it at
+    # ground instead. Each strap runs in y through empty slab: the guides sit at
+    # the electrode gaps and the region between a ground plane and the shield
+    # carries nothing, so a strap crosses no waveguide.
+    n_straps = 0
+    strap_pitch = 0.0
     if m.shield and n_dev > 1:
         for a, b in zip(y_dev, y_dev[1:]):
             yc = 0.5 * (a + b)
-            out["METAL"].append(_rect(x_elec0, yc - m.shield_width_um / 2.0,
-                                      x_elec1, yc + m.shield_width_um / 2.0))
+            sh_lo, sh_hi = yc - m.shield_width_um / 2.0, yc + m.shield_width_um / 2.0
+            out["METAL"].append(_rect(x_elec0, sh_lo, x_elec1, sh_hi))
+            if not m.shield_straps:
+                continue
+            # the facing ground edges: the upper ground of the lower device and
+            # the lower ground of the upper device
+            g_lo = a + sig / 2.0 + gap + gnd
+            g_hi = b - (sig / 2.0 + gap + gnd)
+            span = x_elec1 - x_elec0
+            n = max(1, int(round(span / float(m.shield_strap_pitch_um))))
+            strap_pitch = span / n
+            n_straps += 2 * n
+            hw = m.shield_strap_width_um / 2.0
+            # Placed at the centre of each interval rather than at its ends. A
+            # strap landing on the junction between the electrode and the pad
+            # taper closes a wedge against the taper's outer edge, which is a
+            # notch below the minimum space and reads as a violation.
+            for i in range(n):
+                xc = x_elec0 + (i + 0.5) * strap_pitch
+                out["METAL"].append(_rect(xc - hw, g_lo, xc + hw, sh_lo))
+                out["METAL"].append(_rect(xc - hw, sh_hi, xc + hw, g_hi))
 
     # ---- the blanket slab and the floor plan -----------------------------
     span = (max(y_dev) - min(y_dev)) / 2.0
@@ -412,11 +564,25 @@ def build_mzm_polygons(design: Design, ctx: RunContext) -> tuple[dict, dict]:
         "sbend_peak_radius_um": _sbend_peak_radius(arm_y - y_mmi, m.sbend_length_um),
         "port_taper_um": m.port_taper_um,
         "port_width_um": port_w,
-        # A 1x2 splitter separates two guides from one, so the gap between them
-        # necessarily passes through every value from zero upward. The length
-        # over which it is below the declared minimum space is stated here so
-        # that the exception is a measured quantity and not a surprise.
-        "port_gap_below_min_space_um": (
+        # --- the electrical terminals ---------------------------------
+        "pads_drawn": bool(m.pads),
+        "pad_probe_pitch_um": float(m.pad_probe_pitch_um) if m.pads else 0.0,
+        "pad_scale": pad_scale,
+        "pad_face_signal_width_um": sig * pad_scale if m.pads else 0.0,
+        "pad_face_gap_um": gap * pad_scale if m.pads else 0.0,
+        "pad_face_ground_width_um": gnd * pad_scale if m.pads else 0.0,
+        "pad_landing_length_um": float(m.pad_straight_um) if m.pads else 0.0,
+        "pad_taper_length_um": float(m.pad_taper_um) if m.pads else 0.0,
+        "arm_offset_at_pad_um": pad_slot_y if m.pads else arm_y,
+        "shield_straps_drawn": int(n_straps),
+        "shield_strap_pitch_um": strap_pitch,
+        "port_gap_at_mmi_um": port_gap,
+        # The gap between the two access tapers is at its narrowest where they
+        # leave the multimode section and widens along them, so the whole
+        # junction holds the rule when `port_gap_at_mmi_um` does. The length
+        # below the minimum space is reported so that a closed junction, were
+        # one ever drawn, is a measured quantity rather than a surprise.
+        "port_gap_below_min_space_um": 0.0 if port_gap >= m.min_space_um else (
             m.port_taper_um * (port_w - (2.0 * y_mmi - m.min_space_um)) / (port_w - wg)
             if port_w > wg else 0.0),
         "min_space_um": m.min_space_um,
@@ -878,6 +1044,17 @@ def check_geometry(gds_path, layer_map, *, min_angle_deg: float, max_vertices: i
     findings: dict[str, dict] = {}
     total_issues = 0
 
+    # Two names on one number are one layer, and a per-name report of them is
+    # the same geometry printed twice. A design mapping PAD and METAL both to
+    # M1 was reported as carrying seven pad shapes; they were the electrode
+    # strips, and every pad rule passed by reading the electrode back. The
+    # aliases are named here so that a reader knows which rows are shared.
+    by_number: dict[tuple[int, int], list[str]] = {}
+    for name, ld_pair in layer_map.items():
+        by_number.setdefault(tuple(ld_pair), []).append(name)
+    aliases = {"/".join(f"{n[0]}/{n[1]}" for n in [k]): sorted(v)
+               for k, v in by_number.items() if len(v) > 1}
+
     for name, (li, ld) in layer_map.items():
         idx = ly.find_layer(li, ld)
         if idx is None:
@@ -926,6 +1103,8 @@ def check_geometry(gds_path, layer_map, *, min_angle_deg: float, max_vertices: i
         "grid_nm": float(grid_nm),
         "total_issues": int(total_issues),
         "clean": total_issues == 0,
+        # names that share one number, and therefore one row of `by_layer`
+        "aliased_layers": aliases,
         "by_layer": findings,
     }
 
@@ -1116,6 +1295,11 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                                       grid_nm=design.process.grid_nm)
         except Exception as exc:  # pragma: no cover - backend specific
             geometry = {"performed": False, "reason": f"check raised: {exc}"}
+    for number, names in (geometry.get("aliased_layers") or {}).items():
+        ctx.warn(f"layer {number} carries more than one name in layout.layer_map "
+                 f"({', '.join(names)}). One number is one layer: the geometry "
+                 f"reported against each of these names is the same geometry, "
+                 f"and a rule written against one of them reads all of them")
 
     gf_ok = False
     gds_gf = ctx.run_dir / f"{design.meta.name}.gdsfactory.gds"

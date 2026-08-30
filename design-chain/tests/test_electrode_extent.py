@@ -177,12 +177,17 @@ def test_an_arm_sits_on_the_centre_line_of_its_gap():
     assert rec["metal_to_ridge_clearance_um"] > 0
 
 
-def test_the_splitting_region_is_reported_rather_than_hidden():
-    """A 1x2 splitter cannot hold a minimum-space rule through its junction.
+def test_the_splitter_junction_holds_the_minimum_space():
+    """The two access tapers leave the multimode section already apart.
 
-    The two outputs separate from one guide, so the gap between them passes
-    through every value from zero upward. The extent over which it is below the
-    declared minimum is reported, so the exception is a measured quantity.
+    This test previously asserted the opposite, on the belief that a 1x2
+    splitter cannot hold a minimum-space rule through its junction because the
+    gap between its outputs passes through zero. That belief was wrong, and it
+    put four violations on a released mask and a question to the foundry.
+    `lxt_pdk_gf.ltoi300.cells.mmi1x2_cband` is qualified on this stack and its
+    access tapers leave the section 0.60 um apart, twice the rule. The gap is a
+    drawn dimension, `port_separation_um - port_width_um`, and the junction
+    holds the rule when that dimension does.
     """
     import pathlib
 
@@ -195,5 +200,32 @@ def test_the_splitting_region_is_reported_rather_than_hidden():
     d.grating.enabled = False
     d.electrodes.length_um = 5000.0
     _, rec = build_mzm_polygons(d, None)
-    assert rec["port_gap_below_min_space_um"] > 0.0
     assert rec["min_space_um"] > 0.0
+    # the narrowest point of the junction, and it clears the rule
+    assert rec["port_gap_at_mmi_um"] >= rec["min_space_um"]
+    # so no length of it falls below the rule
+    assert rec["port_gap_below_min_space_um"] == 0.0
+
+
+def test_a_closed_splitter_junction_is_still_measured():
+    """Drawing the two ports meeting is reported rather than passing silently.
+
+    The open junction above is the design. Where a port width is declared equal
+    to the port separation the two meet at the end face, the gap starts at zero,
+    and the length below the minimum space is reported so that the exception is
+    a measured quantity rather than a surprise found by the rule deck.
+    """
+    import pathlib
+
+    from picchain.config import Design
+    from picchain.stages.s05_layout import build_mzm_polygons
+
+    d = Design.load(pathlib.Path(__file__).resolve().parents[2]
+                    / "examples" / "edbr_tfln_baseline" / "design.yaml")
+    d.layout.device = "mach_zehnder"
+    d.grating.enabled = False
+    d.electrodes.length_um = 5000.0
+    d.mzm.port_width_um = d.mzm.port_separation_um
+    _, rec = build_mzm_polygons(d, None)
+    assert rec["port_gap_at_mmi_um"] == 0.0
+    assert rec["port_gap_below_min_space_um"] > 0.0

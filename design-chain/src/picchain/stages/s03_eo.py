@@ -153,7 +153,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 
     # ---- RF problem on its own, coarser, wider mesh ---------------------
     xs_rf = _build(design, with_posts=False, electrodes=True, name="rf")
-    d_fine_rf = max(mesh.d_fine_um * 5, 0.05)
+    d_fine_rf = (float(e.rf_mesh_fine_um) if e.rf_mesh_fine_um
+                 else max(mesh.d_fine_um * 5, 0.05))
     d_coarse_rf = max(mesh.d_coarse_um * 10, 0.60)
     # Grid the RF problem explicitly rather than through build_grid: the
     # blanket layers span the whole (deliberately huge) window, so the generic
@@ -161,17 +162,52 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # 50 nm.  Only the electrode gap and the film stack need resolving.
     x0, x1, y0, y1 = xs_rf.window
     slab_y = design.platform.film_thickness_um - design.platform.etch_depth_um
-    fx = [-geom.electrode_gap_um / 2, geom.electrode_gap_um / 2,
-          -geom.wg_top_width_um / 2, geom.wg_top_width_um / 2]
-    fy = [0.0, slab_y, design.platform.film_thickness_um, slab_y + e.thickness_um]
-    grid = RasterGrid(
-        graded_axis(x0, x1, fx, d_fine_rf, d_coarse_rf, fine_margin=geom.electrode_width_um),
-        graded_axis(y0, y1, fy, d_fine_rf, d_coarse_rf, fine_margin=2.0),
-    )
+    # Fixed points at every material interface the cross-section actually
+    # draws, taken from the shapes rather than written out by hand.
+    #
+    # They were previously the slot topology: the guide on the axis and an
+    # electrode edge at half the gap either side of it. A ground-signal-ground
+    # line puts nothing at either place. Its edges are at half the signal width,
+    # at that plus the gap, and at that plus the ground width, and its guides
+    # sit on the gap centre lines. The mesh was therefore refined on the axis,
+    # where the field is uniform inside the signal conductor, and left coarse at
+    # every edge that carries a field singularity. The buried oxide's lower
+    # interface, across which the permittivity trebles, was not a fixed point in
+    # either topology.
+    def _interfaces(index: int, lo: float, hi: float) -> list[float]:
+        vals = {float(pt[index]) for sh in xs_rf.shapes for pt in sh.points}
+        return sorted(v for v in vals if lo < v < hi)
 
+    fx = _interfaces(0, x0, x1)
+    fy = _interfaces(1, y0, y1)
     eps_rf = {m: lib[m].eps_rf_device(p.cut) for m in xs_rf.materials_used()}
-    eps_x = rasterise(xs_rf, grid, {m: v[0] for m, v in eps_rf.items()}, subsample=2)
-    eps_y = rasterise(xs_rf, grid, {m: v[1] for m, v in eps_rf.items()}, subsample=2)
+
+    def _rf_solve(d_fine: float, d_coarse: float):
+        """The electrostatic problem at one mesh density.
+
+        Returned so that the same problem can be posed twice and the shift
+        between the two reported, rather than a single mesh being trusted.
+        """
+        g = RasterGrid(
+            graded_axis(x0, x1, fx, d_fine, d_coarse,
+                        fine_margin=float(e.rf_mesh_fine_margin_um)),
+            graded_axis(y0, y1, fy, d_fine, d_coarse,
+                        fine_margin=float(e.rf_mesh_fine_margin_um)),
+        )
+        ex = rasterise(xs_rf, g, {m: v[0] for m, v in eps_rf.items()}, subsample=2)
+        ey = rasterise(xs_rf, g, {m: v[1] for m, v in eps_rf.items()}, subsample=2)
+        met = material_mask(xs_rf, g, e.material, subsample=2)
+        if str(e.topology).lower() == "gsg":
+            hs = geom.electrode_width_um / 2
+            dr = [(met * (np.abs(g.x)[:, None] <= hs + 1e-9), V),
+                  (met * (np.abs(g.x)[:, None] > hs + 1e-9), 0.0)]
+        else:
+            dr = [(met * (g.x[:, None] < 0), +V / 2), (met * (g.x[:, None] > 0), -V / 2)]
+        sol = solve_potential(g.x, g.y, ex, ey, dr)
+        c_per_m = 2.0 * (sol.energy(ex, ey) * EPS0) / (V ** 2)
+        return g, ex, ey, dr, sol, c_per_m
+
+    grid, eps_x, eps_y, _drive_unused, _es_unused, _C_unused = _rf_solve(d_fine_rf, d_coarse_rf)
 
     metal = material_mask(xs_rf, grid, e.material, subsample=2)
     gsg = str(e.topology).lower() == "gsg"
@@ -247,6 +283,45 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                          L_electrode_m, geom, n_conductors) if e.travelling_wave \
         else {"enabled": False}
 
+    # ---- the convergence guard on the electrostatic solve ----------------
+    convergence: dict = {"performed": False, "reason": "not requested"}
+    if e.convergence_check:
+        d_fine_r = d_fine_rf * float(e.refinement)
+        d_coarse_r = d_coarse_rf * float(e.refinement)
+        gr, exr, eyr, drr, _sr, C_ref = _rf_solve(d_fine_r, d_coarse_r)
+        rel = abs(C_ref - C_per_m) / C_per_m if C_per_m else float("inf")
+        convergence = {
+            "performed": True,
+            "d_fine_um": d_fine_r,
+            "nx": int(len(gr.x)), "ny": int(len(gr.y)),
+            "capacitance_pF_per_cm": C_ref * 1e12 / 100,
+            "capacitance_rel_shift": rel,
+            "tolerance": float(e.convergence_tolerance),
+            "resolved": bool(rel <= float(e.convergence_tolerance)),
+        }
+        if e.travelling_wave:
+            tw_r = travelling_wave(gr, exr, eyr, drr, V, C_ref, e, n_g,
+                                   L_electrode_m, geom, n_conductors)
+            for key in ("microwave_index", "characteristic_impedance_ohm",
+                        "electro_optic_3dB_GHz"):
+                a, b = tw.get(key), tw_r.get(key)
+                if a and b:
+                    convergence[key + "_refined"] = b
+                    convergence[key + "_rel_shift"] = abs(b - a) / abs(a)
+            bw_shift = convergence.get("electro_optic_3dB_GHz_rel_shift")
+            if bw_shift is not None and bw_shift > float(e.convergence_tolerance):
+                convergence["resolved"] = False
+        if not convergence["resolved"]:
+            ctx.warn(
+                "the electrostatic solve is not converged: halving the cell moves "
+                "the capacitance by %.1f per cent and the 3 dB bandwidth by %.1f "
+                "per cent, against a tolerance of %.1f. Every microwave figure "
+                "this stage reports carries at least that uncertainty, and a "
+                "margin smaller than it is not a margin" % (
+                    rel * 100,
+                    100 * (convergence.get("electro_optic_3dB_GHz_rel_shift") or 0.0),
+                    100 * float(e.convergence_tolerance)))
+
     payload = {
         "enabled": True,
         "electrode_gap_um": geom.electrode_gap_um,
@@ -272,6 +347,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "mode_overlap_with_metal": tail,
         "rf_mesh": {"nx": int(len(grid.x)), "ny": int(len(grid.y)),
                     "d_fine_um": d_fine_rf, "d_coarse_um": d_coarse_rf},
+        "convergence": convergence,
         "n_g_used": n_g,
         "note_group_index": "tuning uses dlambda/lambda = dn/n_g (dispersive Bragg condition)",
         "note_metal_overlap": "reported as the fraction of |E|^2 beyond the electrode inner edge",

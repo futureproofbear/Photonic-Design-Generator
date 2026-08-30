@@ -143,6 +143,28 @@ class Electrodes(BaseModel):
     #: conductor for the skin-effect loss. 4.1e7 S/m is bulk gold; an evaporated
     #: thin film is lower, and the loss scales as its reciprocal square root
     conductivity_S_per_m: float = 4.1e7
+
+    # --- the convergence guard on the electrostatic solve -------------------
+    # The capacitance sets the microwave index, the impedance and the bandwidth,
+    # and it is an integral of a field over a mesh. A design was released whose
+    # bandwidth moved between 19.6 and 26.1 GHz across four refinements, and at
+    # one of them two `must` rows failed at the worst corner that pass at the
+    # mesh as run. A figure read off an unconverged solve carries no margin.
+    #: the fine cell of the electrostatic mesh, um. Where this is unset the
+    #: cell is five times the optical one and never below 50 nm. That floor was
+    #: found to hold the solve short of convergence whatever the optical mesh
+    #: was set to, so the quantity is declarable rather than derived
+    rf_mesh_fine_um: float | None = None
+    #: how far the fine cell extends either side of a material interface, um
+    rf_mesh_fine_margin_um: float = 2.0
+    #: re-solve the electrostatic problem on a finer mesh and report the shift
+    convergence_check: bool = True
+    #: the factor the fine cell size is multiplied by for the refined solve
+    refinement: float = 0.5
+    #: the fractional shift in capacitance below which the solve is called
+    #: resolved. The microwave index goes as the square root of it, so a 2 per
+    #: cent capacitance shift is one per cent of index
+    convergence_tolerance: float = 0.02
     #: "slot" places two conductors either side of one guide, which is the mirror
     #: of a distributed-reflector laser. "gsg" places a signal conductor between
     #: two grounds with a guide centred in EACH gap, which is the coplanar line a
@@ -754,10 +776,21 @@ class MzmCfg(BaseModel):
     on the centre line of each gap, so it is `electrode_width/2 + gap/2` and
     cannot drift from the electrode the electro-optic stage solved.
     """
-    #: the multimode section of the 1x2 splitter. Its outputs emerge at
-    #: plus and minus a quarter of its width, which is where a 1x2 splits
-    mmi_width_um: float = 6.0
-    mmi_length_um: float = 28.0
+    #: the multimode section of the 1x2 splitter, and the two access tapers that
+    #: leave it. The defaults are those of `lxt_pdk_gf.ltoi300.cells.mmi1x2_cband`,
+    #: which is qualified on this stack.
+    #:
+    #: The output gap is `port_separation_um - port_width_um`, and it is drawn
+    #: open rather than closed. A junction whose two ports meet at the end face
+    #: forces that gap through zero and breaks any minimum-space rule over the
+    #: length of the access taper; the qualified cell leaves 0.60 um, which is
+    #: twice the rule, so the gap never approaches it.
+    mmi_width_um: float = 4.5
+    mmi_length_um: float = 13.5
+    #: centre-to-centre separation of the two access tapers at the end face
+    port_separation_um: float = 2.55
+    #: the width of each access taper where it meets the multimode section
+    port_width_um: float = 1.95
     #: the S-bend that carries each arm from the splitter out to its gap. A
     #: raised cosine, so the curvature is zero where it meets a straight guide
     sbend_length_um: float = 220.0
@@ -776,15 +809,39 @@ class MzmCfg(BaseModel):
     shield_width_um: float = 60.0
     #: names drawn beside each modulator, in order
     labels: list[str] = Field(default_factory=lambda: ["MOD1-TX-REF", "MOD2-RX-ECHO"])
-    #: the access taper from the multimode section to the guide width. Each port
-    #: leaves the section half its width, so the two together fill its end face
-    #: and no re-entrant step is drawn at the junction
-    port_taper_um: float = 60.0
+    #: the access taper from the multimode section out to the guide width
+    port_taper_um: float = 25.0
     #: the minimum same-layer space the process declares, used only to report how
     #: far the splitting region falls below it
     min_space_um: float = 0.30
     #: straight guide between the taper and the splitter
     lead_straight_um: float = 50.0
+
+    # --- the electrical terminals -------------------------------------------
+    # A coplanar line with no terminals cannot be probed, driven or terminated,
+    # and a device drawn without them is not a device. The pad structure follows
+    # `lxt_pdk_gf`: the line is scaled up to the probe pitch over a taper, and
+    # the two optical arms run in the two slots the whole way, so metal never
+    # crosses a guide.
+    #: ground-signal-ground probe pads at each end of the line
+    pads: bool = True
+    #: probe pitch, signal centre to ground centre, at the pad face. The whole
+    #: cross-section is scaled to reach it, so the ratio of gap to conductor is
+    #: held and with it the characteristic impedance
+    pad_probe_pitch_um: float = 100.0
+    #: the constant-width landing the probe sits on
+    pad_straight_um: float = 60.0
+    #: the taper from the pad cross-section down to the line
+    pad_taper_um: float = 150.0
+    pad_taper_segments: int = 96
+    #: straps tying the shield to the ground planes on either side of it. The
+    #: shield is otherwise a floating conductor as long as the electrode, which
+    #: resonates at multiples of c/(2 n_m L) and cannot shield
+    shield_straps: bool = True
+    #: strap spacing. It is to stay well below a quarter of the microwave
+    #: wavelength at the top of the band, which the layout stage checks
+    shield_strap_pitch_um: float = 1000.0
+    shield_strap_width_um: float = 20.0
 
 
 class LayoutCfg(BaseModel):
@@ -804,6 +861,9 @@ class LayoutCfg(BaseModel):
     device: Literal["edbr", "mach_zehnder"] = "edbr"
     taper_length_um: float = 150.0
     taper_tip_width_um: float = 0.4
+    #: stations at which the taper's profile is sampled when it is drawn. The
+    #: curve itself is `taper.profile`, shared with the stage that evaluates it
+    taper_segments: int = 64
     input_facet_angle_deg: float = 8.0
     output_facet_angle_deg: float = 0.0
     #: Side of the square bond pad on each electrode, in micrometres. This was a
