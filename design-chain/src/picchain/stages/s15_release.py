@@ -87,11 +87,20 @@ def _readiness(design: Design, ctx: RunContext) -> list[dict[str, Any]]:
                        if (env.get("chain") or {}).get("dirty")
                        else "clean")),
          "field": "environment.chain"},
-        {"condition": "every grating period is drawn",
+        # Named for whatever the device's mask can be a fraction of. A grating is
+        # drawn a period at a time and an interferometer is not, so on a device
+        # with no grating this read "None of None" and passed: a condition that
+        # cannot go red is worse than an absent one, being counted in the total.
+        {"condition": ("every grating period is drawn" if lay.get("device") != "mach_zehnder"
+                       else "the drawn electrode is the electrode that was solved"),
          "met": bool(lay.get("mask_is_complete")),
-         "detail": f"{(lay.get('fidelity') or {}).get('periods_drawn')} of "
-                   f"{(lay.get('fidelity') or {}).get('periods_total')}",
-         "field": "layout.draw_periods"},
+         "detail": (f"{(lay.get('fidelity') or {}).get('periods_drawn')} of "
+                    f"{(lay.get('fidelity') or {}).get('periods_total')}"
+                    if lay.get("device") != "mach_zehnder" else
+                    f"{(lay.get('fidelity') or {}).get('electrode_length_drawn_um')} um drawn "
+                    f"against {(lay.get('fidelity') or {}).get('electrode_length_simulated_um')} um solved"),
+         "field": ("layout.draw_periods" if lay.get("device") != "mach_zehnder"
+                   else "electrodes.length_um")},
         {"condition": "the two layout backends agree",
          "met": bool((lay.get("backend_xor") or {}).get("agree")),
          "detail": str((lay.get("backend_xor") or {}).get("residual_area_um2")),
