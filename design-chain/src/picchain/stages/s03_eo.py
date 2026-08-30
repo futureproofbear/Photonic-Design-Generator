@@ -48,7 +48,8 @@ EPS0 = 8.8541878128e-12  # F/m
 
 
 
-def travelling_wave(grid, eps_x, eps_y, mask_L, mask_R, V, C_per_m, e, n_g, length_m, geom):
+def travelling_wave(grid, eps_x, eps_y, drive, V, C_per_m, e, n_g, length_m, geom,
+                    n_conductors=2.0):
     """Microwave index, impedance, conductor loss and the bandwidth they imply.
 
     The closed-form parts live in ``picchain.rf`` and are tested there. What is
@@ -61,8 +62,7 @@ def travelling_wave(grid, eps_x, eps_y, mask_L, mask_R, V, C_per_m, e, n_g, leng
     from .. import rf
 
     ones = np.ones_like(eps_x)
-    es_air = solve_potential(grid.x, grid.y, ones, ones,
-                             [(mask_L, +V / 2), (mask_R, -V / 2)])
+    es_air = solve_potential(grid.x, grid.y, ones, ones, drive)
     C_air = 2 * (es_air.energy(ones, ones) * EPS0) / (V**2)
     if C_air <= 0 or C_per_m <= 0:
         return {"enabled": False, "reason": "a capacitance was not positive"}
@@ -73,7 +73,8 @@ def travelling_wave(grid, eps_x, eps_y, mask_L, mask_R, V, C_per_m, e, n_g, leng
 
     def alpha(f_Hz):
         R = rf.skin_resistance_per_m(f_Hz, e.conductivity_S_per_m,
-                                     geom.electrode_width_um * 1e-6, e.thickness_um * 1e-6)
+                                     geom.electrode_width_um * 1e-6, e.thickness_um * 1e-6,
+                                     n_conductors=n_conductors)
         return R / (2.0 * Z0)
 
     f_3dB = rf.bandwidth(length_m, alpha, n_m, n_g)
@@ -94,7 +95,38 @@ def travelling_wave(grid, eps_x, eps_y, mask_L, mask_R, V, C_per_m, e, n_g, leng
         "electro_optic_3dB_GHz": f_3dB / 1e9,
         "electro_optic_6dB_GHz": f_6dB / 1e9,
         "electrode_length_mm": length_m * 1e3,
+        "topology": str(e.topology),
+        "conductors_carrying_the_return": n_conductors,
+        # what a source of the declared impedance launches into this line
+        "drive_transmitted_into_line": 2 * Z0 / (Z0 + e.drive_impedance_ohm),
     }
+
+
+def electrode_extent(design: Design, grating: dict) -> tuple[float, str, float, str]:
+    """The electrode run and the wavelength it acts at, and where each came from.
+
+    An electrode flanking a Bragg mirror runs the length of the grating and acts
+    at the Bragg wavelength, the two being one structure. An electrode on a
+    modulator arm runs a length of its own and acts at the wavelength the guide
+    carries. Reading the grating in the second case returns the length and the
+    wavelength of a structure the device does not contain, and `grating.length_um`
+    holds a schema default whether or not a grating exists, so the figure returned
+    would look ordinary while describing another device.
+
+    Returned with the field each value was taken from, so that a run states which
+    of the two rules applied rather than leaving it to be inferred.
+    """
+    if design.electrodes.length_um is not None:
+        return (float(design.electrodes.length_um), "electrodes.length_um",
+                float(design.waveguide.wavelength_um), "waveguide.wavelength_um")
+
+    length_um = float(grating.get("length_um", design.grating.length_um))
+    lam_B = grating.get("bragg_wavelength_um")
+    if lam_B:
+        return (length_um, "grating.length_um",
+                float(lam_B), "grating.bragg_wavelength_um")
+    return (length_um, "grating.length_um",
+            float(design.waveguide.wavelength_um), "waveguide.wavelength_um")
 
 
 def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]:
@@ -142,15 +174,34 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     eps_y = rasterise(xs_rf, grid, {m: v[1] for m, v in eps_rf.items()}, subsample=2)
 
     metal = material_mask(xs_rf, grid, e.material, subsample=2)
-    mask_L = metal * (grid.x[:, None] < 0)
-    mask_R = metal * (grid.x[:, None] > 0)
-    es = solve_potential(grid.x, grid.y, eps_x, eps_y, [(mask_L, +V / 2), (mask_R, -V / 2)])
+    gsg = str(e.topology).lower() == "gsg"
+    if gsg:
+        # Signal on axis against two grounds. The potential difference across
+        # each gap is V, matching the slot convention, so the parallel-plate
+        # reference below is the same quantity in both topologies.
+        half_signal = geom.electrode_width_um / 2
+        signal = metal * (np.abs(grid.x)[:, None] <= half_signal + 1e-9)
+        grounds = metal * (np.abs(grid.x)[:, None] > half_signal + 1e-9)
+        drive = [(signal, V), (grounds, 0.0)]
+        arm_offset_um = half_signal + geom.electrode_gap_um / 2
+        # two grounds carry the return in parallel, so the series resistance is
+        # the signal conductor's plus half of one ground's
+        n_conductors = 1.5
+    else:
+        mask_L = metal * (grid.x[:, None] < 0)
+        mask_R = metal * (grid.x[:, None] > 0)
+        drive = [(mask_L, +V / 2), (mask_R, -V / 2)]
+        arm_offset_um = 0.0
+        n_conductors = 2.0
+    es = solve_potential(grid.x, grid.y, eps_x, eps_y, drive)
 
     # ---- interpolate E_x onto the optical mesh --------------------------
+    # The optical mesh is centred on its own guide, so the field is sampled
+    # about that guide's position in the line rather than about the axis.
     interp = RegularGridInterpolator(
         (grid.x, grid.y), es.Ex, bounds_error=False, fill_value=0.0
     )
-    OX, OY = np.meshgrid(ox, oy, indexing="ij")
+    OX, OY = np.meshgrid(ox + arm_offset_um, oy, indexing="ij")
     Ex_opt = interp(np.stack([OX.ravel(), OY.ravel()], axis=-1)).reshape(OX.shape)
 
     gamma = eo_overlap(Ex_opt, intensity, mask_film_opt, ox, oy, geom.electrode_gap_um, V)
@@ -166,7 +217,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 
     grating = ctx.get("grating") or {}
     n_g = float(grating.get("n_g") or (ctx.get("mode") or {}).get("n_g") or n_e)
-    lam_B_um = float(grating.get("bragg_wavelength_um") or lam)
+
+    L_electrode_um, length_from, lam_B_um, wavelength_from = electrode_extent(design, grating)
     f_B = C0 / (lam_B_um * 1e-6)
 
     tuning_Hz_per_V = f_B * dn_eff_per_V / n_g
@@ -181,7 +233,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # this is already joules per metre of electrode run.
     W = es.energy(eps_x, eps_y) * EPS0
     C_per_m = 2 * W / (V**2)
-    L_electrode_m = float(grating.get("length_um", design.grating.length_um)) * 1e-6
+    L_electrode_m = L_electrode_um * 1e-6
     C_total_F = C_per_m * L_electrode_m
     f_rc_Hz = 1.0 / (2 * math.pi * e.drive_impedance_ohm * C_total_F) if C_total_F > 0 else float("inf")
 
@@ -191,8 +243,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     beyond = np.abs(ox)[:, None] >= (geom.electrode_gap_um / 2)
     tail = float(np.sum(intensity * beyond * dA) / np.sum(intensity * dA))
 
-    tw = travelling_wave(grid, eps_x, eps_y, mask_L, mask_R, V,
-                         C_per_m, e, n_g, L_electrode_m, geom) if e.travelling_wave \
+    tw = travelling_wave(grid, eps_x, eps_y, drive, V, C_per_m, e, n_g,
+                         L_electrode_m, geom, n_conductors) if e.travelling_wave \
         else {"enabled": False}
 
     payload = {
@@ -212,6 +264,10 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "VpiL_ideal_V_cm": VpiL_ideal_V_cm,
         "capacitance_pF_per_cm": C_per_m * 1e12 / 100,
         "capacitance_total_pF": C_total_F * 1e12,
+        "electrode_length_um": L_electrode_um,
+        "electrode_length_from": length_from,
+        "wavelength_um": lam_B_um,
+        "wavelength_from": wavelength_from,
         "lumped_RC_bandwidth_MHz": f_rc_Hz / 1e6,
         "mode_overlap_with_metal": tail,
         "rf_mesh": {"nx": int(len(grid.x)), "ny": int(len(grid.y)),

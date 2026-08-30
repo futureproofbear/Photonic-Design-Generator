@@ -148,6 +148,42 @@ def the_electrode_clears_the_ridge(d: Design) -> list[Finding]:
 
 
 @check
+def the_electrode_length_is_declared_where_no_grating_sets_it(d: Design) -> list[Finding]:
+    """An electrode on a device with no mirror must state its own length.
+
+    The electro-optic stage sizes the capacitance, the lumped RC figure and the
+    travelling-wave bandwidth over the electrode run. Where a Bragg mirror is
+    present the electrodes flank it and the grating length is that run. Where
+    the mirror is switched off, the grating length is a default carried by the
+    schema, and taking it would size a modulator's electrode from a structure
+    the device does not contain.
+
+    The failure it prevents is silent. `grating.length_um` holds 7250 um
+    whether or not a grating exists, so the stage would return a capacitance,
+    a bandwidth and an impedance for a 7.25 mm electrode on a device whose
+    electrode is any other length, and every one of those figures would look
+    ordinary.
+    """
+    if not getattr(d.electrodes, "enabled", True):
+        return []
+    if d.grating.enabled:
+        return []
+    if d.electrodes.length_um is None:
+        return [Finding(
+            "the_electrode_length_is_declared_where_no_grating_sets_it",
+            "the grating is switched off and no electrode length is declared, so "
+            f"the electrode would be sized from grating.length_um at "
+            f"{float(d.grating.length_um):.0f} um, which this device does not contain",
+            ("electrodes.length_um", "grating.enabled"))]
+    if float(d.electrodes.length_um) <= 0.0:
+        return [Finding(
+            "the_electrode_length_is_declared_where_no_grating_sets_it",
+            f"the declared electrode length is {float(d.electrodes.length_um):.3f} um",
+            ("electrodes.length_um",))]
+    return []
+
+
+@check
 def the_grating_period_suits_the_order(d: Design) -> list[Finding]:
     """A declared period and order must be consistent with the wavelength."""
     g, w = d.grating, d.waveguide

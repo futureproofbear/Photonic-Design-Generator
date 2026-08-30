@@ -42,6 +42,18 @@ def _dn_for_geometry(design: Design, lib, post_w: float, post_gap: float, n_bare
 
 def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]:
     g = design.grating
+    # A device that carries no Bragg mirror declares it here. The field existed
+    # in the schema and was read by nothing, so every device acquired a grating
+    # whether or not it contained one, and the stages downstream took the
+    # period, the Bragg wavelength and the electrode length from it. Where the
+    # grating is switched off, the payload says so and those stages fall back to
+    # figures declared in their own right.
+    if not g.enabled:
+        payload = {"enabled": False,
+                   "reason": "grating.enabled is false; the device carries no Bragg mirror"}
+        ctx.put("grating", payload)
+        return payload
+
     mode = ctx.get("mode")
     if mode is None:
         raise RuntimeError("stage 'grating' requires stage 'mode' to have run")

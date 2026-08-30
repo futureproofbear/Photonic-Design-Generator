@@ -115,6 +115,14 @@ class Electrodes(BaseModel):
     material: str = "Au"
     eo_coefficient: str = "r33"
     test_voltage_V: float = 1.0
+    #: the electro-optically active electrode run, um. Where it is unset the
+    #: grating length is used, which is correct for a mirror whose electrodes
+    #: flank the grating and wrong for every other electro-optic device. A
+    #: modulator carries no grating, so its length is declared here and the
+    #: capacitance, the lumped RC figure and the travelling-wave bandwidth all
+    #: follow from the figure declared rather than from a grating that is
+    #: absent. The chain reports which of the two was used.
+    length_um: float | None = None
     #: the largest drive the electrode will actually see, volts. The mode-hop
     #: search is bounded by it, so a tuning range is reported over the excursion
     #: a driver can deliver rather than over whatever span the sweep happened to
@@ -135,6 +143,39 @@ class Electrodes(BaseModel):
     #: conductor for the skin-effect loss. 4.1e7 S/m is bulk gold; an evaporated
     #: thin film is lower, and the loss scales as its reciprocal square root
     conductivity_S_per_m: float = 4.1e7
+    #: "slot" places two conductors either side of one guide, which is the mirror
+    #: of a distributed-reflector laser. "gsg" places a signal conductor between
+    #: two grounds with a guide centred in EACH gap, which is the coplanar line a
+    #: push-pull interferometer carries.
+    #:
+    #: The two are different transmission lines. Solving a slot line for a device
+    #: drawn as ground-signal-ground overstates the impedance and understates the
+    #: capacitance and the conductor loss, and the drive a 50 ohm source actually
+    #: launches into the line follows from the impedance.
+    topology: Literal["slot", "gsg"] = "slot"
+    #: ground conductor width for the gsg topology; defaults to the signal width
+    ground_width_um: float | None = None
+
+
+class ModulatorCfg(BaseModel):
+    """A Mach-Zehnder amplitude modulator, as distinct from one of its arms.
+
+    The electro-optic stage solves one guide between two electrodes. What a link
+    budget consumes is the interferometer, which reaches its half-wave point at
+    half the single-arm voltage when the arms are driven in opposition. The
+    convention is declared here so that a reported V_pi states which device it
+    belongs to.
+    """
+    enabled: bool = False
+    configuration: Literal["mach_zehnder"] = "mach_zehnder"
+    #: push_pull drives the two arms in opposition and halves V_pi; single_arm
+    #: leaves the second arm as a passive reference and does not
+    drive: Literal["push_pull", "single_arm"] = "push_pull"
+    #: the band the device must pass, GHz. A modulator carrying a signal about a
+    #: carrier is required to work across a band, and a 3 dB bandwidth quoted at
+    #: the carrier describes a device 3 dB down where it is used. Declaring the
+    #: band causes the response to be reported at its edges
+    rf_band_GHz: list[float] = Field(default_factory=list)
 
 
 class GainMedium(BaseModel):
@@ -1043,6 +1084,7 @@ class Design(BaseModel):
     waveguide: Waveguide = Field(default_factory=Waveguide)
     grating: Grating = Field(default_factory=Grating)
     electrodes: Electrodes = Field(default_factory=Electrodes)
+    modulator: ModulatorCfg = Field(default_factory=ModulatorCfg)
     cavity: Cavity = Field(default_factory=Cavity)
     chirp: ChirpDrive = Field(default_factory=ChirpDrive)
     dynamics: DynamicsCfg = Field(default_factory=DynamicsCfg)
