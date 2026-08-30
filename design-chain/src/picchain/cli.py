@@ -38,10 +38,27 @@ app = typer.Typer(add_completion=False, help="Headless PIC design chain")
 EXIT_OK, EXIT_ERROR, EXIT_VERIFY_FAIL, EXIT_USAGE = 0, 1, 2, 3
 
 
+def _library(d: Design) -> MaterialLibrary:
+    """The material library this design names, derived from the design itself.
+
+    Held apart from `_load` so that it can be rebuilt after an override. The
+    library was previously constructed once from the design as it arrived on
+    disk, and every override path then re-read the design and discarded the
+    library that came with it. `--set platform.materials_file=...` therefore
+    reached `design.resolved.json` and never reached a solver: the run recorded
+    one material file and solved with another.
+
+    The symptom was silence. A sweep of the radio-frequency permittivity across
+    plus and minus fifteen per cent returned a capacitance identical in the last
+    bit at every point, which reads as a quantity the design is insensitive to
+    rather than as an override that was dropped.
+    """
+    return MaterialLibrary(d.platform.materials_file) if d.platform.materials_file else MaterialLibrary()
+
+
 def _load(design_path: Path) -> tuple[Design, MaterialLibrary]:
     d = Design.load(design_path)
-    lib = MaterialLibrary(d.platform.materials_file) if d.platform.materials_file else MaterialLibrary()
-    return d, lib
+    return d, _library(d)
 
 
 def _resolve_stages(requested: list[str]) -> list[str]:
@@ -117,6 +134,7 @@ def run(
             raise typer.Exit(EXIT_USAGE)
         key, val = ov.split("=", 1)
         _apply_override(d, key, val)
+    lib = _library(d)          # an override may have named another material file
 
     chosen = _resolve_stages([s.strip() for s in stages.split(",") if s.strip()] or d.stages)
     ctx = RunContext(design_dir=design.parent, run_id=new_run_id(tag or d.meta.name)).ensure()
@@ -534,11 +552,12 @@ def sweep(
     for i, v in enumerate(vals):
         d, _ = _load(design)
         _apply_override(d, param, v)
+        lib_i = _library(d)    # the swept parameter may be the material file
         ctx = RunContext(design_dir=design.parent, run_id=new_run_id(f"sweep{i:03d}")).ensure()
         try:
             for s in chosen:
                 ctx.current_stage = s
-                STAGES[s](d, ctx, lib)
+                STAGES[s](d, ctx, lib_i)
             ctx.finalise("ok", update_latest=False)
             row = {"param": param, "value": v}
             row.update({m: ctx.get(m) for m in want} if want else {"metrics": ctx.metrics})
@@ -732,7 +751,7 @@ def corners(
         for s in chosen:
             try:
                 ctx.current_stage = s
-                STAGES[s](dc, ctx, lib)
+                STAGES[s](dc, ctx, _library(dc))
             except Exception as exc:
                 status = f"failed:{s}"
                 ctx.warn(f"stage {s} raised: {exc}")
@@ -884,6 +903,7 @@ def golden(
     for ov in set_:
         key, val = ov.split("=", 1)
         _apply_override(d, key, val)
+    lib = _library(d)
 
     ctx = RunContext(design_dir=design.parent, run_id=new_run_id("golden")).ensure()
     for s in _resolve_stages(["layout"]):
@@ -1075,7 +1095,7 @@ def search(
         try:
             for st in chosen:
                 ctx.current_stage = st
-                STAGES[st](d, ctx, lib)
+                STAGES[st](d, ctx, _library(d))
             ctx.finalise("ok", update_latest=False)
             return ctx.metrics
         except Exception as exc:
@@ -1342,7 +1362,7 @@ def sensitivity(
         try:
             for st in chosen:
                 ctx.current_stage = st
-                STAGES[st](d, ctx, lib)
+                STAGES[st](d, ctx, _library(d))
             ctx.finalise("ok", update_latest=False)
             return ctx.metrics
         except Exception as exc:
