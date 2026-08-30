@@ -67,3 +67,33 @@ def test_bandwidth_falls_as_the_electrode_lengthens():
     f_short = rf.bandwidth(0.002, alpha, 2.54, 2.21)
     f_long = rf.bandwidth(0.020, alpha, 2.54, 2.21)
     assert f_long < f_short
+
+
+def test_the_bandwidth_is_resolved_and_not_quantised_on_the_walk():
+    """Two lines differing slightly must not return an identical bandwidth.
+
+    The coarse walk returned its first grid point, so any two crossings inside
+    one 2 per cent step gave a figure identical in the last bit. Two electrode
+    gaps whose capacitance, microwave index and conductor loss all differed
+    reported the same bandwidth, and the equality was read as physics.
+    """
+    a = rf.bandwidth(0.010, lambda f: 20.0, 2.5600, 2.0893)
+    b = rf.bandwidth(0.010, lambda f: 20.0, 2.5675, 2.0893)
+    assert a != b
+    # the slower line walks off sooner, so its bandwidth is the lower
+    assert b < a
+    assert abs(a - b) / a < 0.05          # and only slightly
+
+
+def test_the_resolved_bandwidth_sits_on_the_declared_level():
+    """The returned frequency is where the response actually crosses."""
+    f = rf.bandwidth(0.013, lambda _f: 15.0, 2.5422, 2.0893)
+    m = rf.response(f, 0.013, 15.0, 2.5422, 2.0893)
+    assert abs(m - 1 / math.sqrt(2)) < 1e-3
+
+
+def test_a_finer_tolerance_does_not_move_the_answer_materially():
+    """The default tolerance is fine enough for the figure to be quoted."""
+    coarse = rf.bandwidth(0.013, lambda _f: 15.0, 2.5422, 2.0893, tol=1e-4)
+    fine = rf.bandwidth(0.013, lambda _f: 15.0, 2.5422, 2.0893, tol=1e-7)
+    assert abs(coarse - fine) / fine < 1e-3

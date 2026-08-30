@@ -66,11 +66,33 @@ def response(f_Hz: float, length_m: float, alpha_np_per_m: float,
 def bandwidth(length_m: float, alpha_at: callable, n_microwave: float,
               n_optical: float, level: float = 1 / math.sqrt(2),
               f_start: float = 1e8, f_stop: float = 1e13,
-              step: float = 1.02) -> float:
-    """Lowest frequency at which the response falls to ``level``."""
-    f = f_start
-    while f < f_stop:
-        if response(f, length_m, alpha_at(f), n_microwave, n_optical) <= level:
-            return f
-        f *= step
+              step: float = 1.02, tol: float = 1e-4) -> float:
+    """Lowest frequency at which the response falls to ``level``.
+
+    The coarse walk brackets the crossing and a bisection then resolves it to
+    ``tol`` in fraction. Returning the first grid point of the walk, as this did
+    until 2026-08-30, gives an upper bound biased high by up to one step, which
+    was 2 per cent.
+
+    That bias was not benign. Two electrode gaps whose capacitance, microwave
+    index and conductor loss all differed returned a bandwidth identical in the
+    last bit, because both crossings fell inside one step, and the equality was
+    read as a physical result. A margin quoted at 0.3 per cent of the bound sat
+    inside the step that produced it.
+    """
+    lo = f_start
+    if response(lo, length_m, alpha_at(lo), n_microwave, n_optical) <= level:
+        return lo
+    hi = lo * step
+    while hi < f_stop:
+        if response(hi, length_m, alpha_at(hi), n_microwave, n_optical) <= level:
+            # bracketed between lo and hi; bisect on the crossing
+            while (hi - lo) / hi > tol:
+                mid = 0.5 * (lo + hi)
+                if response(mid, length_m, alpha_at(mid), n_microwave, n_optical) <= level:
+                    hi = mid
+                else:
+                    lo = mid
+            return hi
+        lo, hi = hi, hi * step
     return float("inf")
