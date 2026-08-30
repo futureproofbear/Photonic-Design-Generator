@@ -240,6 +240,15 @@ def edbr_cross_section(
     electrode_width_um: float = 20.0,
     electrode_thickness_um: float = 0.9,
     electrode_material: str = "Au",
+    #: "slot" places two conductors either side of one guide, which is the
+    #: mirror of a distributed-reflector laser. "gsg" places a signal conductor
+    #: between two grounds with a guide centred in EACH gap, which is the
+    #: coplanar line of a push-pull interferometer. The two differ in the
+    #: capacitance, the impedance and the conductor loss, and a device drawn as
+    #: one and solved as the other reports the line it does not have.
+    electrode_topology: str = "slot",
+    #: ground conductor width for "gsg"; defaults to the signal width
+    ground_width_um: float | None = None,
     window_pad_x_um: float = 3.0,
     window_pad_y_um: float = 0.0,
     include_substrate: bool = True,
@@ -257,9 +266,20 @@ def edbr_cross_section(
     if slab < -1e-9:
         raise ValueError("etch depth exceeds film thickness")
 
+    gsg = electrodes and str(electrode_topology).lower() == "gsg"
+    w_gnd = float(ground_width_um) if ground_width_um else electrode_width_um
+    # the guides of a gsg line sit centred in the two gaps, so the cross-section
+    # is symmetric about the signal conductor and carries two ridges
+    arm_offset = (electrode_width_um / 2 + electrode_gap_um / 2) if gsg else 0.0
+    if gsg:
+        electrode_extent = electrode_width_um / 2 + electrode_gap_um + w_gnd
+    elif electrodes:
+        electrode_extent = electrode_gap_um / 2 + electrode_width_um
+    else:
+        electrode_extent = 0.0
     half_x = max(
-        electrode_gap_um / 2 + electrode_width_um if electrodes else 0.0,
-        wg_top_width_um / 2 + post_gap_um + post_width_um,
+        electrode_extent,
+        arm_offset + wg_top_width_um / 2 + post_gap_um + post_width_um,
     ) + window_pad_x_um
     box_model = min(box_thickness_um, box_model_depth_um)
     y_lo = -box_model
@@ -289,12 +309,17 @@ def edbr_cross_section(
     # unetched slab
     if slab > 1e-9:
         xs.add(Shape.rect(film_material, -xe, xe, 0.0, slab, "slab"))
-    # ridge
-    xs.add(
-        Shape.trapezoid(
-            film_material, 0.0, wg_top_width_um, etch_depth_um, slab, sidewall_deg, "ridge"
+    # ridge, or one ridge per gap for a gsg line
+    if gsg:
+        for sgn, tag in ((-1.0, "ridge_L"), (+1.0, "ridge_R")):
+            xs.add(Shape.trapezoid(film_material, sgn * arm_offset, wg_top_width_um,
+                                   etch_depth_um, slab, sidewall_deg, tag))
+    else:
+        xs.add(
+            Shape.trapezoid(
+                film_material, 0.0, wg_top_width_um, etch_depth_um, slab, sidewall_deg, "ridge"
+            )
         )
-    )
     # Bragg posts (the grating perturbation, seen in this cut when the plane
     # passes through a post)
     if with_posts:
@@ -308,7 +333,17 @@ def edbr_cross_section(
                 )
             )
     # coplanar electrodes, sitting in cladding recesses in contact with the slab
-    if electrodes:
+    if gsg:
+        # signal on axis, a ground beyond each gap, and a guide in each gap
+        xs.add(Shape.rect(electrode_material, -electrode_width_um / 2,
+                          electrode_width_um / 2, slab,
+                          slab + electrode_thickness_um, "electrode_S"))
+        for sgn, tag in ((-1.0, "electrode_GL"), (+1.0, "electrode_GR")):
+            x_in = sgn * (electrode_width_um / 2 + electrode_gap_um)
+            x_out = x_in + sgn * w_gnd
+            xs.add(Shape.rect(electrode_material, min(x_in, x_out), max(x_in, x_out),
+                              slab, slab + electrode_thickness_um, tag))
+    elif electrodes:
         for sgn in (-1.0, +1.0):
             x_in = sgn * electrode_gap_um / 2
             x_out = x_in + sgn * electrode_width_um

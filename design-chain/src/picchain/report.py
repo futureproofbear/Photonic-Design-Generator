@@ -51,8 +51,15 @@ def make_figures(run_dir: Path) -> list[Path]:
     p = run_dir / "mode.npz"
     if p.exists():
         d = np.load(p)
-        fig, ax = plt.subplots(1, 2, figsize=(10, 3.6), constrained_layout=True)
-        for a, key, title in zip(ax, ["field_bare", "field_posts"], ["bare ridge", "with Bragg posts"]):
+        # a device with no grating writes no posted field, and one panel is drawn
+        # rather than two. Drawing a posted panel for such a device would show a
+        # structure it does not contain
+        panels = [("field_bare", "bare ridge")]
+        if "field_posts" in d:
+            panels.append(("field_posts", "with Bragg posts"))
+        fig, ax = plt.subplots(1, len(panels), figsize=(5 * len(panels), 3.6),
+                               constrained_layout=True, squeeze=False)
+        for a, (key, title) in zip(ax[0], panels):
             f = d[key]
             im = a.pcolormesh(d["x_um"], d["y_um"], (np.abs(f) ** 2 / np.abs(f).max() ** 2).T,
                               shading="auto", cmap="magma")
@@ -1011,6 +1018,11 @@ PROVENANCE: list[tuple[str, str, Any, list[tuple[str, str]]]] = [
     ("eo", "how far does the wavelength move per volt",
      "finite-difference electrostatic solve of the electrode field, overlapped with the optical mode",
      [("eo_overlap_gamma", "overlap"), ("tuning_MHz_per_V", "mirror tuning"), ("VpiL_V_cm", "Vpi.L")]),
+    ("modulator", "what drive does the interferometer demand, and across what band",
+     "the single-arm electro-optic solve converted for the two arms it sits in, "
+     "and the travelling-wave response evaluated at the edges of the declared band",
+     [("Vpi_V", "Vpi", " V"), ("VpiL_device_V_cm", "Vpi.L device", " V.cm"),
+      ("worst_in_band_dB", "worst in band", " dB")]),
     ("cavity", "what does the laser do",
      "closed-form composite-cavity analysis, with the lasing mode followed numerically against applied voltage",
      [("pockels_lever", "Pockels lever"), ("mode_hop_free_range_GHz", "mode-hop-free range"),
