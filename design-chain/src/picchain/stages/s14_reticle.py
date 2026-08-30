@@ -619,6 +619,17 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             if not uncovered.is_empty():
                 extra = uncovered.sized(
                     int(round(float(slab_offset_um) / DBU))).merged()
+                # Clipped to the usable area. Sizing a structure that begins on
+                # the CHIP_INNER edge carries its slab past that edge: the loss
+                # cutback did exactly that and put 387 um2 of film outside the
+                # usable area, on the one layer the rule-deck driver's
+                # outside-CHIP_INNER check did not read.
+                li_inner = lmap.get("CHIP_INNER")
+                if li_inner is not None:
+                    inner = db.Region(
+                        die.begin_shapes_rec(layout.layer(*li_inner)))
+                    if not inner.is_empty():
+                        extra = (extra & inner).merged()
                 monitor_slab_um2 = float(extra.area()) * DBU * DBU
                 die.shapes(isl).insert(extra)
                 counts["SLAB"] = counts.get("SLAB", 0) + int(extra.count())
