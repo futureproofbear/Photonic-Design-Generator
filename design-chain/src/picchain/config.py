@@ -1012,6 +1012,18 @@ class MaskCfg(BaseModel):
     #: as `drc.target`. Density in particular is a property of the die and
     #: not of the device, the frame and the monitors contributing to it
     target: Literal["device", "die"] = "device"
+    #: a region within which violations are counted separately rather than as
+    #: real, given as [x0, y0, x1, y1] in die coordinates. It exists for the
+    #: process monitors: a critical-dimension vernier has to straddle the
+    #: minimum width to find where printing fails, so its narrowest rungs breach
+    #: the rule on purpose. Checked against the device cell those shapes are out
+    #: of scope and the report is silent about them; checked against the die
+    #: they are reported as real, and a reader cannot tell them from a defect.
+    #: Left unset, every violation counts as real.
+    #:
+    #: The box is read from the reticle stage where that stage declares one, so
+    #: it follows the monitors rather than being written out by hand.
+    declared_region_from_reticle: bool = True
     #: layers whose shapes are merged and counted as connected regions
     connected_layers: list[str] = Field(default_factory=lambda: ["WG", "METAL", "PAD"])
     #: how many connected regions each layer should have when correct

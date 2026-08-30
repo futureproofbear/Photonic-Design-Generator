@@ -650,8 +650,23 @@ def build_mzm_polygons(design: Design, ctx: RunContext) -> tuple[dict, dict]:
         "mmi_length_um": m.mmi_length_um,
         "mmi_output_offset_um": y_mmi,
         "sbend_length_um": m.sbend_length_um,
-        "sbend_excursion_um": arm_y - y_mmi,
-        "sbend_peak_radius_um": _sbend_peak_radius(arm_y - y_mmi, m.sbend_length_um),
+        # The S-bend carries the arm from the splitter to wherever it enters the
+        # line, and with pads drawn that is the pad slot at `y_entry`, not the
+        # electrode gap at `arm_y`. Reported against `arm_y` it described an
+        # excursion of 20.975 um and a peak radius of 467.6 where the mask drew
+        # 48.725 um and 201, a factor of 2.3 on the quantity the bend stage's
+        # floor is compared against.
+        "sbend_excursion_um": y_entry - y_mmi,
+        "sbend_peak_radius_um": _sbend_peak_radius(y_entry - y_mmi,
+                                                   m.sbend_length_um),
+        # The pad taper is a bend too, and it is the tightest on the die. The
+        # arm rides the slot centre from the pad face down to the line over
+        # `pad_taper_um`, on the same raised cosine, so its peak radius follows
+        # the same expression. Nothing reported it.
+        "pad_taper_excursion_um": (pad_slot_y - arm_y) if m.pads else 0.0,
+        "pad_taper_peak_radius_um": (
+            _sbend_peak_radius(pad_slot_y - arm_y, m.pad_taper_um)
+            if m.pads else 0.0),
         "port_taper_um": m.port_taper_um,
         "port_width_um": port_w,
         # --- the electrical terminals ---------------------------------

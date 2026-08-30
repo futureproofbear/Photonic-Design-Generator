@@ -60,8 +60,34 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     regions = {n: region(n) for n in lmap}
     marker_idx = ly.layer(*MARKER_LAYER)
 
+    # The monitor field, where a breach is deliberate.
+    #
+    # A critical-dimension vernier has to straddle the minimum width to find
+    # where printing fails, so its narrowest rungs break the rule on purpose.
+    # Checked against the device cell those shapes are out of scope and the
+    # report is silent about them, which is how a die carrying twenty-one
+    # deliberate breaches was reported as clean. Checked against the die they are
+    # real, and a reader cannot tell them from a defect. They are counted
+    # separately instead, and the box is read from the reticle stage so that it
+    # follows the monitors rather than being written out by hand.
+    declared_box = None
+    if getattr(cfg, "declared_region_from_reticle", True):
+        box_um = (ctx.get("reticle") or {}).get("monitor_field_box_um")
+        if box_um and len(box_um) == 4:
+            declared_box = db.Region(db.Box(
+                db.DPoint(box_um[0], box_um[1]).to_itype(ly.dbu),
+                db.DPoint(box_um[2], box_um[3]).to_itype(ly.dbu)))
+
+    def _split(polys: "db.Region") -> tuple[int, int]:
+        """Violations inside the monitor field, and the rest."""
+        if declared_box is None or polys.is_empty():
+            return 0, int(polys.count())
+        inside = polys.interacting(declared_box)
+        return int(inside.count()), int((polys - inside).count())
+
     results = []
     total_err = 0
+    total_declared = 0
     for rule in cfg.rules:
         a = regions.get(rule.layer)
         if a is None:
@@ -89,14 +115,16 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                 for poly in a.each():
                     if poly.area() * (ly.dbu**2) < rule.value_um:
                         bad.insert(poly)
+                dec, real = _split(bad)
                 results.append({
                     "name": rule.name, "kind": rule.kind, "layer": rule.layer,
                     "value_um": rule.value_um, "severity": rule.severity,
-                    "violations": int(bad.count()),
-                    "status": "fail" if bad.count() else "pass",
+                    "violations": real, "declared_in_monitor_field": dec,
+                    "status": "fail" if real else "pass",
                 })
-                if bad.count() and rule.severity == "error":
-                    total_err += int(bad.count())
+                total_declared += dec
+                if real and rule.severity == "error":
+                    total_err += real
                 top.shapes(marker_idx).insert(bad)
                 continue
             else:
@@ -107,16 +135,19 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             results.append({"name": rule.name, "status": "error", "reason": str(exc)})
             continue
 
-        n = int(edges.count())
+        polys = edges.polygons(1)
+        dec, real = _split(polys)
         results.append({
             "name": rule.name, "kind": rule.kind, "layer": rule.layer,
             "other_layer": rule.other_layer, "value_um": rule.value_um,
-            "severity": rule.severity, "violations": n,
-            "status": "fail" if n else "pass",
+            "severity": rule.severity, "violations": real,
+            "declared_in_monitor_field": dec,
+            "status": "fail" if real else "pass",
         })
-        if n and rule.severity == "error":
-            total_err += n
-        top.shapes(marker_idx).insert(edges.polygons(1))
+        total_declared += dec
+        if real and rule.severity == "error":
+            total_err += real
+        top.shapes(marker_idx).insert(polys)
 
     marked = ctx.run_dir / f"{design.meta.name}.drc_markers.gds"
     ly.write(str(marked))
@@ -130,6 +161,9 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "markers_gds": str(marked),
         "rules_checked": len(cfg.rules),
         "error_violations": total_err,
+        "declared_in_monitor_field": total_declared,
+        "declared_region_um": (list((ctx.get("reticle") or {}).get(
+            "monitor_field_box_um") or []) if declared_box is not None else None),
         "clean": total_err == 0,
         "results": results,
     }
