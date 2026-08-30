@@ -14,7 +14,7 @@ been observed to propagate into an electro-optic overlap that differs by two.
 
 Why the band matters more than the bandwidth
 --------------------------------------------
-A modulator carrying a radar signal passes a band about a carrier, and a 3 dB
+A modulator carrying a signal about a carrier passes a band, and a 3 dB
 bandwidth quoted against the carrier frequency describes a device that is 3 dB
 down where it is required to work. The response is therefore evaluated at the
 edges of the declared band, and the drive the device actually demands there is

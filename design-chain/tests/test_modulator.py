@@ -54,7 +54,7 @@ def test_the_response_at_a_band_edge_is_below_the_response_at_the_carrier():
 
     This is the reason the band is declared rather than a single bandwidth: a
     device whose 3 dB point sits at the carrier is already past it at the top of
-    the chirp.
+    the band.
     """
     L, alpha, n_m, n_g = 0.013, 20.0, 2.54, 2.089
     carrier = rf.response(15.0e9, L, alpha, n_m, n_g)
