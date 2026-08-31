@@ -104,11 +104,26 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # with the rest, so the standing caveat that a design's material data is not
     # the foundry's went unowned and unreported in the one place the denominator
     # is quoted.
-    META = {"verify.findings_unacknowledged", "verify.acknowledgements_stale"}
+    META = {"verify.findings_unacknowledged", "verify.acknowledgements_stale",
+            "verify.acknowledgements_stage_not_run"}
     emitted = [w for w in ctx.warning_records if w["key"] not in META]
     seen = {w["key"] for w in emitted}
     unacknowledged = sorted(seen - set(acked))
-    stale = sorted(set(acked) - seen)
+
+    # An acknowledgement is stale where the finding it names was fixed or
+    # reworded. It is NOT stale merely because the stage that raises it was left
+    # out of the run.
+    #
+    # A key is `<stage>.<slug>`, so the stage that owns each acknowledgement is
+    # read from the key and compared against the stages this run executed. A
+    # design whose `stages:` line omits the layout stages reported six stale
+    # entries on a run that had simply not drawn a mask, and a check that cries
+    # wolf on a partial run is a check a reader learns to skip.
+    ran = set(getattr(ctx, "stages_run", None) or ctx.metrics.keys())
+    def _stage_of(key: str) -> str:
+        return key.split(".", 1)[0] if "." in key else key
+    not_run = sorted(k for k in set(acked) - seen if _stage_of(k) not in ran)
+    stale = sorted(k for k in set(acked) - seen if _stage_of(k) in ran)
     enforce = bool(getattr(design.warnings, "enforce", False))
 
     payload = {
@@ -124,6 +139,9 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "findings_acknowledged": len(seen & set(acked)),
         "findings_unacknowledged": unacknowledged,
         "findings_acknowledged_but_absent": stale,
+        # acknowledgements whose stage this run did not execute, so nothing is
+        # established about them either way
+        "findings_acknowledged_stage_not_run": not_run,
         "findings_enforced": enforce,
         "verdict": ("PASS" if (n_must_fail == 0 and not blocked
                                and not (enforce and unacknowledged)) else "FAIL"),
@@ -147,5 +165,15 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             + ". Either the finding was fixed and the entry should go, or its "
             "wording changed and the key with it",
             key="verify.acknowledgements_stale",
+        )
+    if not_run:
+        ctx.warn(
+            f"{len(not_run)} acknowledgement(s) name a stage this run did not "
+            f"execute, so they were neither confirmed nor cleared: "
+            + ", ".join(not_run)
+            + ". A run that omits stages establishes what those stages would "
+            "have found, and a release is to be assembled from a run of the "
+            "whole chain",
+            key="verify.acknowledgements_stage_not_run",
         )
     return payload

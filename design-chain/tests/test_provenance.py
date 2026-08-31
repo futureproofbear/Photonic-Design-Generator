@@ -10,6 +10,7 @@ indistinguishable from a tree that has no revision.
 
 from __future__ import annotations
 
+import inspect
 import pathlib
 import subprocess
 
@@ -95,3 +96,44 @@ def test_every_provenance_row_has_the_shape_the_renderer_reads():
         assert isinstance(stage, str) and isinstance(question, str)
         for m in metrics:
             assert len(m) == 2, f"metric tuple in {stage!r} is not a pair: {m}"
+
+
+def test_an_acknowledgement_whose_stage_did_not_run_is_not_called_stale():
+    """A partial run establishes what its absent stages would have found.
+
+    The staleness check compares the acknowledgements in the design file against
+    the findings the run emitted, and every acknowledgement belonging to a stage
+    that was skipped falls out of that comparison. One design whose `stages:`
+    line omitted the layout stages reported six stale entries on a run that had
+    simply not drawn a mask. A check that reports a false positive on an ordinary
+    partial run is a check a reader learns to skip, so the two cases are now
+    reported separately and under different keys.
+    """
+    from picchain.stages import s07_verify
+
+    src = inspect.getsource(s07_verify)
+    assert "findings_acknowledged_stage_not_run" in src
+    assert "verify.acknowledgements_stage_not_run" in src
+    # the split must be made on the stage the key names, against the stages the
+    # runner recorded, and not against the metric tree: a stage may run and
+    # write no metrics
+    assert "stages_run" in src
+    assert "_stage_of" in src
+
+
+def test_the_runner_records_every_stage_it_enters():
+    """`stages_run` is the only record of what a run actually executed.
+
+    The metric tree is not that record. A stage is free to run and write
+    nothing, and its absence from the tree would then read as a stage that never
+    ran, which is the misreading the staleness check was making.
+    """
+    from picchain import artifacts, cli
+
+    ctx = artifacts.RunContext(design_dir=pathlib.Path("."), run_id="x")
+    assert ctx.stages_run == []
+
+    src = inspect.getsource(cli)
+    n_set = src.count("ctx.current_stage = s\n") + src.count("ctx.current_stage = st\n")
+    n_rec = src.count("ctx.stages_run.append(")
+    assert n_rec >= n_set, "every site that sets the current stage must record it"

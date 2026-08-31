@@ -178,6 +178,7 @@ def run(
         t0, c0 = time.perf_counter(), time.process_time()
         try:
             ctx.current_stage = s
+            ctx.stages_run.append(s)
             STAGES[s](d, ctx, lib)
         except Exception as exc:
             timings[s] = round(time.perf_counter() - t0, 3)
@@ -557,6 +558,7 @@ def sweep(
         try:
             for s in chosen:
                 ctx.current_stage = s
+                ctx.stages_run.append(s)
                 STAGES[s](d, ctx, lib_i)
             ctx.finalise("ok", update_latest=False)
             row = {"param": param, "value": v}
@@ -751,6 +753,7 @@ def corners(
         for s in chosen:
             try:
                 ctx.current_stage = s
+                ctx.stages_run.append(s)
                 STAGES[s](dc, ctx, _library(dc))
             except Exception as exc:
                 status = f"failed:{s}"
@@ -908,6 +911,7 @@ def golden(
     ctx = RunContext(design_dir=design.parent, run_id=new_run_id("golden")).ensure()
     for s in _resolve_stages(["layout"]):
         ctx.current_stage = s
+        ctx.stages_run.append(s)
         STAGES[s](d, ctx, lib)
     emitted = Path((ctx.get("layout") or {})["gds"])
 
@@ -1095,6 +1099,7 @@ def search(
         try:
             for st in chosen:
                 ctx.current_stage = st
+                ctx.stages_run.append(st)
                 STAGES[st](d, ctx, _library(d))
             ctx.finalise("ok", update_latest=False)
             return ctx.metrics
@@ -1362,6 +1367,7 @@ def sensitivity(
         try:
             for st in chosen:
                 ctx.current_stage = st
+                ctx.stages_run.append(st)
                 STAGES[st](d, ctx, _library(d))
             ctx.finalise("ok", update_latest=False)
             return ctx.metrics

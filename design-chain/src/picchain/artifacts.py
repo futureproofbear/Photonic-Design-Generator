@@ -135,6 +135,11 @@ class RunContext:
     warning_records: list[dict] = field(default_factory=list)
     #: set by the runner before each stage, so a warning knows its origin
     current_stage: str = ""
+    #: every stage the runner has entered, in order. Read by the verify stage to
+    #: tell an acknowledgement whose finding was fixed from one whose stage was
+    #: simply left out of the run; the metric tree cannot answer that, a stage
+    #: being free to run and write nothing.
+    stages_run: list[str] = field(default_factory=list)
     t0: float = field(default_factory=time.time)
 
     @property
