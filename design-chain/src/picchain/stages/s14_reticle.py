@@ -606,7 +606,13 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # a structure added to the die in future carries its slab without anyone
     # having to remember. The monitors are straight and rectangular, so sizing
     # their ridges is exact.
-    slab_offset_um = design.platform.slab_offset_um
+    # The device's own convention where it declares one, and the monitors' own
+    # otherwise. It was gated on the device declaring a local slab, so a design
+    # drawing a blanket slab across its device band got no monitor slab at all
+    # and left 18.3 per cent of its ridge area on bare oxide.
+    slab_offset_um = (design.platform.slab_offset_um
+                      if design.platform.slab_offset_um is not None
+                      else getattr(cfg.monitors, "slab_offset_um", None))
     monitor_slab_um2 = 0.0
     if slab_offset_um is not None:
         li_wg, li_slab = lmap.get("WG"), lmap.get("SLAB")

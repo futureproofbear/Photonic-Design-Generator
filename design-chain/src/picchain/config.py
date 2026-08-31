@@ -601,6 +601,19 @@ class MonitorsCfg(BaseModel):
     disabled individually.
     """
     enabled: bool = True
+    #: how far the unetched slab reaches either side of a monitor's ridge, um.
+    #:
+    #: A monitor measures the process the device runs in, and a ridge with no
+    #: slab under it is a different waveguide. A die released from this chain
+    #: drew its slab across the device band only and left 18.3 per cent of the
+    #: ridge area outside it: the loss cutback, the critical-dimension vernier
+    #: and the electrode ladder all sat on bare oxide, so none of the four
+    #: quantities they measure described the device beside them.
+    #:
+    #: Where `platform.slab_offset_um` is declared the device's own convention is
+    #: used instead of this, so a design drawing local slab draws it the same way
+    #: everywhere.
+    slab_offset_um: float = 6.0
     #: gratings of stepped post gap, by which kappa against gap is measured
     #: directly on the delivered process rather than taken from a model
     kappa_ladder: bool = True
