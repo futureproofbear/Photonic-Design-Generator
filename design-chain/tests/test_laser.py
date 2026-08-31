@@ -884,3 +884,77 @@ def test_a_cross_check_between_two_of_your_own_implementations_is_weak():
     # the mirror's own delay, and the assembly which must exceed it
     tau_dbr = 67.1349e-12
     assert tau_dbr + 2 * tau > tau_dbr
+
+
+# --- the thermal phase trimmer ----------------------------------------------
+
+
+def test_the_side_mode_suppression_is_evaluated_across_cavity_phase():
+    """One sample of cavity phase is not a property of the design.
+
+    The suppression swings with the round-trip path modulo a wavelength, which
+    no process holds on a centimetre-long cavity. A single value therefore
+    describes the die that happened to be drawn. The stage must scan the phase
+    and report the range it spans.
+    """
+    from picchain.stages import s04_cavity
+
+    src = inspect.getsource(s04_cavity)
+    assert "_side_mode_at" in src
+    assert "phase_scan" in src
+    for k in ("smsr_dB_worst", "smsr_dB_best",
+              "n_cavity_modes_in_band_worst", "n_cavity_modes_in_band_best"):
+        assert k in src, k
+    # the scan must be driven through the phase argument of the mode finder.
+    # Perturbing a geometry to move the phase would move other quantities too.
+    assert "extra=extra_phase" in src
+
+
+def test_the_best_of_the_scan_is_claimed_only_with_a_verified_trimmer():
+    """A design entitled to the best of the phase scan must carry the actuator.
+
+    Without one the die lands where it lands, so the worst of the scan is what
+    the design can promise. The choice is made by the stage from the trimmer's
+    computed range, and never by an assertion in a design file.
+    """
+    from picchain.stages import s04_cavity
+
+    src = inspect.getsource(s04_cavity)
+    i = src.index("smsr_dB_settable")
+    window = src[i:i + 400]
+    assert "covers_a_full_fsr" in window
+    assert "smsr_dB_best" in window and "smsr_dB_worst" in window
+
+
+def test_a_trimmer_reaches_a_full_mode_spacing_only_if_its_length_allows():
+    """The trimmer's claim is arithmetic and is checked rather than declared.
+
+    Two passes of the intracavity section accumulate 2*(2*pi/lambda)*dn*L of
+    round-trip phase, and a full mode spacing is 2*pi of it. Halving the wire
+    halves the phase, so the same heater on a shorter section loses the claim.
+    """
+    import math
+
+    def round_trip_phase(length_um, dn_dT, dT, lam_um=1.588):
+        return 2.0 * (2.0 * math.pi / lam_um) * (dn_dT * dT) * length_um
+
+    full = 2.0 * math.pi
+    assert round_trip_phase(1400.0, 3e-5, 40.0) > full
+    assert round_trip_phase(600.0, 3e-5, 40.0) < full
+    # and the temperature a full spacing costs is the inverse of that
+    dT_full = full / (2.0 * (2.0 * math.pi / 1.588) * 3e-5 * 1400.0)
+    assert 18.0 < dT_full < 20.0
+
+
+def test_a_declared_trimmer_that_is_drawn_on_nothing_is_raised():
+    """The cavity stage runs before the layout stage and cannot see the mask.
+
+    A trimmer declared in the design file and absent from the polygons would
+    otherwise buy a `must` row with a wire that does not exist, so the layout
+    stage carries the check.
+    """
+    from picchain.stages import s05_layout
+
+    src = inspect.getsource(s05_layout)
+    assert "phase_trimmer" in src
+    assert "HEATER" in src

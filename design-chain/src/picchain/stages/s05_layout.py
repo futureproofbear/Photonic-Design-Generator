@@ -832,6 +832,43 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
             f"tighten layout.facet_bend_radius_um"
         )
     out["WG"].append(_rect(z, -wg_width / 2, z + feed, wg_width / 2))
+
+    # --- the thermal phase trimmer -----------------------------------------
+    #
+    # A resistive wire on its own layer, over the feed guide. It sets the cavity
+    # phase once at commissioning, which is what lets a design be graded on the
+    # excursion it delivers rather than on the one it can guarantee without
+    # knowing where in the mode comb it started.
+    #
+    # It is drawn over the feed rather than over the phase section on purpose:
+    # the degraded mode it exists to support is the one with the Pockels section
+    # unpowered, and the feed carries no electrode to clear.
+    pt = getattr(cav, "phase_trimmer", None)
+    _trim_over_feed = pt is not None and getattr(pt, "over", "feed") == "feed"
+    if (pt is not None and pt.enabled and pt.length_um > 0
+            and "HEATER" in out and _trim_over_feed):
+        h_len = min(float(pt.length_um), feed)
+        h_start = z
+        hw = float(pt.width_um) / 2.0
+        out["HEATER"].append(_rect(h_start, -hw, h_start + h_len, hw))
+        # a landing at each end, wider than the wire so a probe or a bond has
+        # something to reach; they sit clear of the guide in y
+        pad = float(getattr(pt, "pad_um", 60.0))
+        for xc in (h_start, h_start + h_len):
+            out["HEATER"].append(_rect(xc - pad / 2, hw, xc + pad / 2, hw + pad))
+        heater_record = {
+            "drawn": True,
+            "length_um": h_len,
+            "declared_length_um": float(pt.length_um),
+            "width_um": float(pt.width_um),
+            "from_um": h_start,
+            "to_um": h_start + h_len,
+            "over": "feed",
+            "clipped": h_len < float(pt.length_um),
+        }
+    else:
+        heater_record = {"drawn": False}
+
     z += feed
 
     # --- the intracavity phase section -------------------------------------
@@ -847,6 +884,25 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     if ps and ps.enabled and ps.length_um > 0:
         p0 = z
         out["WG"].append(_rect(p0, -wg_width / 2, p0 + ps.length_um, wg_width / 2))
+        # the thermal trimmer, where it is declared to run over this section
+        if (pt is not None and pt.enabled and pt.length_um > 0
+                and "HEATER" in out and not _trim_over_feed):
+            h_len = min(float(pt.length_um), float(ps.length_um))
+            hw = float(pt.width_um) / 2.0
+            out["HEATER"].append(_rect(p0, -hw, p0 + h_len, hw))
+            pad = float(getattr(pt, "pad_um", 60.0))
+            for xc in (p0, p0 + h_len):
+                out["HEATER"].append(_rect(xc - pad / 2, hw, xc + pad / 2, hw + pad))
+            heater_record = {
+                "drawn": True, "over": "phase_section",
+                "length_um": h_len, "declared_length_um": float(pt.length_um),
+                "width_um": float(pt.width_um),
+                "from_um": p0, "to_um": p0 + h_len,
+                "clipped": h_len < float(pt.length_um),
+                # the wire sits above the guide; these are the clearances the
+                # runset measures it against
+                "clearance_to_electrode_um": ps.gap_um / 2 - hw,
+            }
         if e.enabled:
             for sgn in (-1, 1):
                 y_in = sgn * ps.gap_um / 2
@@ -998,6 +1054,22 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     # without re-deriving the floor plan
     ctx.put("layout.taper_length_um", tl)
     ctx.put("layout.grating_start_um", g0)
+    # what the trimmer actually got drawn as, so that a claim about the cavity
+    # phase being settable rests on a polygon rather than on a declaration
+    ctx.put("layout.phase_trimmer", heater_record)
+    # The cavity stage runs before this one, so it can check the trimmer's range
+    # but not whether a polygon carries it. That check belongs here, and a
+    # declared actuator the mask does not carry would otherwise let a design be
+    # graded on an excursion it cannot reach.
+    if pt is not None and pt.enabled and pt.length_um > 0 and not heater_record.get("drawn"):
+        ctx.warn(
+            "cavity.phase_trimmer is declared and no polygon carries it. "
+            + ("layout.layer_map declares no HEATER layer, so there is nowhere to "
+               "draw it" if "HEATER" not in out else
+               "the section it is declared over draws no guide")
+            + ". The cavity stage grades the degraded excursion on the placed "
+              "figure where the trimmer can place the comb, and a trimmer that "
+              "is not on the mask places nothing")
     return out
 
 

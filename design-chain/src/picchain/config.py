@@ -307,6 +307,44 @@ class PhaseSection(BaseModel):
     separation_um: float = 50.0
 
 
+
+class PhaseTrimmer(BaseModel):
+    """A thermal actuator that sets the cavity phase once, at commissioning.
+
+    It exists to answer one question: whether the mode comb can be placed. The
+    excursion a laser guarantees before commissioning is smaller than the one it
+    delivers after, by `ceil(hops) + 1`, and the difference is entirely the
+    cavity phase, which no process controls. A design with no way to set that
+    phase is graded on the guaranteed figure, and the framework's rules say so.
+
+    Declaring one is not enough, and this block is checked rather than believed:
+    the cavity stage computes the round-trip phase the trimmer can actually
+    deliver and reports whether it reaches a full free spectral range. A trimmer
+    that cannot move the comb through one whole mode spacing cannot place it.
+
+    It is thermal rather than electro-optic on purpose. The degraded mode this
+    supports is the one with the Pockels phase section unpowered, so an actuator
+    sharing that section's failure would be no answer at all.
+    """
+    enabled: bool = False
+    #: the guide length the heater runs over, um
+    length_um: float = 0.0
+    #: thermo-optic coefficient of the guiding film, per kelvin. It belongs to
+    #: the material and is declared here until the material file carries it
+    dn_dT_per_K: float = 3.0e-5
+    #: the temperature rise the heater is driven to, K
+    max_delta_T_K: float = 40.0
+    #: drawn width of the resistive wire, um
+    width_um: float = 1.5
+    #: which intracavity section the wire runs over. Both lie inside the
+    #: cavity and either sets the round-trip phase; they differ in how much
+    #: length is available and therefore in the temperature rise required.
+    #: The feed carries no electrode to clear; the phase section is longer.
+    over: Literal["feed", "phase_section"] = "feed"
+    #: the landing at each end of the wire, um square
+    pad_um: float = 60.0
+
+
 class Cavity(BaseModel):
     enabled: bool = True
     #: passive PIC length between the chip facet and the start of the grating
@@ -314,6 +352,8 @@ class Cavity(BaseModel):
     rsoa: RSOA = Field(default_factory=RSOA)
     #: an intracavity phase electrode, driven synchronously with the mirror
     phase_section: PhaseSection = Field(default_factory=PhaseSection)
+    #: a thermal actuator that sets the cavity phase once, at commissioning
+    phase_trimmer: PhaseTrimmer = Field(default_factory=PhaseTrimmer)
 
 
 class DynamicsCfg(BaseModel):

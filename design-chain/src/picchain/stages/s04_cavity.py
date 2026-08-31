@@ -539,29 +539,114 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # of a case. Restricting the search to modes inside the band reported no
     # side mode at all and returned a NaN, which reads as a defect and would
     # carry a target to an error.
-    ms0_all = modes_at(0.0, floor=0.0)
-    ms0 = [m for m in ms0_all if m[2] >= R_floor]
-    n_in_band = len(ms0)
-    smsr_dB = float("nan")
-    dg_per_cm = float("nan")
-    side_in_band = None
-    if ms0_all:
-        main = max(ms0 or ms0_all, key=lambda t: t[2])
-        neighbours = [m for m in ms0_all if abs(m[0] - main[0]) == 1]
-        if neighbours:
-            side = max(neighbours, key=lambda t: t[2])
-            side_in_band = bool(side[2] >= R_floor)
-            R_main, R_side = main[2], side[2]
-            if R_side > 0:
-                # extra modal gain the side mode would need, per unit active length
-                dg_per_cm = (1 / (2 * L_a_cm)) * math.log(R_main / R_side)
-                deficit = 1.0 - math.exp(-2 * L_a_cm * dg_per_cm)
-                denom = (
-                    H * nu * v_g_a**2 * (alpha_m_per_cm * 100)
-                    * rs.spontaneous_emission_factor_nsp * (modal_gth_per_cm * 100) * tau_rt
-                )
-                if denom > 0 and P0 > 0:
-                    smsr_dB = 10 * math.log10(max(P0 * deficit / denom, 1e-30))
+    def _side_mode_at(extra_phase: float):
+        """Side-mode suppression at one setting of the cavity phase.
+
+        The cavity phase is the round-trip optical path modulo a wavelength, and
+        no process holds a centimetre-long cavity to that. It is therefore not a
+        property of the drawn design but of the particular die, unless the design
+        carries an actuator that sets it.
+        """
+        all_m = modes_at(0.0, floor=0.0, extra=extra_phase)
+        in_band = [m for m in all_m if m[2] >= R_floor]
+        smsr = float("nan")
+        dg = float("nan")
+        in_b = None
+        if all_m:
+            main = max(in_band or all_m, key=lambda t: t[2])
+            nb = [m for m in all_m if abs(m[0] - main[0]) == 1]
+            if nb:
+                side = max(nb, key=lambda t: t[2])
+                in_b = bool(side[2] >= R_floor)
+                R_main, R_side = main[2], side[2]
+                if R_side > 0:
+                    dg = (1 / (2 * L_a_cm)) * math.log(R_main / R_side)
+                    deficit = 1.0 - math.exp(-2 * L_a_cm * dg)
+                    denom = (
+                        H * nu * v_g_a**2 * (alpha_m_per_cm * 100)
+                        * rs.spontaneous_emission_factor_nsp
+                        * (modal_gth_per_cm * 100) * tau_rt
+                    )
+                    if denom > 0 and P0 > 0:
+                        smsr = 10 * math.log10(max(P0 * deficit / denom, 1e-30))
+        return {"smsr_dB": smsr, "side_mode_gain_margin_per_cm": dg,
+                "n_cavity_modes_in_band": len(in_band),
+                "side_mode_within_mirror_band": in_b}
+
+    _at_drawn = _side_mode_at(0.0)
+    smsr_dB = _at_drawn["smsr_dB"]
+    dg_per_cm = _at_drawn["side_mode_gain_margin_per_cm"]
+    side_in_band = _at_drawn["side_mode_within_mirror_band"]
+    n_in_band = _at_drawn["n_cavity_modes_in_band"]
+
+    # The same quantities across one whole cycle of cavity phase.
+    #
+    # A design with no actuator gets whichever value its die happens to land on,
+    # so the worst of these is what it can promise. A design that can set the
+    # phase, and can show its actuator reaches a full mode spacing, gets the
+    # best of them, and the setting is a commissioning step rather than a hope.
+    _scan = [_side_mode_at(2.0 * math.pi * k / 24.0) for k in range(24)]
+    _valid = [d for d in _scan if d["smsr_dB"] == d["smsr_dB"]]
+    _phase_scan = {
+        "points": len(_scan),
+        "smsr_dB_worst": min((d["smsr_dB"] for d in _valid), default=float("nan")),
+        "smsr_dB_best": max((d["smsr_dB"] for d in _valid), default=float("nan")),
+        "n_cavity_modes_in_band_worst": max(d["n_cavity_modes_in_band"] for d in _scan),
+        "n_cavity_modes_in_band_best": min(d["n_cavity_modes_in_band"] for d in _scan),
+    }
+
+    # ---- the thermal phase trimmer, and whether it can place the comb -----
+    #
+    # A round trip accumulates 2 * (2 pi / lambda) * n * L of phase, so a change
+    # dn over a length L moves it by 2 * (2 pi / lambda) * dn * L. Placing the
+    # comb anywhere in the mode spacing needs a full 2 pi of that, which is
+    # dn * L >= lambda / 2. The heater delivers dn = dn_dT * dT.
+    #
+    # Declaring a trimmer is not enough and this is checked rather than
+    # believed: a trimmer that cannot move the comb through one whole mode
+    # spacing cannot place it, and one the layout did not draw cannot set
+    # anything at all.
+    _pt = design.cavity.phase_trimmer
+    _drawn = (ctx.get("layout") or {}).get("phase_trimmer")
+    if not _pt.enabled or _pt.length_um <= 0:
+        _trimmer = {
+            "enabled": False,
+            "covers_a_full_fsr": False,
+            "reason": "no phase trimmer is declared, so the cavity phase cannot "
+                      "be set and the guaranteed excursion is what the design "
+                      "delivers",
+        }
+    else:
+        _dn = float(_pt.dn_dT_per_K) * float(_pt.max_delta_T_K)
+        _lam_um = float(design.waveguide.wavelength_um)
+        _phase_rad = 2.0 * (2.0 * math.pi / _lam_um) * _dn * float(_pt.length_um)
+        _covers = _phase_rad >= 2.0 * math.pi
+        if _drawn is not None and not _drawn.get("drawn"):
+            _covers = False
+        _trimmer = {
+            "enabled": True,
+            "length_um": float(_pt.length_um),
+            "over": str(getattr(_pt, "over", "feed")),
+            "dn_dT_per_K": float(_pt.dn_dT_per_K),
+            "max_delta_T_K": float(_pt.max_delta_T_K),
+            "index_change": _dn,
+            "round_trip_phase_rad": _phase_rad,
+            "phase_needed_rad": 2.0 * math.pi,
+            "delta_T_for_a_full_fsr_K": (
+                _lam_um / (2.0 * float(_pt.dn_dT_per_K) * float(_pt.length_um))),
+            # the layout stage runs after this one, so this is None on a normal
+            # run and the layout stage carries the "is it drawn" check instead
+            "drawn_at_cavity_time": _drawn,
+            "covers_a_full_fsr": bool(_covers),
+        }
+        if not _covers:
+            ctx.warn(
+                f"the phase trimmer reaches {_phase_rad:.3f} rad of round-trip "
+                f"phase against the {2 * math.pi:.3f} a full mode spacing needs, "
+                f"or was not drawn, so it cannot place the comb and the degraded "
+                f"excursion stays at the guaranteed figure. It needs "
+                f"{_trimmer['delta_T_for_a_full_fsr_K']:.1f} K over "
+                f"{_pt.length_um:.0f} um, or a longer heater")
 
     payload: dict[str, Any] = {
         "enabled": True,
@@ -579,6 +664,16 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # phase-independent; write requirements against these
         "mode_hop_free_range_guaranteed_GHz": mhf_guaranteed_Hz / 1e9,
         "mode_hop_free_range_placed_GHz": laser_tuning_Hz_per_V * V_span / 1e9,
+        # Which of the two the design is entitled to, and why. The guaranteed
+        # figure is the placed one divided by `ceil(hops) + 1`, and the divisor
+        # is entirely the cavity phase: a design that cannot set that phase does
+        # not know where in the comb its sweep begins. One that can, and can
+        # show the actuator reaches a whole mode spacing, starts where it
+        # chooses.
+        "phase_trimmer": _trimmer,
+        "mode_hop_free_range_degraded_GHz": (
+            laser_tuning_Hz_per_V * V_span / 1e9 if _trimmer.get("covers_a_full_fsr")
+            else mhf_guaranteed_Hz / 1e9),
         "mirror_relative_drift_GHz": drift_Hz / 1e9,
         "laser_tuning_from_lever_MHz_per_V": eta_lever_Hz_per_V / 1e6,
         "laser_tuning_fitted_over_lever": eta_ratio,
@@ -622,6 +717,16 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "side_mode_gain_margin_per_cm": dg_per_cm,
         "smsr_dB": smsr_dB,
         "n_cavity_modes_in_band": n_in_band,
+        # across a whole cycle of cavity phase, and the figure a design with a
+        # verified trimmer is entitled to
+        "phase_scan": _phase_scan,
+        "smsr_dB_settable": (_phase_scan["smsr_dB_best"]
+                             if _trimmer.get("covers_a_full_fsr")
+                             else _phase_scan["smsr_dB_worst"]),
+        "n_cavity_modes_in_band_settable": (
+            _phase_scan["n_cavity_modes_in_band_best"]
+            if _trimmer.get("covers_a_full_fsr")
+            else _phase_scan["n_cavity_modes_in_band_worst"]),
         # False is the favourable case: the neighbouring mode falls outside the
         # mirror band and is suppressed by the rolloff rather than competing.
         "side_mode_within_mirror_band": side_in_band,
