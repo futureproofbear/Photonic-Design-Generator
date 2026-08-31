@@ -51,7 +51,15 @@ def outline(tip: float, full: float, length: float, profile: str,
     at `segments + 1` stations, so the drawn edge and the solved edge are the
     same curve to within the sampling.
     """
-    u = np.linspace(0.0, 1.0, int(segments) + 1)
+    # A straight edge is drawn from its endpoints.
+    #
+    # Sampling it at 64 stations puts 130 vertices on a line, and rounding each
+    # to the database grid leaves them up to half a unit off it, so the edge is
+    # no longer exactly straight. A dark-field layer derived from such a guide
+    # overlapped it by 5e-05 um2, which is the kind of residue a rule deck
+    # reports and nobody can explain.
+    n = 1 if profile == "linear" else int(segments)
+    u = np.linspace(0.0, 1.0, n + 1)
     w = np.asarray(widths_at(tip, full, u, profile), dtype=float)
     x = x0 + (length * (1.0 - u) if reverse else length * u)
     lower = [(float(xi), float(y0 - wi / 2.0)) for xi, wi in zip(x, w)]

@@ -53,6 +53,7 @@ def _facet_shear(angle_deg: float, width_um: float) -> float:
 
 def _angled_lead_in(angle_deg: float, radius_um: float, straight_um: float,
                     width_um: float, tip_width_um: float | None = None,
+                    profile: str = "linear",
                     n_seg: int = 24):
     """The guide that meets a perpendicular die edge at ``angle_deg``.
 
@@ -97,7 +98,7 @@ def _angled_lead_in(angle_deg: float, radius_um: float, straight_um: float,
     for k in range(n_str + 1):
         t = k / n_str
         centre.append((straight_um * t * math.cos(th), straight_um * t * math.sin(th)))
-        halves.append(0.5 * (w0 + (w1 - w0) * t))
+        halves.append(0.5 * float(taper_profile.widths_at(w0, w1, t, profile)))
         tang.append((math.cos(th), math.sin(th)))
 
     # the arc back to parallel: centre of curvature is perpendicular to the
@@ -740,6 +741,7 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     # at the facet, equal to the figure the `facet` stage was given.
     tl = lay.taper_length_um
     tip = lay.taper_tip_width_um
+    prof = _taper_profile_name(design)
     angled = lay.draw_facets and lay.facet_route == "angled"
     lead_excursion = 0.0
     # The optical path from the facet to the grating, which is what the cavity
@@ -755,7 +757,7 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
         # feed begins, so nothing downstream of the lead-in moves.
         rad = lay.facet_bend_radius_um
         poly, dz_lead, dy_lead, _ = _angled_lead_in(
-            lay.input_facet_angle_deg, rad, tl, wg_width, tip
+            lay.input_facet_angle_deg, rad, tl, wg_width, tip, profile=prof
         )
         out["WG"].append([(pz, py - dy_lead) for pz, py in poly])
         lead_excursion = abs(dy_lead)
@@ -763,10 +765,21 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
         z = dz_lead
     else:
         shear_in = _facet_shear(lay.input_facet_angle_deg, tip) if lay.draw_facets else 0.0
-        out["WG"].append(
-            [(z + shear_in, -tip / 2), (z + tl, -wg_width / 2),
-             (z + tl, wg_width / 2), (z - shear_in, tip / 2)]
-        )
+        # Drawn on the profile the taper stage evaluates. It was a four-point
+        # trapezoid, which is a linear taper whatever `taper.profile` declared,
+        # so a design evaluating a quadratic taper reported a margin for a
+        # structure its mask did not carry.
+        poly = taper_profile.outline(tip, wg_width, tl, prof,
+                                     segments=lay.taper_segments, x0=z)
+        if shear_in:
+            # The facet end is SHEARED and not translated: the two rails meet
+            # the die edge at the declared angle, so the lower tip advances and
+            # the upper tip retreats. `outline` returns the lower rail followed
+            # by the upper rail reversed, so those are its first and last points.
+            poly = list(poly)
+            poly[0] = (poly[0][0] + shear_in, poly[0][1])
+            poly[-1] = (poly[-1][0] - shear_in, poly[-1][1])
+        out["WG"].append(poly)
         z += tl
     # --- feed waveguide ---
     # `cavity.feed_length_um` is the facet-to-grating distance the round-trip
@@ -988,7 +1001,8 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     return out
 
 
-def apply_derived_layers(polys: dict, layer_map: dict, derived) -> tuple[dict, list[dict]]:
+def apply_derived_layers(polys: dict, layer_map: dict, derived,
+                         grid_nm: float = 1.0) -> tuple[dict, list[dict]]:
     """Produce the layers a process asks for from the layers a designer draws.
 
     Mask polarity is the case that matters. A process wanting a trench, or a
@@ -1001,11 +1015,25 @@ def apply_derived_layers(polys: dict, layer_map: dict, derived) -> tuple[dict, l
     """
     import klayout.db as db
 
+    # Snapped to the manufacturing grid before the boolean, and by the same
+    # step the writer uses.
+    #
+    # A derived layer is written to the mask alongside the layer it was derived
+    # from, and the writer snaps each independently. Where the operands are
+    # rectilinear the two snaps agree exactly. Where one carries a curve they
+    # need not: a quadratic facet taper sampled at 64 stations left 5e-05 um2
+    # of a dark-field layer overlapping the guide it is the inverse of. Snapping
+    # first makes the boolean and the written geometry the same geometry.
+    grid_step = max(1, int(round(float(grid_nm) * 1e-3 / DBU)))
+
     def region_of(name: str) -> "db.Region":
         r = db.Region()
         for p in polys.get(name, []):
             r.insert(db.DPolygon([db.DPoint(x, y) for x, y in p]).to_itype(DBU))
-        return r.merged()
+        r = r.merged()
+        if grid_step > 1:
+            r.snap(grid_step, grid_step)
+        return r
 
     out = dict(polys)
     described: list[dict] = []
@@ -1363,7 +1391,9 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         polys = build_polygons(design, ctx)
     derived: list[dict] = []
     if lay.derived_layers:
-        polys, derived = apply_derived_layers(polys, lay.layer_map, lay.derived_layers)
+        polys, derived = apply_derived_layers(polys, lay.layer_map,
+                                              lay.derived_layers,
+                                              grid_nm=design.process.grid_nm)
     polys, snap = snap_polygons(polys, design.process.grid_nm)
     info0 = ctx.get("layout") or {}
     if lay.device != "mach_zehnder":

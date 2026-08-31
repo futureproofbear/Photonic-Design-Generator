@@ -127,7 +127,12 @@ def test_the_snap_reports_what_it_cost(tmp_path):
     grid = payload["grid"]
     assert grid["grid_nm"] == 10.0
     assert grid["vertices"] > 0
-    assert 0.0 < grid["max_displacement_nm"] <= 5.0 + 1e-9   # half a grid step
+    # Half a grid step per axis, so the Euclidean displacement of a vertex that
+    # moves on both is sqrt(2)/2 of a step. That bound was written as half a
+    # step, which holds only while every polygon is rectilinear: a quadratic
+    # facet taper's vertices sit off-grid in x and y at once and reach 6.25 nm
+    # on a 10 nm grid.
+    assert 0.0 < grid["max_displacement_nm"] <= 5.0 * math.sqrt(2.0) + 1e-9
 
 
 def test_a_snap_beyond_the_declared_limit_is_refused(tmp_path):
