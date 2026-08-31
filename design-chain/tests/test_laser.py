@@ -920,10 +920,66 @@ def test_the_best_of_the_scan_is_claimed_only_with_a_verified_trimmer():
     from picchain.stages import s04_cavity
 
     src = inspect.getsource(s04_cavity)
-    i = src.index("smsr_dB_settable")
+    # the payload assignment, not the earlier mentions in the tolerance scan
+    i = src.index('"smsr_dB_settable": (_phase_scan["smsr_dB_best"]')
     window = src[i:i + 400]
     assert "covers_a_full_fsr" in window
     assert "smsr_dB_best" in window and "smsr_dB_worst" in window
+
+
+def test_the_suppression_is_taken_at_its_worst_over_the_drive():
+    """Zero mirror bias is a question the radar never asks.
+
+    The mirror is swept across the chirp on every ramp and the side mode moves
+    with it. A suppression read at zero bias selected, on one design, the phase
+    whose figure was highest there and worst across the ramp: 44.17 dB at zero
+    bias and 27.47 dB by the top of the drive, against a 40 dB bound. A separate
+    phase held 43.10 dB the whole way.
+    """
+    from picchain.stages import s04_cavity
+
+    src = inspect.getsource(s04_cavity)
+    assert "_side_mode_over_the_drive" in src
+    # the scan must use the over-the-drive figure, not the zero-bias one
+    assert "_scan = [_side_mode_over_the_drive(" in src
+    # and the zero-bias value stays visible, so the two can be compared
+    assert "smsr_dB_at_zero_bias" in src
+
+
+def test_both_graded_quantities_are_read_at_one_setting_of_the_phase():
+    """A trimmer sets one variable, so two rows graded on it hold together.
+
+    Taking each requirement at its own optimum over phase describes two devices.
+    The stage evaluates the suppression and the swept excursion at the same
+    stations, reports the widest window in which both bounds hold, and refuses
+    to name a setting where that window is empty.
+    """
+    from picchain.stages import s04_cavity
+
+    src = inspect.getsource(s04_cavity)
+    assert "joint_with_the_hop_free_span" in src
+    assert "a_single_setting_meets_both" in src
+    assert "cavity.no_joint_phase_window" in src
+    # the excursion at each station must be the SWEPT one, which tracks the mode
+    # and sees hops, rather than the analytic product of slope and span
+    assert '_sw.get("range_Hz")' in src
+
+
+def test_the_trimmer_reach_is_an_effective_index_and_states_its_break_even():
+    """A material coefficient times a geometric length is not a mode's phase.
+
+    The reach was computed as a bulk one, overstating it by the reciprocal of
+    the confinement. It is now the confinement-weighted sum of the film and
+    cladding coefficients, and the coefficient at which the entitlement flips is
+    reported so that a measurement can settle it.
+    """
+    from picchain.stages import s04_cavity
+
+    src = inspect.getsource(s04_cavity)
+    assert "_dndt_eff" in src
+    assert "dn_dT_cladding_per_K" in src
+    assert "dn_dT_effective_break_even_per_K" in src
+    assert "film_confinement" in src
 
 
 def test_a_trimmer_reaches_a_full_mode_spacing_only_if_its_length_allows():

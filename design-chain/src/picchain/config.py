@@ -332,6 +332,11 @@ class PhaseTrimmer(BaseModel):
     #: thermo-optic coefficient of the guiding film, per kelvin. It belongs to
     #: the material and is declared here until the material file carries it
     dn_dT_per_K: float = 3.0e-5
+    #: the cladding's own thermo-optic coefficient. A heater warms the cladding
+    #: as well as the film, and the mode's effective index moves by the
+    #: confinement-weighted sum of the two. Left at zero the reach is understated
+    #: by the cladding's share, which is the conservative direction.
+    dn_dT_cladding_per_K: float = 0.0
     #: the temperature rise the heater is driven to, K
     max_delta_T_K: float = 40.0
     #: drawn width of the resistive wire, um
