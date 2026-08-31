@@ -135,15 +135,23 @@ def _readiness(design: Design, ctx: RunContext) -> list[dict[str, Any]]:
          "detail": ", ".join(ver.get("unconfirmed_materials") or []) or "all confirmed",
          "field": "platform.materials_file"},
         # the density that stands after any fill was placed, not before it
+        # A window that was never declared was never checked, and `all()` over
+        # nothing is true. A design declaring no density window reported this
+        # condition met, with the detail "within", having measured nothing
+        # against nothing. Silence from a check that did not run is recorded as
+        # silence and may be waived with a reason like any other.
         {"condition": "density is within the declared windows",
-         "met": all(not (v.get("tiles_below_window") or v.get("tiles_above_window"))
-                    for v in _final_density(mask).values()),
-         "detail": "; ".join(
-             f"{k}: {v.get('fill_area_required_um2', 0):.0f} um2 of fill required"
-             for k, v in _final_density(mask).items()
-             if v.get("tiles_below_window") or v.get("tiles_above_window"))
-         or ("within, after fill" if (mask.get("fill") or {}).get("performed")
-             else "within"),
+         "met": bool(_final_density(mask)) and all(
+             not (v.get("tiles_below_window") or v.get("tiles_above_window"))
+             for v in _final_density(mask).values()),
+         "detail": ("no density window is declared, so nothing was measured"
+                    if not _final_density(mask) else
+                    "; ".join(
+                        f"{k}: {v.get('fill_area_required_um2', 0):.0f} um2 of fill required"
+                        for k, v in _final_density(mask).items()
+                        if v.get("tiles_below_window") or v.get("tiles_above_window"))
+                    or ("within, after fill"
+                        if (mask.get("fill") or {}).get("performed") else "within")),
          "field": "mask.density_windows"},
         {"condition": "a die frame is present",
          "met": bool(ret.get("enabled")),

@@ -131,7 +131,24 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 
     # ---------------- threshold, linewidth ----------------
     R_peak = float(grat["peak_reflectivity"])
-    eta = 10 ** (-rs.coupling_loss_dB_per_facet / 10)          # power coupling, per pass
+    # The facet loss the facet stage computed, where it ran, and the declared
+    # figure otherwise.
+    #
+    # `coupling_loss_dB_per_facet` is a declared input, and a declared input can
+    # be left behind by the geometry it describes. On one design the taper tip
+    # moved from 0.20 to 0.26 um to clear a minimum-width rule and the declared
+    # loss stayed at 1.096 dB while the stage computed 1.4266. The cavity used
+    # the declared one, so the effective mirror, the threshold gain, and the
+    # fitted active thickness that the output power and the linewidth descend
+    # from were all optimistic by 0.66 dB of round trip. The facet stage warned
+    # and the warning was acknowledged; nothing used the number it computed.
+    _facet = ctx.get("facet") or {}
+    _loss_dB = _facet.get("total_loss_dB")
+    if _loss_dB is None:
+        _loss_dB, _loss_from = rs.coupling_loss_dB_per_facet, "cavity.rsoa (declared)"
+    else:
+        _loss_dB, _loss_from = float(_loss_dB), "facet.total_loss_dB (computed)"
+    eta = 10 ** (-_loss_dB / 10)                               # power coupling, per pass
     feed_loss = 10 ** (-design.platform.propagation_loss_dB_per_cm * cav.feed_length_um * 1e-4 / 10)
     R2_eff = R_peak * (eta**2) * (feed_loss**2)
     L_a_cm = rs.length_um * 1e-4
@@ -594,6 +611,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "chirp_nonlinearity_rms_MHz": rms_nonlin / 1e6 if rms_nonlin == rms_nonlin else float("nan"),
         "chirp_nonlinearity_rms_percent": rel_nonlin * 100 if rel_nonlin == rel_nonlin else float("nan"),
         "mirror_reflectivity": R_peak,
+        "coupling_loss_dB_per_facet_used": _loss_dB,
+        "coupling_loss_dB_per_facet_from": _loss_from,
         "effective_mirror_R_at_soa": R2_eff,
         "alpha_mirror_per_cm": alpha_m_per_cm,
         "modal_threshold_gain_per_cm": modal_gth_per_cm,

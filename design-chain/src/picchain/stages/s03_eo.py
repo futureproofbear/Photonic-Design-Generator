@@ -313,8 +313,30 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # optical power beyond the electrode inner edge -> metal absorption proxy
     dxo, dyo = np.gradient(ox), np.gradient(oy)
     dA = np.outer(dxo, dyo)
-    beyond = np.abs(ox)[:, None] >= (geom.electrode_gap_um / 2)
-    tail = float(np.sum(intensity * beyond * dA) / np.sum(intensity * dA))
+    def _tail_at(gap_um: float) -> float:
+        """The mode power beyond a conductor's inner edge, at any gap."""
+        beyond = np.abs(ox)[:, None] >= (float(gap_um) / 2)
+        return float(np.sum(intensity * beyond * dA) / np.sum(intensity * dA))
+
+    tail = _tail_at(geom.electrode_gap_um)
+
+    # Every conductor pair the design carries, not only the one this stage
+    # solved the field for.
+    #
+    # The proxy is an integral of the optical mode alone, so evaluating it at a
+    # second gap costs nothing. A design carrying a mirror electrode at 6.41 um
+    # and a phase section at 4.80 graded this row at the wider one and passed by
+    # a factor of 84; at the narrower it passes by 7 per cent, and across that
+    # design's own process window it breaches at 34 corners of 81. Its own
+    # documentation had named the configuration and warned against exactly this.
+    gaps = {"electrodes": float(geom.electrode_gap_um)}
+    ps = getattr(getattr(design, "cavity", None), "phase_section", None)
+    if ps is not None and getattr(ps, "enabled", False):
+        g2 = getattr(ps, "gap_um", None)
+        if g2:
+            gaps["cavity.phase_section"] = float(g2)
+    tails = {k: _tail_at(v) for k, v in gaps.items()}
+    worst_where = max(tails, key=lambda k: tails[k])
 
     tw = travelling_wave(grid, eps_x, eps_y, drive, V, C_per_m, e, n_g,
                          L_electrode_m, geom, n_conductors) if e.travelling_wave \
@@ -439,6 +461,12 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "wavelength_from": wavelength_from,
         "lumped_RC_bandwidth_MHz": f_rc_Hz / 1e6,
         "mode_overlap_with_metal": tail,
+        # the same proxy at every conductor pair the design declares, and the
+        # worst of them, which is the figure a target should be written against
+        "mode_overlap_with_metal_by_gap": tails,
+        "mode_overlap_with_metal_gaps_um": gaps,
+        "mode_overlap_with_metal_worst": tails[worst_where],
+        "mode_overlap_with_metal_worst_at": worst_where,
         "rf_mesh": {"nx": int(len(grid.x)), "ny": int(len(grid.y)),
                     "d_fine_um": d_fine_rf, "d_coarse_um": d_coarse_rf},
         "convergence": convergence,
