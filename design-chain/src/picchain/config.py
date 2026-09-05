@@ -426,6 +426,11 @@ class ChirpDrive(BaseModel):
     enabled: bool = False
     bandwidth_GHz: float = 3.0
     chirp_duration_us: float = 50.0
+    #: the mirror voltage at the middle of the ramp. The carrier is specified at
+    #: the band centre, so a beat is to be evaluated with the chirped laser at
+    #: this voltage and not at zero. Left unset, the ramp is taken to start at
+    #: zero and the centre is half the drive the chirp needs.
+    ramp_centre_V: float | None = None
     waveform: Literal["triangle", "sawtooth"] = "triangle"
     drive_amplitude_Vpp: float | None = None
 
@@ -590,6 +595,23 @@ class FDTDCfg(BaseModel):
     #: ceiling partway through a solve that was proceeding correctly. A timeout
     #: is a guard against a hang and is not a schedule, so it is set well clear
     #: of the longest solve observed rather than just above it.
+    #: Ceiling on the grid a solve may allocate, in millions of Yee cells.
+    #:
+    #: This host bugchecked on 2026-09-05 while a three-dimensional taper of
+    #: 32.4 million cells was allocating, at resolution 30. The largest
+    #: three-dimensional solve it has completed is 9.6 million cells, at
+    #: resolution 20, which ran in 1530 s. The machine had also bugchecked on
+    #: 2026-09-03 with a solve running and twice on 28 August with nothing
+    #: running, so the instability is not attributed to the solver alone; the
+    #: correlation is nonetheless three occasions out of three with a solve in
+    #: flight, and `.wslconfig` caps the virtual machine at 16 GB with swap, so
+    #: an overrun inside it should be killed by Linux rather than reaching the
+    #: host.
+    #:
+    #: Sixteen million is above every solve this host has completed and below
+    #: the one that took it down. Raising it is a deliberate act and the reason
+    #: belongs in the design file beside the new value.
+    max_cells_millions: float = 16.0
     timeout_s: int = 21600
 
 

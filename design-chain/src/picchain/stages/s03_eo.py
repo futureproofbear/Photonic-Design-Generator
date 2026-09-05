@@ -306,6 +306,40 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 
     gamma = eo_overlap(Ex_opt, intensity, mask_film_opt, ox, oy, geom.electrode_gap_um, V)
 
+    # ---- THE PHASE SECTION'S OWN GAP, SOLVED RATHER THAN SCALED ------------------
+    #
+    # The cavity stage took the phase section's index change per volt as the
+    # mirror electrode's scaled by the ratio of the two gaps, the field going as
+    # 1/gap. That holds for a parallel plate and this is not one: the overlap
+    # of the fringing field with the mode changes with the gap, and two tight
+    # `must` rows rest on the phase section, its drive margin at 6.7 per cent
+    # and the metal-absorption proxy at its gap at 7 per cent. Where a phase
+    # section is declared at a different gap, the electrostatics are solved
+    # again at that gap and the direct figures are reported beside the scaled
+    # one, so the cavity stage can use the solve and state the ratio.
+    _ps = getattr(getattr(design, "cavity", None), "phase_section", None)
+    _ps_payload: dict[str, Any] = {}
+    if (_ps is not None and getattr(_ps, "enabled", False)
+            and abs(float(_ps.gap_um) - float(geom.electrode_gap_um)) > 1e-6
+            and not getattr(ctx, "_solving_phase_section", False)):
+        _d2 = design.model_copy(deep=True)
+        _d2.electrodes.gap_um = float(_ps.gap_um)
+        _d2.electrodes.convergence_check = False
+        _c2 = ctx.masked_for({"eo.eo_overlap_gamma": None})
+        _c2._solving_phase_section = True
+        _c2.warnings = []; _c2.warning_records = []
+        try:
+            _r2 = run(_d2, _c2, lib)
+            _ps_payload = {
+                "gap_um": float(_ps.gap_um),
+                "eo_overlap_gamma": _r2.get("eo_overlap_gamma"),
+                "tuning_MHz_per_V": _r2.get("tuning_MHz_per_V"),
+                "mode_overlap_with_metal": _r2.get("mode_overlap_with_metal"),
+                "scaled_by_gap_ratio_tuning_MHz_per_V": None,   # filled below
+            }
+        except Exception as _exc:
+            _ps_payload = {"error": f"{type(_exc).__name__}: {_exc}"}
+
     mat = lib[p.film_material]
     n_e = mat.index(lam, "e", p.use_index_override)
     r = mat.r_pm_per_V(e.eo_coefficient) * 1e-12  # m/V
@@ -468,6 +502,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     payload = {
         "enabled": True,
         "electrode_gap_um": geom.electrode_gap_um,
+        # the phase section at its own gap, solved (see above)
+        "phase_section": _ps_payload,
         "electrode_width_um": geom.electrode_width_um,
         "test_voltage_V": V,
         "eo_coefficient": e.eo_coefficient,

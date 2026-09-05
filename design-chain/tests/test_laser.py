@@ -1071,3 +1071,58 @@ def test_a_masked_context_hides_only_the_overridden_leaves():
     assert v.get("mode.n_eff") == 1.6717
     # and the original is untouched
     assert ctx.get("grating.period_um") == 1.42474
+
+
+# --- items settled on 2026-09-05 ----------------------------------------------
+
+
+def test_the_beat_is_read_with_the_chirped_laser_at_the_centre_of_its_ramp():
+    """The carrier is specified at the band centre, and zero bias is the ramp's start.
+
+    On one design the difference was 4 GHz of beat. The primary's frequency is
+    read at the ramp centre with the phase section driven in step, so the comb
+    has followed the mirror and the laser has not hopped; the mirror-alone
+    figure at the same voltage is the degraded case and is reported under that
+    name beside it.
+    """
+    from picchain.stages import s04_cavity
+
+    src = inspect.getsource(s04_cavity)
+    assert "ramp_centre_V" in src
+    assert "_phi_sync_of_V" in src
+    assert "f_lase_GHz_at_ramp_centre_by_station" in src
+    assert "f_lase_GHz_at_ramp_centre_degraded_by_station" in src
+    # the beat search takes the ramp-centre array for the primary
+    i = src.index('fp = np.asarray(_phase_scan["f_lase_GHz_at_ramp_centre_by_station"]')
+    assert i > 0
+
+
+def test_the_phase_section_is_solved_at_its_own_gap_where_it_differs():
+    """A 1/gap scaling is a parallel-plate rule, and the fringing field is not one.
+
+    Where the phase section sits at a different gap from the mirror electrode,
+    the electrostatics are solved again at that gap and the cavity stage uses
+    the solve, reporting the ratio to the scaled figure so the size of the old
+    assumption is visible. On one design the ratio was 1.0145.
+    """
+    from picchain.stages import s03_eo, s04_cavity
+
+    assert '"phase_section": _ps_payload' in inspect.getsource(s03_eo)
+    src = inspect.getsource(s04_cavity)
+    assert "solved at the phase section's gap" in src
+    assert '"solved_over_scaled"' in src
+
+
+def test_chirp_linearity_is_reported_as_quadratic_phase_over_the_ramp():
+    """The requirement is a phase in degrees, and the chain reported a percentage.
+
+    The synchronous sweep is mapped to time over the declared ramp, the
+    frequency residual against the best line is integrated to phase, and the
+    quadratic component over one chirp bandwidth is what is graded.
+    """
+    from picchain.stages import s04_cavity
+
+    src = inspect.getsource(s04_cavity)
+    assert "quadratic_phase_error_peak_deg" in src
+    assert "chirp_quadratic_phase_error_deg" in src
+    assert "chirp_duration_us" in src

@@ -237,6 +237,14 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # it.
     V_needed = (design.chirp.bandwidth_GHz * 1e9 / (S_Hz_per_V * max(lever, 1e-6))
                 if design.chirp.enabled and S_Hz_per_V > 0 else float("nan"))
+    # THE CENTRE OF THE RAMP. The carrier is specified at the band centre, so a
+    # beat is read with the chirped laser at the middle of its ramp. The design
+    # may declare where that is; otherwise the ramp is taken to start at zero
+    # and its centre is half the drive the chirp needs. On one design the
+    # difference between zero bias and the ramp centre was 1.5 GHz of beat.
+    _rc = getattr(design.chirp, "ramp_centre_V", None)
+    V_ramp_centre = (float(_rc) if _rc is not None
+                     else (V_needed / 2.0 if V_needed == V_needed else 0.0))
     V_limit_decl = float(design.electrodes.max_drive_voltage_V or 0.0)
     if V_limit_decl > 0:
         V_max = V_limit_decl
@@ -444,13 +452,29 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     #     phi_avail  = 4*pi * dn_per_V * V_ph * L / lambda
     ps = getattr(design.cavity, "phase_section", None)
     phase_payload: dict[str, Any] = {"enabled": bool(ps and ps.enabled)}
+    # The round-trip phase the section adds at a given mirror voltage when it is
+    # driven in step. Replaced below where a section exists and is sufficient;
+    # zero otherwise, which is the degraded case.
+    _phi_sync_of_V = lambda V: 0.0
     mhf_sync_Hz = float("nan")
     eta_sync_Hz_per_V = float("nan")
     _sync_track: dict | None = None
     if ps and ps.enabled and fsr_Hz > 0 and S_Hz_per_V > 0:
         lam_m = C0 / nu
         dn_per_V = S_Hz_per_V * n_g_wg / nu
-        dn_per_V_ph = dn_per_V * (design.electrodes.gap_um / max(ps.gap_um, 1e-9))
+        dn_per_V_ph_scaled = dn_per_V * (design.electrodes.gap_um / max(ps.gap_um, 1e-9))
+        # THE SOLVE AT THE PHASE SECTION'S OWN GAP, where the eo stage supplied
+        # it. The 1/gap scaling is a parallel-plate rule and the fringing field's
+        # overlap with the mode does not follow it; the ratio between the two
+        # is reported so the size of the assumption is visible.
+        _eo_ps = ((ctx.get("eo") or {}).get("phase_section") or {})
+        _S_ps = _eo_ps.get("tuning_MHz_per_V")
+        if _S_ps:
+            dn_per_V_ph = float(_S_ps) * 1e6 * n_g_wg / nu
+            _ps_source = "solved at the phase section's gap"
+        else:
+            dn_per_V_ph = dn_per_V_ph_scaled
+            _ps_source = "the mirror electrode scaled by 1/gap"
         phi_needed = 2.0 * math.pi * drift_Hz / fsr_Hz
         V_ph = float(ps.max_drive_voltage_V or 0.0)
         phi_avail = 4.0 * math.pi * dn_per_V_ph * V_ph * (ps.length_um * 1e-6) / lam_m
@@ -462,6 +486,10 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             "gap_um": ps.gap_um,
             "drive_V": V_ph,
             "dn_eff_per_volt": dn_per_V_ph,
+            "dn_eff_per_volt_source": _ps_source,
+            "dn_eff_per_volt_scaled_by_gap": dn_per_V_ph_scaled,
+            "solved_over_scaled": (dn_per_V_ph / dn_per_V_ph_scaled
+                                   if dn_per_V_ph_scaled else float("nan")),
             "phase_needed_rad": phi_needed,
             "phase_needed_in_FSR": phi_needed / (2.0 * math.pi),
             "phase_available_rad": phi_avail,
@@ -499,6 +527,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 
             runs = [(s, _sweep(lambda V, s=s: _phi_ps(V, s))) for s in (1.0, -1.0)]
             pol, sync = max(runs, key=lambda t: t[1]["range_Hz"])
+            _phi_sync_of_V = lambda V, _p=pol: _phi_ps(V, _p)
             mhf_sync_Hz = sync["range_Hz"]
             eta_sync_Hz_per_V = sync["slope"]
             _sync_track = sync
@@ -592,12 +621,24 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         """
         Vs = np.linspace(0.0, V_span, max(int(points), 2)) if V_span > 0 else np.array([0.0])
         out = [_side_mode_at(extra_phase, shift=S_Hz_per_V * float(V)) for V in Vs]
+        # THE FREQUENCY AT THE CENTRE OF THE CHIRP RAMP, where the carrier is
+        # specified, in the condition the radar operates in: the phase section
+        # driven in step with the mirror, so the comb follows and the laser has
+        # not hopped. Evaluated with the mirror shift alone the laser on one
+        # design sat one tooth away, and the beat read 18.75 GHz where the
+        # operating figure is 9.87. The mirror-alone figure is the degraded case
+        # and is kept beside it under that name.
+        _Vc = float(V_ramp_centre)
+        _centre = _side_mode_at(extra_phase + _phi_sync_of_V(_Vc), shift=S_Hz_per_V * _Vc)
+        _centre_deg = _side_mode_at(extra_phase, shift=S_Hz_per_V * _Vc)
         ok = [d for d in out if d["smsr_dB"] == d["smsr_dB"]]
         worst = min(ok, key=lambda d: d["smsr_dB"]) if ok else out[0]
         return {
             "smsr_dB": worst["smsr_dB"],
             "smsr_dB_at_zero_bias": out[0]["smsr_dB"],
             "f_lase_Hz_at_zero_bias": out[0]["f_lase_Hz"],
+            "f_lase_Hz_at_ramp_centre": _centre["f_lase_Hz"],
+            "f_lase_Hz_at_ramp_centre_degraded": _centre_deg["f_lase_Hz"],
             "smsr_dB_at_full_drive": out[-1]["smsr_dB"],
             "drive_points": len(Vs),
             "n_cavity_modes_in_band": max(d["n_cavity_modes_in_band"] for d in out),
@@ -640,6 +681,9 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # the lasing frequency at zero bias at every station: the beat between
         # two lasers on one die is the difference of two of these
         "f_lase_GHz_by_station": [d["f_lase_Hz_at_zero_bias"] / 1e9 for d in _scan],
+        "f_lase_GHz_at_ramp_centre_by_station": [d["f_lase_Hz_at_ramp_centre"] / 1e9 for d in _scan],
+        "f_lase_GHz_at_ramp_centre_degraded_by_station": [d["f_lase_Hz_at_ramp_centre_degraded"] / 1e9 for d in _scan],
+        "ramp_centre_V": float(V_ramp_centre),
     }
 
     # THE WIDTH OF THE WINDOW, which is what a commissioning setting needs.
@@ -964,7 +1008,10 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             except Exception as _exc:
                 _beat[_name] = {"error": f"{type(_exc).__name__}: {_exc}"}
                 continue
-            fp = np.asarray(_phase_scan["f_lase_GHz_by_station"], dtype=float)
+            # the chirped laser at the CENTRE of its ramp, the reference at its
+            # fixed bias: that is the pair the carrier specification names
+            fp = np.asarray(_phase_scan["f_lase_GHz_at_ramp_centre_by_station"], dtype=float)
+            fp0 = np.asarray(_phase_scan["f_lase_GHz_by_station"], dtype=float)
             fc = np.asarray(_cv["phase_scan"]["f_lase_GHz_by_station"], dtype=float)
             sc0 = np.asarray(_cv["phase_scan"]["smsr_dB_at_zero_bias_by_station"], dtype=float)
             Np, Nc = len(fp), len(fc)
@@ -977,7 +1024,13 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                 "companion": _name,
                 "overrides": _ov,
                 "mirror_separation_GHz": _bragg_GHz(_gp) - _bragg_GHz(_gc),
-                "beat_at_zero_phase_GHz": float(fp[0] - fc[0]),
+                "beat_at_zero_phase_GHz": float(fp0[0] - fc[0]),
+                "beat_at_zero_phase_ramp_centre_GHz": float(fp[0] - fc[0]),
+                "beat_at_zero_phase_ramp_centre_degraded_GHz": float(
+                    np.asarray(_phase_scan["f_lase_GHz_at_ramp_centre_degraded_by_station"])[0] - fc[0]),
+                "primary_drive_condition": "phase section driven in step with the mirror",
+                "primary_evaluated_at_V": float(V_ramp_centre),
+                "companion_evaluated_at_V": 0.0,
                 "beat_range_GHz": [float(np.nanmin(fp) - np.nanmax(fc)),
                                    float(np.nanmax(fp) - np.nanmin(fc))],
                 "target_GHz": _spec.beat_target_GHz,
@@ -994,9 +1047,17 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                         return False
                     return ((deg - _start) % 360.0) <= _width
                 feas = []
+                _sp_fine = _phase_scan["smsr_dB_by_station"]
                 for i in range(Np):
                     dp = 360.0 * i / Np
                     if not _in_primary_window(dp):
+                        continue
+                    # The joint window is drawn at 24 stations and this scan has
+                    # 96, so a station can sit inside the coarse window and
+                    # below the floor on the fine scan. On one design the single
+                    # surviving station read 38.12 dB against a 40 dB floor and
+                    # was counted feasible. The fine figure decides.
+                    if not (float(_sp_fine[i]) >= floor):
                         continue
                     want = fp[i] - float(tgt)
                     for j in range(Nc):
@@ -1057,6 +1118,55 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                         key=f"cavity.beat_unreachable_{_name.lower()}",
                     )
             _beat[_name] = _entry
+
+    # ---- CHIRP LINEARITY AS PHASE, WHICH IS WHAT THE REQUIREMENT NAMES ---------
+    #
+    # A coherent radar compresses range by matched filtering, and what degrades
+    # that is phase error over the ramp, not fractional frequency error. The
+    # requirement is written as a bound on the QUADRATIC phase error over the
+    # chirp bandwidth. The chain reported an RMS frequency nonlinearity of the
+    # static tuning curve, which is a different quantity in different units, and
+    # no row graded either.
+    #
+    # Over the hop-free segment the synchronous sweep exposes, the drive is
+    # mapped to time linearly across the declared chirp duration, the frequency
+    # residual against the best line is integrated to phase, and the quadratic
+    # component of that phase over the chirp bandwidth is what is reported. The
+    # transient of a real ramp is outside the rate equations and is not in this.
+    _chirp_phase: dict[str, Any] = {}
+    try:
+        if _sync_track is not None and design.chirp.enabled:
+            _V = np.asarray(_sync_track["V_used"], dtype=float)
+            _f = np.asarray(_sync_track["f_track"], dtype=float)
+            _seg = _sync_track.get("best_seg")
+            if _seg is not None and _seg[1] - _seg[0] >= 8:
+                _V, _f = _V[_seg[0]:_seg[1]], _f[_seg[0]:_seg[1]]
+                _B = float(design.chirp.bandwidth_GHz) * 1e9
+                _T = float(design.chirp.chirp_duration_us) * 1e-6
+                # the window of the sweep that spans one chirp bandwidth, from its start
+                _fx = _f - _f[0]
+                _m = np.abs(_fx) <= _B * 1.0000001
+                if _m.sum() >= 8 and abs(_fx[_m][-1]) >= 0.9 * _B:
+                    Vw, fw = _V[_m], _f[_m]
+                    t = (Vw - Vw[0]) / (Vw[-1] - Vw[0]) * _T          # linear ramp in time
+                    c1 = np.polyfit(t, fw, 1)                          # ideal linear chirp
+                    df = fw - np.polyval(c1, t)                        # frequency residual
+                    phi = 2.0 * np.pi * np.concatenate(([0.0], np.cumsum(0.5 * (df[1:] + df[:-1]) * np.diff(t))))
+                    q = np.polyfit(t, phi, 2)                          # quadratic + linear + const
+                    quad = q[0] * (t - t.mean()) ** 2
+                    quad -= quad.mean()
+                    _chirp_phase = {
+                        "bandwidth_spanned_GHz": float(abs(fw[-1] - fw[0])) / 1e9,
+                        "points": int(_m.sum()),
+                        "quadratic_phase_error_peak_deg": float(np.degrees(np.max(np.abs(quad)))),
+                        "total_phase_error_rms_deg": float(np.degrees(np.sqrt(np.mean((phi - np.polyval(q[1:], t)) ** 2)))),
+                        "frequency_residual_rms_MHz": float(np.sqrt(np.mean(df ** 2))) / 1e6,
+                        "ramp_duration_us": _T * 1e6,
+                    }
+                else:
+                    _chirp_phase = {"error": "the hop-free segment does not span one chirp bandwidth"}
+    except Exception as _exc:
+        _chirp_phase = {"error": f"{type(_exc).__name__}: {_exc}"}
 
     payload: dict[str, Any] = {
         "enabled": True,
@@ -1131,6 +1241,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # verified trimmer is entitled to
         "phase_scan": _phase_scan,
         "beat": _beat,
+        "chirp_phase": _chirp_phase,
+        "chirp_quadratic_phase_error_deg": _chirp_phase.get("quadratic_phase_error_peak_deg"),
         # THE TWO QUANTITIES AT ONE SETTING OF THE PHASE, which is what a
         # commissioned device delivers. Both are absent where no single setting
         # meets both bounds, so a target written against either fails as missing
