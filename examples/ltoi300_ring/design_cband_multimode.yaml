@@ -1,0 +1,70 @@
+# The cross-section of the ltoi300 single-mode O-band ring, posed to the chain.
+#
+# The geometry is that of `ring_resonator_single_mode_point_coupler_oband` in
+# the Luxtelligence PDK: a 0.7 um ridge, 180 nm etched into a 300 nm lithium
+# tantalate film, on a 120 nm slab, at 1310 nm. The purpose of the run is to
+# replace the group index of 2.2 that the PDK carries with a TODO beside it,
+# to bound the mode solver against an independent one, and to establish what
+# the 200 um bend does to the mode.
+
+meta:
+  name: ltoi300_ring_cband_multimode
+  title: "The 1.5 um multimode ring cross-section at C band"
+  status: scaffold
+
+platform:
+  cut: x
+  materials_file: ../../design-chain/pdk/LXT_LT_PRO/materials_lt_pro.yaml
+  film_material: LiTaO3
+  film_thickness_um: 0.300
+  etch_depth_um: 0.180
+  sidewall_deg: 70.0            # the PDK layer stack declares 20 deg from vertical
+  box_thickness_um: 7.0
+  clad_thickness_um: 2.0
+
+waveguide:
+  top_width_um: 1.500
+  wavelength_um: 1.55
+
+mesh:
+  d_fine_um: 0.008
+  d_coarse_um: 0.050
+  num_modes: 3
+  polarisation: TE
+
+grating:
+  enabled: false
+
+electrodes:
+  enabled: false
+
+cavity:
+  enabled: false
+
+fem:
+  enabled: true
+  with_posts: false             # there is no grating in this device
+
+bend:
+  enabled: true
+  radii_um: [400.0, 200.0, 100.0, 60.0]
+
+targets:
+  - metric: mode.n_guided_modes
+    max: 4.0
+    severity: must
+    source: "the cell is named single-mode and the ring width is 0.7 um"
+
+  - metric: mode.n_eff_bare
+    value: 1.77
+    rel_tol: 0.05
+    severity: should
+    source: "the PDK compact model states n_eff 1.75 at 1.31 um"
+
+  - metric: mode.n_g
+    value: 2.13
+    rel_tol: 0.05
+    severity: should
+    source: "the PDK compact model states n_g 2.2, marked TODO in the source"
+
+stages: [mode, fem, bend, verify]

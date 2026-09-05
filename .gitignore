@@ -1,5 +1,7 @@
 # environments and caches
 .venv/
+# one environment per kit, kits disagreeing about which gdsfactory they want
+.venv-*/
 __pycache__/
 *.pyc
 *.egg-info/

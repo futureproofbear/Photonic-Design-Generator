@@ -53,7 +53,8 @@ def _library(d: Design) -> MaterialLibrary:
     bit at every point, which reads as a quantity the design is insensitive to
     rather than as an override that was dropped.
     """
-    return MaterialLibrary(d.platform.materials_file) if d.platform.materials_file else MaterialLibrary()
+    resolved = d.materials_path()
+    return MaterialLibrary(resolved) if resolved else MaterialLibrary()
 
 
 def _load(design_path: Path) -> tuple[Design, MaterialLibrary]:
@@ -850,7 +851,26 @@ def corners(
 
 
 def _read_dotted(obj: Any, dotted: str) -> Any:
-    return get_dotted(obj, dotted)
+    """The nominal value of a corner parameter.
+
+    A per-layer process bias is held in a dict keyed by layer name, and a layer
+    carrying no bias has no key rather than a key of zero. Walking to it then
+    raises, which is what happened to every design that took the corner stage's
+    own advice: the stage recommends `process.bias_um.<layer>` where a window
+    varies a drawn dimension, and following that recommendation on a design
+    declaring `bias_um: {}` crashed with a KeyError naming the layer.
+
+    The absence of a bias is a bias of zero, which is the value returned here.
+    Nothing else about a missing field is forgiven; only the bias dictionaries,
+    whose empty state is meaningful.
+    """
+    try:
+        return get_dotted(obj, dotted)
+    except (KeyError, AttributeError):
+        head, _, leaf = dotted.rpartition(".")
+        if head.endswith(("bias_um", "depth_bias_um")) and leaf:
+            return 0.0
+        raise
 
 
 def _corners_markdown(doc: dict) -> str:
@@ -1344,8 +1364,6 @@ def sensitivity(
     from . import search as S
 
     d0, lib = _load(design)
-    chosen = _resolve_stages([s.strip() for s in stages.split(",") if s.strip()]
-                             or d0.search.stages or d0.stages)
 
     names = [p.strip() for p in params.split(",") if p.strip()]
     if not names:
@@ -1356,6 +1374,29 @@ def sensitivity(
         raise typer.Exit(3)
 
     want = [m.strip() for m in metrics.split(",") if m.strip()] or [t.metric for t in d0.targets]
+
+    # The stages actually needed are those producing the metrics measured,
+    # closed over their dependencies, which is what a corner sweep already
+    # derives and for the same two reasons. A sweep multiplies every cost in the
+    # stage list. And a stage that raises rather than reporting a metric stops
+    # the sweep before its first parameter: `release` is a readiness gate, so a
+    # design whose submission is blocked could not be swept at all, the nominal
+    # evaluation failing on a verdict no sensitivity figure depends on.
+    asked = [s.strip() for s in stages.split(",") if s.strip()]
+    if asked:
+        chosen = _resolve_stages(asked)
+    else:
+        base = list(d0.search.stages or d0.stages)
+        needed = sorted({m.split(".", 1)[0] for m in want if "." in m} & set(STAGES))
+        chosen = _resolve_stages(needed or base)
+        skipped = [s for s in base if s not in chosen]
+        if skipped:
+            typer.echo(
+                f"sensitivity runs {len(chosen)} stages producing the measured "
+                f"metrics: {', '.join(chosen)}. Not run, no measured metric "
+                f"requiring them: {', '.join(skipped)}. Pass --stages to override",
+                err=True,
+            )
     n = {"i": 0}
 
     def evaluate(over):
@@ -1398,12 +1439,35 @@ def sensitivity(
     rows = {}
     for path in names:
         try:
-            v0 = float(get_dotted(d0, path))
+            v0 = float(_read_dotted(d0, path))
         except Exception:
             typer.echo(f"  skipped {path}: not a numeric design field", err=True)
             continue
-        lo_t = evaluate({path: v0 * (1 - probe)})
-        hi_t = evaluate({path: v0 * (1 + probe)})
+
+        # The probe is a fraction of the nominal, and a parameter whose nominal
+        # is zero cannot be moved by one. A per-layer process bias is exactly
+        # that case: an uncharacterised process declares no bias, the nominal is
+        # zero, and the two parameters a lithographic excursion actually moves
+        # were dropped from the table with a message saying they were not
+        # numeric. They are numeric and they are zero.
+        #
+        # Where the corner window declares an excursion for such a parameter,
+        # that excursion is the step, which is the same figure the contribution
+        # column is computed over. Where it does not, the parameter is skipped
+        # and the message says why.
+        if v0 == 0.0:
+            step = float(d0.corners.parameters.get(path) or 0.0)
+            if step <= 0:
+                typer.echo(
+                    f"  skipped {path}: its nominal is zero and a fractional "
+                    f"probe cannot move it. Declare an excursion for it under "
+                    f"corners.parameters to sweep it", err=True)
+                continue
+            lo_t = evaluate({path: -step})
+            hi_t = evaluate({path: +step})
+        else:
+            lo_t = evaluate({path: v0 * (1 - probe)})
+            hi_t = evaluate({path: v0 * (1 + probe)})
         e = {}
         for m in present:
             a, b = mval(lo_t, m), mval(hi_t, m)

@@ -1,0 +1,81 @@
+# The cross-section of the ltoi300 single-mode O-band ring, posed to the chain.
+#
+# The geometry is that of `ring_resonator_single_mode_point_coupler_oband` in
+# the Luxtelligence PDK: a 0.7 um ridge, 180 nm etched into a 300 nm lithium
+# tantalate film, on a 120 nm slab, at 1310 nm. The purpose of the run is to
+# replace the group index of 2.2 that the PDK carries with a TODO beside it,
+# to bound the mode solver against an independent one, and to establish what
+# the 200 um bend does to the mode.
+
+meta:
+  name: ltoi300_ring_cband
+  title: "LTOI300 single-mode O-band ridge, the ring cross-section"
+  status: scaffold
+
+platform:
+  cut: x
+  film_material: LiTaO3
+  film_thickness_um: 0.300
+  etch_depth_um: 0.180
+  sidewall_deg: 70.0            # the PDK layer stack declares 20 deg from vertical
+  box_thickness_um: 7.0
+  clad_thickness_um: 2.0
+
+waveguide:
+  top_width_um: 0.900
+  wavelength_um: 1.55
+
+mesh:
+  d_fine_um: 0.008
+  d_coarse_um: 0.050
+  num_modes: 3
+  polarisation: TE
+
+grating:
+  enabled: false
+
+electrodes:
+  enabled: false
+
+cavity:
+  enabled: false
+
+fem:
+  enabled: true
+  with_posts: false             # there is no grating in this device
+
+bend:
+  enabled: true
+  radii_um: [400.0, 200.0, 100.0, 60.0]
+
+warnings:
+  acknowledged:
+    - key: mode.index_override_declared_and_unread
+      reason: >-
+        The measured thin-film indices in the material file are quoted at
+        1550 nm and are held for reference. The Sellmeier fit is evaluated
+        here so that the dispersion, and with it the group index, is
+        continuous across the band. The variant run
+        `ltoi300_ring_oband_measured` re-solves with the override and moves
+        n_eff by 0.0165 while moving n_g by 0.001, so the group index this
+        design depends on is insensitive to the choice.
+
+targets:
+  - metric: mode.n_guided_modes
+    max: 1.0
+    severity: must
+    source: "the cell is named single-mode and the ring width is 0.7 um"
+
+  - metric: mode.n_eff_bare
+    value: 1.70
+    rel_tol: 0.05
+    severity: should
+    source: "the PDK compact model states n_eff 1.75 at 1.31 um"
+
+  - metric: mode.n_g
+    value: 2.1
+    rel_tol: 0.05
+    severity: should
+    source: "the PDK compact model states n_g 2.2, marked TODO in the source"
+
+stages: [mode, fem, bend, verify]

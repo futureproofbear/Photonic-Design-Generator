@@ -208,6 +208,61 @@ For a swept or ramped drive, the bandwidth is to be sized against the harmonics
 rather than the fundamental. Approximately ten times the ramp repetition rate is
 a workable rule for acceptable corner fidelity.
 
+### The far-end condition, which is the fourth travelling-wave condition
+
+A matched line carries one forward wave. A line left open, which is what a bond
+pad with nothing behind it presents, returns a wave. The returned wave travels
+against the optical carrier, so the two walk off at the **sum** of the indices
+rather than at their difference, and it therefore contributes at low frequency
+and vanishes at high. With `g = alpha + j omega n_RF / c`,
+
+    m ~ (1 - exp(-u_f))/u_f  +  G exp(-2 g L) (exp(u_b) - 1)/u_b
+    u_f = (alpha + j (omega/c)(n_RF - n_opt)) L
+    u_b = (alpha + j (omega/c)(n_RF + n_opt)) L
+    G   = (Z_L - Z0) / (Z_L + Z0)
+
+`G` is zero at a matched load, plus one at an open end and minus one at a short.
+Any unmodulated line between the end of the modulation section and the load
+rotates the returned wave without contributing modulation, so it moves the null
+and leaves the zero-frequency limit alone.
+
+**The reference decides what the number means, and it inverts the conclusion.**
+An open end doubles the response at zero frequency, so dividing by that value
+reports the decay of the doubling rather than the onset of a loss. On one 5 mm
+electrode the self-referred 3 dB point read 4.4 GHz while the device was within
+half a decibel of a matched line above 49 GHz. **Quote the penalty against a
+matched line driven by the same incident wave**, being the worst and the best the
+far-end condition does across the band, each with the frequency it occurs at.
+
+**The far-end condition is a claim about a polygon.** A termination is realised
+by a resistive feature the mask must draw. Where the layout draws none, the
+declared load is an assumption and the correct declaration is the open end that
+exists. A foundry deck will say so, five times, before anything else does.
+
+### A periodically loaded electrode is two cross-sections, and one is no bound on the pair
+
+An electrode may be interrupted along its length, holding a narrow gap for most
+of a period and opening to several times that gap for the remainder. A chain
+solving one cross-section per run returns the figure of the narrow section alone.
+
+**Weighting the reciprocal gap over the period is an estimate and not a bound.**
+It holds the overlap fixed and the overlap moves: on one such electrode the
+overlap fell by 23 per cent in the open section, and the ratio of the two
+half-wave voltages is the gap ratio multiplied by that further factor. The
+weighting predicted 5.9 per cent and the homogenised figure is 6.7.
+
+**Solve both drawn cross-sections and homogenise over the period.** Capacitance
+averages arithmetically, the sections being in parallel across the line;
+inductance averages arithmetically, the sections being in series along it; the
+half-wave voltage combines as a reciprocal average; and the series resistance is
+recovered from each section before being averaged, since each section's
+attenuation carries its own impedance.
+
+The homogenisation returns three quantities the weighting is silent about. The
+microwave index rises away from the optical group index, so the walk-off worsens
+and on the case measured the bandwidth fell 15 per cent. The characteristic
+impedance rises, by about two ohm toward the source.
+
 ## What Must Be Reported
 
 An electrode design is not delivered until the following are stated together.
@@ -239,3 +294,6 @@ electrode field and thereby alters Gamma, and it displaces the microwave index
 from the optical index, which is significant for travelling-wave designs. Where a
 platform is changed, Gamma and Vpi.L are to be recomputed. They do not scale with
 the electro-optic coefficient alone.
+| the far-end load, and whether the mask draws it | a declared termination with no resistive polygon describes a device that does not exist |
+| the penalty against a matched line over the declared band | the self-referred 3 dB point of an unterminated line measures the loss of a doubling |
+| whether the electrode is uniform along its length | one cross-section of a periodically loaded electrode understates Vpi and overstates the bandwidth |

@@ -121,6 +121,11 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # computed at 1.5 conductors and the in-band response at 2.
         n_cond = float(tw.get("conductors_carrying_the_return") or 2.0)
 
+        # The far-end load is read from the same place and for the same reason.
+        # A line left open returns a wave that the optical carrier meets going
+        # forward, and the response is no longer the one a matched line has.
+        gamma = float(tw.get("far_end_reflection") or 0.0)
+
         def alpha(f_Hz: float) -> float:
             R = rf.skin_resistance_per_m(f_Hz, e.conductivity_S_per_m,
                                          geom.electrode_width_um * 1e-6,
@@ -132,7 +137,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         points = [f_lo, 0.5 * (f_lo + f_hi), f_hi]
         band = []
         for f_GHz in points:
-            resp = rf.response(f_GHz * 1e9, L_m, alpha(f_GHz * 1e9), n_m, n_g)
+            resp = rf.response_loaded(f_GHz * 1e9, L_m, alpha(f_GHz * 1e9),
+                                      n_m, n_g, gamma)
             band.append({
                 "frequency_GHz": f_GHz,
                 "response": resp,
@@ -152,7 +158,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # residual, rather than printing one beside the other.
         f3 = tw.get("electro_optic_3dB_GHz")
         if f3:
-            m_at_f3 = rf.response(float(f3) * 1e9, L_m, alpha(float(f3) * 1e9), n_m, n_g)
+            m_at_f3 = rf.response_loaded(float(f3) * 1e9, L_m,
+                                         alpha(float(f3) * 1e9), n_m, n_g, gamma)
             residual = abs(m_at_f3 - 1.0 / math.sqrt(2.0))
             payload["response_at_the_reported_3dB_point"] = m_at_f3
             payload["loss_model_residual"] = residual
@@ -167,6 +174,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                 )
         payload.update({
             "rf_band_GHz": [f_lo, f_hi],
+            "far_end_reflection": gamma,
             "band_response": band,
             "worst_in_band_dB": worst["response_dB"],
             "worst_in_band_frequency_GHz": worst["frequency_GHz"],

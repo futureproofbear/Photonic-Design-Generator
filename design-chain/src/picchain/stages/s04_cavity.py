@@ -819,16 +819,50 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                 key="cavity.trimmer_confinement_unavailable",
             )
         _conf = float(_conf)
-        # The cladding is heated too, and its own coefficient adds.
+        # THE WEIGHTS ARE dn_eff/dn, AND THE CONFINEMENT IS ONLY A PROXY FOR THEM.
         #
-        #   dn_eff/dT = Gamma_film * (dn/dT)_film + (1 - Gamma_film) * (dn/dT)_clad
+        #   dn_eff/dT = S_film * (dn/dT)_film + S_clad * (dn/dT)_clad
         #
-        # Omitting the second term understates the reach; omitting the first
-        # OVERSTATES it by 1/Gamma, which is what this calculation did. Both are
-        # carried so the figure is a computation rather than a bound.
+        # S_film is the fraction of the effective index that follows the film's
+        # own index, and the confinement is the fraction of the mode's POWER in
+        # the film. The two are not equal. Measured on one thin-film tantalate
+        # cross-section by perturbing each index by 2e-03 and re-solving:
+        #
+        #   dn_eff/dn_e     0.69834      confinement_film   0.54495
+        #   dn_eff/dn_o     0.00000      <- X-cut, so the mode sees only n_e
+        #   dn_eff/dn_clad  0.40130
+        #
+        # The confinement understated the film weight by 28 per cent and the
+        # cladding term, which is 0.40 of the oxide's own coefficient, had been
+        # left out entirely. Both errors ran against the design.
+        #
+        # Where the sensitivities are declared they are used. Where they are not,
+        # the confinement stands in for the film weight, the cladding weight is
+        # taken as zero, and a warning says the figure is a lower bound.
         _dndt_clad = float(getattr(_pt, "dn_dT_cladding_per_K", 0.0) or 0.0)
-        _dndt_eff = (_conf * float(_pt.dn_dT_per_K)
-                     + (1.0 - _conf) * _dndt_clad)
+        _sf = getattr(_pt, "index_sensitivity_film", None)
+        _sc = getattr(_pt, "index_sensitivity_cladding", None)
+        if _sf is None:
+            _sf, _sc = _conf, 0.0
+            _w_from = f"the film confinement {_conf:.5f} as a proxy, cladding ignored"
+            ctx.warn(
+                "the phase trimmer's reach is weighted by the film confinement "
+                "rather than by dn_eff/dn, and the cladding's own coefficient is "
+                "ignored. The confinement is the fraction of the mode's power in "
+                "the film and the weight wanted is the fraction of its effective "
+                "index that follows the film, which on one measured cross-section "
+                "was 28 per cent larger. The reach reported is a lower bound. "
+                "Declare cavity.phase_trimmer.index_sensitivity_film and "
+                "index_sensitivity_cladding, measured by perturbing each index "
+                "and re-solving the mode",
+                key="cavity.trimmer_weighted_by_confinement",
+            )
+        else:
+            _sf = float(_sf)
+            _sc = float(_sc if _sc is not None else 0.0)
+            _w_from = str(getattr(_pt, "index_sensitivity_provenance", "")
+                          or "declared, provenance not stated")
+        _dndt_eff = _sf * float(_pt.dn_dT_per_K) + _sc * _dndt_clad
         _dn_mat = float(_pt.dn_dT_per_K) * float(_pt.max_delta_T_K)
         _dn = _dndt_eff * float(_pt.max_delta_T_K)   # the effective-index change
         _lam_um = float(design.waveguide.wavelength_um)
@@ -845,6 +879,9 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             "film_confinement": _conf,
             "film_confinement_from": _conf_from,
             "dn_dT_cladding_per_K": _dndt_clad,
+            "index_sensitivity_film": _sf,
+            "index_sensitivity_cladding": _sc,
+            "index_weights_from": _w_from,
             "dn_dT_effective_per_K": _dndt_eff,
             "index_change_material": _dn_mat,
             "index_change": _dn,

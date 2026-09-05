@@ -1,0 +1,75 @@
+# The cross-section of the ltoi300 single-mode O-band ring, posed to the chain.
+#
+# The geometry is that of `ring_resonator_single_mode_point_coupler_oband` in
+# the Luxtelligence PDK: a 0.7 um ridge, 180 nm etched into a 300 nm lithium
+# tantalate film, on a 120 nm slab, at 1310 nm. The purpose of the run is to
+# replace the group index of 2.2 that the PDK carries with a TODO beside it,
+# to bound the mode solver against an independent one, and to establish what
+# the 200 um bend does to the mode.
+
+meta:
+  name: ltoi300_mmi2x2_cband
+  title: "The mmi2x2_cband cell of the ltoi300 kit, measured by the chain"
+  status: scaffold
+
+platform:
+  cut: x
+  materials_file: ../../design-chain/pdk/LXT_LT_PRO/materials_lt_pro.yaml
+  film_material: LiTaO3
+  film_thickness_um: 0.300
+  etch_depth_um: 0.180
+  sidewall_deg: 70.0            # the PDK layer stack declares 20 deg from vertical
+  box_thickness_um: 7.0
+  clad_thickness_um: 2.0
+
+waveguide:
+  top_width_um: 0.900
+  wavelength_um: 1.55
+
+mesh:
+  d_fine_um: 0.008
+  d_coarse_um: 0.050
+  num_modes: 3
+  polarisation: TE
+
+grating:
+  enabled: false
+
+electrodes:
+  enabled: false
+
+cavity:
+  enabled: false
+
+fem:
+  enabled: false
+
+bend:
+  enabled: false
+
+# The point coupler of the PDK cell, solved in the plane. The gap and the radius
+# are those of `ring_resonator_single_mode_point_coupler_oband`.
+# The splitter geometry of `lxt_pdk_gf.ltoi300.cells.mmi1x2_oband`, which the
+# kit states is optimised for transmission at 1310 nm on the 300/120 stack.
+mzm:
+  mmi_width_um: 5.15
+  mmi_length_um: 67.5
+  port_width_um: 1.5               # the access taper where it meets the section
+  port_separation_um: 3.65         # centre to centre at the end face
+
+fdtd:
+  enabled: true
+  structure: mmi
+  dimensions: 2
+  resolution: 50
+  convergence_resolution: 25
+  pml_um: 1.0
+  mmi_taper_length_um: 25.0
+  mmi_lead_um: 3.0
+  mmi_ports_in: 2
+  coupler_margin_um: 2.0
+  coupler_bandwidth_frac: 0.04
+  coupler_frequencies: 11
+  processes: 6
+
+stages: [mode, fdtd, verify]

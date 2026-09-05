@@ -56,6 +56,19 @@ def _sellmeier_zelmon(lam_um: float, p: dict) -> float:
     return math.sqrt(n2)
 
 
+def _sellmeier_epsinf(lam_um: float, p: dict) -> float:
+    """n^2 = eps_inf + A l^2/(l^2 - B^2) - P l^2.
+
+    The single-resonance form with a high-frequency permittivity and a linear
+    infrared term, in which foundry design manuals for thin-film lithium
+    tantalate state their fits. ``B`` is a wavelength in micrometres and is
+    squared here; ``P`` carries units of inverse square micrometres.
+    """
+    l2 = lam_um**2
+    n2 = p["eps_inf"] + p["A"] * l2 / (l2 - p["B"] ** 2) - p["P"] * l2
+    return math.sqrt(n2)
+
+
 @dataclass(frozen=True)
 class Material:
     name: str
@@ -86,6 +99,8 @@ class Material:
             return _sellmeier_1(lam_um, sm["B"], sm["C"])
         if form in ("sellmeier_zelmon_ln", "sellmeier_zelmon_lt"):
             return _sellmeier_zelmon(lam_um, sm[axis])
+        if form == "sellmeier_epsinf":
+            return _sellmeier_epsinf(lam_um, sm[axis])
         raise ValueError(f"unknown sellmeier form {form!r}")
 
     def eps_optical_device(

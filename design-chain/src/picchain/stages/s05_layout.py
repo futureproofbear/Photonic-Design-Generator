@@ -928,11 +928,17 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     g0 = z
     out["WG"].append(_rect(g0, -wg_width / 2, g0 + drawn_length, wg_width / 2))
     inner = wg_width / 2 + geom.post_gap_um
+    # The posts are the guide's layer unless the design names another. They were
+    # appended to the guide layer unconditionally until 2026-09-03, so a process
+    # reserving a layer for small repeating features could not be met: by the
+    # time a layer map or a derived layer sees them they are the same polygons
+    # as the ridge.
+    post_layer = lay.grating_layer or "WG"
     for k in range(n_draw):
         zc = g0 + (k + 0.5) * period
         for sgn in (-1, 1):
             yc = sgn * (inner + geom.post_width_um / 2)
-            out["WG"].append(
+            out[post_layer].append(
                 _rect(zc - post_len / 2, yc - geom.post_width_um / 2,
                       zc + post_len / 2, yc + geom.post_width_um / 2)
             )
@@ -982,7 +988,32 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     if e.enabled:
         pad_y = max(pad_y, geom.electrode_gap_um / 2 + geom.electrode_width_um
                     + lay.bond_pad_um + 20.0)
-    out["SLAB"].append(_rect(-5.0, -pad_y, z_end + 5.0, pad_y))
+
+    # The slab is derived from the ridges where the platform states how far it
+    # reaches beside one, and drawn as a band across the device band where it
+    # does not. The band is the older behaviour and it is retained, since a
+    # design may intend it, and it is reported because it is rarely what is
+    # wanted: an unbroken sheet guides, its index floor standing well above the
+    # cladding, so it offers a path from facet to facet that bypasses the
+    # device. The modulator topology has derived its slab since the field was
+    # added; this brings the same treatment to the topology beside it.
+    slab_offset = design.platform.slab_offset_um
+    if slab_offset is None:
+        out["SLAB"].append(_rect(-5.0, -pad_y, z_end + 5.0, pad_y))
+        ctx.warn(
+            f"the slab is drawn as one band {2 * pad_y:.0f} um across the device "
+            "rather than derived from the ridges. An unbroken slab guides, so it "
+            "carries light between structures that the design separates. Declare "
+            "platform.slab_offset_um to derive it, the open PDK for this stack "
+            "using 6.0 um",
+            key="layout.slab_drawn_as_a_band")
+    else:
+        derived = slab_from_ridges(out, float(slab_offset))
+        if not derived:
+            raise RuntimeError(
+                "platform.slab_offset_um is declared and the ridges yielded no "
+                "slab; the guide layer carries no polygon at this point")
+        out["SLAB"] += derived
     out["FLOORPLAN"].append(_rect(-5.0, -pad_y - 5.0, z_end + 5.0, pad_y + 5.0))
 
     # --- the facet planes and the band the cleave or polish removes -------

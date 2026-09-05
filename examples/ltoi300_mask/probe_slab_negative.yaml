@@ -1,0 +1,239 @@
+# A mask-path exercise on the Luxtelligence LT-PRO ltoi300 stack.
+#
+# The purpose of this design is the mask and not the physics. It exists to
+# drive stages 5, 6, 12 and 14 against the foundry rule deck and to establish
+# where what the chain emits departs from what the process requires. The
+# optical device is the smallest one that carries a grating, because the
+# question of layer 2/11 turns on a grating being present.
+#
+#   picchain run examples/ltoi300_mask/design.yaml
+#
+# Every layer number below is taken from the LT-PRO design manual entry in
+# references/README.md and from the deck at
+# design-chain/pdk/LXT_KLayout_DRC_Runsets/LT_PRO_ltoi300.lydrc.
+
+meta:
+  name: ltoi300_mask_slabneg
+  title: "A ridge and a Bragg mirror on ltoi300, drawn for the LT-PRO deck"
+  status: scaffold
+
+platform:
+  cut: x                          # manual: the wafers are x-cut
+  stack: ltoi300                  # binds the design to the LT-PRO deck
+  materials_file: design-chain/pdk/LXT_LT_PRO/materials_lt_pro.yaml
+  film_material: LiTaO3
+  film_thickness_um: 0.300        # 300 nm thin-film lithium tantalate
+  etch_depth_um: 0.180            # 180 nm ridge etch, leaving a 120 nm slab
+  sidewall_deg: 70.0              # 20 degrees from vertical
+  box_thickness_um: 7.0
+  clad_thickness_um: 2.0
+  slab_offset_um: 6.0             # the open PDK convention
+  propagation_loss_dB_per_cm: 0.2 # vendor page
+
+waveguide:
+  top_width_um: 0.700
+  wavelength_um: 1.31
+
+mesh:
+  d_fine_um: 0.010
+  d_coarse_um: 0.060
+  num_modes: 3
+  polarisation: TE
+
+# A third-order mirror. First order at 1310 nm asks for a period near 360 nm,
+# and a 300 nm post then leaves a longitudinal gap of about 60 nm against the
+# 300 nm minimum the process states, so first order is not drawable here.
+grating:
+  enabled: true
+  order: 3
+  target_wavelength_um: 1.31
+  length_um: 500.0
+  post_width_um: 0.30             # at the 250 nm minimum width with margin
+  post_gap_um: 0.63               # from the ridge edge
+  span_GHz: 6000.0
+  points: 2001
+
+electrodes:
+  enabled: true
+  gap_um: 7.0
+  width_um: 20.0
+  thickness_um: 0.9
+  material: Au
+  length_um: 500.0
+
+cavity:
+  enabled: false
+  # read by the layout stage whether or not the cavity is solved: it is the
+  # facet-to-grating distance, and the lead-in is drawn inside it
+  feed_length_um: 400.0
+
+process:
+  bias_um: {}                     # ASSUMPTION: no bias is characterised for this process
+  depth_bias_um: 0.0
+  precompensate: true
+  simulate: printed
+  grid_nm: 1.0                    # ASSUMPTION: the manual entry records no grid
+  max_snap_displacement_nm: 0.0
+
+layout:
+  enabled: true
+  device: edbr
+  draw_periods: null              # the whole mirror
+  require_complete: true          # this mask is meant to be submittable
+  compare_backends: true
+  cell_name: LTOI300_MASK
+  taper_length_um: 150.0
+  taper_tip_width_um: 0.40        # above the 250 nm minimum ridge width
+  taper_segments: 64
+  slab_min_width_um: 0.30
+  input_facet_angle_deg: 8.0
+  output_facet_angle_deg: 0.0
+  facet_route: angled             # the die edge stays perpendicular
+  facet_bend_radius_um: 500.0
+  facet_angled_length_um: 40.0
+  draw_facets: true
+  facet_recess_um: 5.0
+  facet_keepout_um: 30.0
+  bond_pad_um: 100.0
+  crystal_misalignment_deg: 0.0
+  draw_orientation_key: true
+  check_geometry: true
+  min_angle_deg: 20.0
+  max_vertices: 200
+  write_oasis: true
+  write_layer_table: true
+  # PROBE ONLY. The LT-PRO slab-etch negative is 3/11 and the mask is 3/11
+  # minus 3/10, so the region in which the slab is removed has to be drawn.
+  # The only field extent this chain draws at device level is FLOORPLAN, which
+  # hugs the slab band by 5 um, so the derivation is exercised here to measure
+  # what it produces.
+  derived_layers:
+    - {name: SLAB_NEG, op: not, a: FLOORPLAN, b: SLAB, layer: [3, 11]}
+  # The LT-PRO layer table. Ridge 2/10, slab protect 3/10, slab-etch negative
+  # 3/11, labels 4/0, chip boundaries 6/0 and 6/1, metals 20/0, 22/0 and 23/0,
+  # contacts 40/0 and 41/0. Everything this chain draws that the process does
+  # not read is placed on 2xx, which the deck names nowhere.
+  layer_map:
+    WG:         [2, 10]
+    SLAB:       [3, 10]
+    METAL:      [20, 0]
+    PAD:        [20, 0]
+    LABEL:      [4, 0]
+    CHIP_INNER: [6, 0]
+    CHIP_OUTER: [6, 1]
+    SEAL:       [200, 0]
+    MARK:       [201, 0]
+    DICE:       [202, 0]
+    FACET:      [203, 0]
+    ORIENT:     [204, 0]
+    FILL:       [205, 0]
+    FLOORPLAN:  [206, 0]
+
+reticle:
+  enabled: true
+  # 10.1 by 5.05 mm, both edges drawn from the set the process offers
+  die_width_um: 10100.0
+  die_height_um: 5050.0
+  margin_um: 40.0
+  dicing_lane_um: 80.0
+  align_facet_to_edge: true
+  device_y: centre
+  label: LTMASK
+  revision: A
+  label_height_um: 40.0
+  label_layers: [LABEL]
+  seal_ring:
+    # The process states no seal-ring layer and the foundry adds the filler and
+    # the guard rails during mask preparation, so none is drawn.
+    enabled: false
+    width_um: 20.0
+    clearance_um: 60.0
+    layers: [SEAL]
+  chip_frame:
+    enabled: true
+    exclusion_zone_um: 50.0
+    allowed_edges_um: [5050.0, 10100.0, 20200.0]
+    edge_tolerance_um: 0.005
+  marks:
+    enabled: true
+    size_um: 40.0
+    arm_width_um: 4.0
+    clearance_um: 3.0
+    layers: [WG, METAL]
+    composite_layer: null         # 201/0 would be a drawing the process does not read
+    corners: [SW, SE, NW, NE]
+  split:
+    enabled: false
+  monitors:
+    enabled: true
+    slab_offset_um: 6.0
+    kappa_ladder: true
+    kappa_gaps_um: [0.53, 0.58, 0.63, 0.68, 0.73]
+    kappa_periods: 200
+    coherence_ladder: false
+    loss_cutback: true
+    loss_lengths_um: [500.0, 1500.0, 3000.0]
+    cd_vernier: true
+    cd_widths_um: [0.25, 0.30, 0.40, 0.60]
+    cd_repeats: 10
+    electrode_ladder: true
+    electrode_gaps_um: [4.0, 7.0, 12.0]
+    row_pitch_um: 120.0
+
+mask:
+  enabled: true
+  target: die
+  connected_layers: [WG, METAL, PAD]
+  expectations_describe: device
+  extract_netlist: true
+  joined_layers: [[METAL, PAD]]
+  label_layer: LABEL
+  must_not_touch: [[WG, METAL]]
+  density_tile_um: 200.0
+  density_windows: []             # the manual entry records no density window
+  fill:
+    enabled: false
+
+drc:
+  enabled: true
+  target: die
+  deck: ../../design-chain/pdk/LXT_KLayout_DRC_Runsets/LT_PRO_ltoi300.lydrc
+  rules:
+    # The declared rules restate the process minima so that a failure is
+    # localised before the deck is read. They are a smoke test and the deck is
+    # the check.
+    - {name: RIDGE_min_width, kind: min_width, layer: WG,    value_um: 0.25, severity: error, ignore_angle_deg: 20.0}
+    - {name: RIDGE_min_space, kind: min_space, layer: WG,    value_um: 0.30, severity: error, ignore_angle_deg: 20.0}
+    - {name: M1_min_width,    kind: min_width, layer: METAL, value_um: 0.80, severity: error}
+    - {name: M1_min_space,    kind: min_space, layer: METAL, value_um: 1.00, severity: error}
+    - {name: M1_to_RIDGE_sep, kind: min_separation, layer: METAL, other_layer: WG, value_um: 1.50, severity: error}
+    - {name: SLAB_min_width,  kind: min_width, layer: SLAB,  value_um: 0.25, severity: error}
+
+warnings:
+  enforce: false
+  acknowledged: []
+
+targets:
+  - metric: mode.n_guided_modes
+    max: 1.0
+    severity: must
+    source: "a single lateral mode at 1310 nm"
+
+  - metric: drc.error_violations
+    max: 0.0
+    severity: must
+    source: "the declared minima restate the LT-PRO layer table"
+
+  - metric: drc.deck.violations_total
+    max: 0.0
+    severity: must
+    source: "a submittable die returns no violation from the foundry runset"
+
+  - metric: grating.bragg_wavelength_nm
+    value: 1310.0
+    rel_tol: 0.02
+    unit: nm
+    severity: should
+    source: "the O band"
+
+stages: [mode, grating, layout, reticle, drc, mask, verify]

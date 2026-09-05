@@ -70,7 +70,7 @@ materials:
       o: {A: 3.29628, B: 0.03246, C: 0.06724, D: 0.13594, E: 1.85677, F: 244.0}
       e: {A: 3.28553, B: 0.03164, C: 0.07642, D: 0.13540, E: 1.85710, F: 244.0}
     # MEASURED ON THIN-FILM LITHIUM TANTALATE, 2026-08-14, replacing the bulk
-    # congruent values of 2.1188 and 2.1145. Wang et al., Nature 630, 784 (2024)
+    # congruent values of 2.1188 and 2.1145. Wang et al., Nature 629, 784 (2024)
     # report n_o = 2.119 and n_e = 2.123 for a 600 nm LTOI film.
     index_override_1550:
       o: 2.119
@@ -83,12 +83,15 @@ materials:
     eps_rf:
       perp_c: 40.9                    # eps_11
       along_c: 42.5                   # eps_33
-    # MEASURED on LTOI waveguides: 5.6 dB/m, with 7.3 dB/m before reduction.
-    # Wang et al., Nature 630, 784 (2024).
+    # MEASURED on LTOI waveguides: 5.6 dB/m on unreduced LiTaO3, and 7.3 dB/m
+    # on the wafer used for optical applications. The same paper reports
+    # 17.1 dB/m on a mass-manufactured LTOI substrate, which is the figure a
+    # volume process is more likely to present. Wang et al., Nature 629, 784
+    # (2024), held at ../../references/.
     loss_dB_per_cm: 0.056
     provenance: >-
       thin_film_literature - r33 30.5 pm/V is the accepted material value and is
-      corroborated in thin film by Wang et al., Nature 630, 784 (2024), whose
+      corroborated in thin film by Wang et al., Nature 629, 784 (2024), whose
       LTOI modulator measures VpiL = 1.9 V.cm at 1550 nm and 1.6 V.cm at
       1310 nm. Indices and loss are that paper's measured thin-film figures:
       n_o 2.119, n_e 2.123, 5.6 dB/m. The RF permittivity remains the bulk
@@ -101,10 +104,23 @@ materials:
 
   Si3N4:
     kind: isotropic
-    index_const: 1.996
+    # index_const was 1.996 and is displaced by the dispersion below, which
+    # passes through 1.99637 at 1550 nm. A constant is the degenerate case of a
+    # dispersion and the two are not both declared here, `Material.index`
+    # reading the constant first where they are.
+    sellmeier:                        # Luke 2015, stoichiometric LPCVD Si3N4
+      form: sellmeier_1
+      B: [3.0249, 40314.0]
+      C: [0.1353406, 1239.842]        # sqrt(C) in um
     eps_rf: 7.5
     loss_dB_per_cm: 0.01
-    provenance: "typical LPCVD stoichiometric SiN at 1550 nm; ultra-low-loss process dependent"
+    provenance: >-
+      Luke, Okawachi, Lamont, Gaeta and Lipson, Opt. Lett. 40, 4823 (2015),
+      measured on stoichiometric LPCVD silicon nitride from 310 to 5504 nm. The
+      fit returns 1.99637 at 1550 nm, which is the constant that stood here
+      alone until 2026-09-04 and which is now the value the dispersion passes
+      through. eps_rf and the loss remain typical figures and are process
+      dependent.
 
   InP:
     kind: isotropic

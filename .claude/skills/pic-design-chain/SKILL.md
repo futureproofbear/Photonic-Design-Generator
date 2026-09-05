@@ -712,3 +712,44 @@ previous numerical output pins the previous defect with equal fidelity.
    findings of which 0 acknowledged, 3 stages unreported" is a true summary.
    "PASS" was not, and a green wall of individually-true checks is how a false
    summary gets assembled.
+
+51. **The first design to select an option is testing the option.** A stage that
+    has run a hundred times has run one branch of every conditional it carries.
+    Before running a design that declares a device, a topology or a stage no
+    prior run has declared, search the stages for the field's name and read every
+    branch that reads it. The failures of this class substitute a value and
+    continue rather than raising: a builder that dispatched to the only device
+    previously drawn, a clearance adjustment written for a grating that ran on a
+    device without one and overwrote the parameter a ladder was varying, and a
+    recommendation that raised a key error on the empty mapping it recommended
+    populating. See `rules/generic/first-exercise.md`.
+52. **A ladder's swept parameter is immune to automatic adjustment.** Any logic
+    that may move a dimension the reticle split is stepping must report what it
+    did on every rung, and a rung whose swept value was replaced is no longer a
+    member of the study. Read `electrode_gap_widened_to_um`, or its equivalent
+    for the parameter being stepped, on every copy before the ladder is believed.
+53. **Convert every invariant a builder states in a comment into a
+    precondition** where its terms are declared fields. One layout builder's own
+    comment stated the relation its port geometry must satisfy and the code
+    beneath it broke the relation, which a foundry deck then found as 148
+    violations.
+54. **A rule violation is not evidence that the design was at its optimum.**
+    Where a dimension is moved to satisfy a clearance rule, re-evaluate the
+    quantity it was chosen for rather than recording a compromise. Opening one
+    splitter's port separation to the least value its rule admits raised the
+    transmission of the imaging section by 0.233 dB, the imaging length being set
+    by the section width and the separation moving only where the images land.
+55. **Read the corner sensitivity table for blank elasticities before reading the
+    corner verdict.** A declared parameter that moved no metric was not
+    exercised, and a sweep can report a full factorial while varying one thing.
+    See `rules/generic/parameter-scans.md`.
+56. **Compare a model-to-source disagreement against the whole corner spread
+    before explaining it.** The division is one line and it eliminates or
+    implicates the process outright. A disagreement several times the width of the
+    declared window is not a process effect, and that result is what justifies
+    building an instrument rather than tuning a model.
+57. **Where a chain and a supplied model disagree about a product of two
+    quantities, no single measurement separates them.** Step a parameter that
+    enters the two factors differently, and design the acceptance rows so the
+    disputed quantity carries the lower severity. A blocking target on the
+    quantity an experiment exists to settle asserts the answer in advance.

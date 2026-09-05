@@ -229,3 +229,64 @@ def test_a_closed_splitter_junction_is_still_measured():
     _, rec = build_mzm_polygons(d, None)
     assert rec["port_gap_at_mmi_um"] == 0.0
     assert rec["port_gap_below_min_space_um"] > 0.0
+
+
+# --- the splitter port separation, added 2026-09-05 -------------------------
+
+def _mzm_design(**over):
+    """A minimal Mach-Zehnder design, for the splitter precondition."""
+    import yaml
+    from picchain.config import Design
+    base = yaml.safe_load("""
+meta: {name: t, title: t}
+grating: {enabled: false, period_um: 0.4}
+waveguide: {top_width_um: 2.5, wavelength_um: 1.55}
+layout: {enabled: true, device: mach_zehnder}
+mzm: {port_separation_um: 2.55}
+drc:
+  enabled: true
+  rules:
+    - {name: s, kind: min_space, layer: WG, value_um: 0.30, severity: error}
+""")
+    for k, v in over.items():
+        a, b = k.split(".")
+        base.setdefault(a, {})[b] = v
+    return Design.model_validate(base)
+
+
+def _names(d):
+    from picchain import preflight
+    return {f.check for f in preflight.run_checks(d)}
+
+
+def test_a_splitter_whose_ports_cannot_carry_the_arm_is_refused():
+    """2.55 um apart carrying a 2.5 um arm leaves 50 nm against a 300 nm rule.
+
+    The device draws, the run completes and the deck reports the violation at
+    both ends of every copy on the die. The relation is among three declared
+    fields and is knowable before anything is solved.
+    """
+    assert "the_splitter_ports_can_carry_the_arm" in _names(_mzm_design())
+
+
+def test_opening_the_port_separation_satisfies_it():
+    d = _mzm_design(**{"mzm.port_separation_um": 2.80})
+    assert "the_splitter_ports_can_carry_the_arm" not in _names(d)
+
+
+def test_narrowing_the_arm_satisfies_it_too():
+    d = _mzm_design(**{"waveguide.top_width_um": 2.25})
+    assert "the_splitter_ports_can_carry_the_arm" not in _names(d)
+
+
+def test_it_says_nothing_about_a_device_that_is_not_an_interferometer():
+    """The E-DBR draws no splitter and the relation does not apply to it."""
+    d = _mzm_design(**{"layout.device": "edbr"})
+    assert "the_splitter_ports_can_carry_the_arm" not in _names(d)
+
+
+def test_it_says_nothing_where_no_guide_spacing_rule_is_declared():
+    """The check derives its bound from the declared rules and invents none."""
+    d = _mzm_design()
+    d.drc.rules = []
+    assert "the_splitter_ports_can_carry_the_arm" not in _names(d)

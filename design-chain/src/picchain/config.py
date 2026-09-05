@@ -165,6 +165,26 @@ class Electrodes(BaseModel):
     #: conductor for the skin-effect loss. 4.1e7 S/m is bulk gold; an evaporated
     #: thin film is lower, and the loss scales as its reciprocal square root
     conductivity_S_per_m: float = 4.1e7
+    #: what sits at the far end of the travelling-wave line, ohm. Unset states a
+    #: termination matched to the line, which returns nothing and is the model
+    #: the chain carried alone until 2026-09-04. A resistor of a declared value
+    #: returns (Z_L - Z0)/(Z_L + Z0) of the wave. A pad with nothing behind it
+    #: is an open end, and is stated as 1e9 or above.
+    #:
+    #: A kit that ships terminated and unterminated variants of the same
+    #: modulator described them by the same bandwidth while this was absent, so
+    #: a design pointing at the unterminated cell was graded by the model of the
+    #: terminated one.
+    far_end_load_ohm: float | None = None
+    #: the unmodulated line between the end of the modulation section and the
+    #: far-end load, um. The optical carrier does not travel it and the
+    #: microwave does, twice, so on a line that reflects it rotates the returned
+    #: wave and moves the null. It does nothing where the far end is matched.
+    #:
+    #: The LTOI300 unterminated modulator draws its signal metal to 5220 um
+    #: against 5045 for the terminated one, on a modulation section of 5000, so
+    #: the two variants differ by 175 um of stub as well as by the resistor.
+    far_end_stub_um: float = 0.0
 
     # --- the convergence guard on the electrostatic solve -------------------
     # The capacitance sets the microwave index, the impedance and the bandwidth,
@@ -334,9 +354,26 @@ class PhaseTrimmer(BaseModel):
     dn_dT_per_K: float = 3.0e-5
     #: the cladding's own thermo-optic coefficient. A heater warms the cladding
     #: as well as the film, and the mode's effective index moves by the
-    #: confinement-weighted sum of the two. Left at zero the reach is understated
+    #: sensitivity-weighted sum of the two. Left at zero the reach is understated
     #: by the cladding's share, which is the conservative direction.
     dn_dT_cladding_per_K: float = 0.0
+    #: dn_eff/dn for the guiding film and for the cladding, MEASURED by
+    #: perturbing each index and re-solving the mode.
+    #:
+    #: These are the correct weights. The film confinement was used as a proxy
+    #: for the first and understated it by 28 per cent on one design, the
+    #: confinement being the fraction of POWER in the film while this is the
+    #: fraction of the effective index that follows the film's own. Left unset,
+    #: the confinement is used and a warning says so.
+    #:
+    #: They are pure properties of the cross-section, so they are measured once
+    #: and declared rather than re-solved on every run: two extra mode solves
+    #: per run is the cost, and the mode solve is the expensive stage.
+    index_sensitivity_film: float | None = None
+    index_sensitivity_cladding: float | None = None
+    #: where the two above came from, carried into the payload so a reader can
+    #: find the runs that measured them
+    index_sensitivity_provenance: str = ""
     #: the temperature rise the heater is driven to, K
     max_delta_T_K: float = 40.0
     #: drawn width of the resistive wire, um
@@ -475,8 +512,53 @@ class FDTDCfg(BaseModel):
     #: which structure is solved. "taper" measures the radiation of the input
     #: taper; "grating" measures the reflection of a finite grating, which is an
     #: independent check on the coupled-mode kappa
-    structure: Literal["taper", "grating", "bandstructure"] = "taper"
+    structure: Literal["taper", "grating", "bandstructure", "coupler", "mmi"] = "taper"
     grating_periods: int = 100           # a finite section, not the full mirror
+    #: Point-coupler geometry, being a bus running past a ring of the given
+    #: radius. The chain carries no resonator block, so the geometry is declared
+    #: beside the solve that consumes it. The guide width is the ridge width the
+    #: design already states, and the two indices come from the same
+    #: effective-index reduction the taper uses.
+    #:
+    #: The two-dimensional reduction is valid only where the partially etched
+    #: slab is continuous across the gap, which is what sets the decay of the
+    #: evanescent field. Where a platform draws no slab between the two guides,
+    #: `dimensions: 3` is required.
+    coupler_gap_um: float = 1.0
+    coupler_ring_radius_um: float = 200.0
+    #: width of the ring guide where it differs from the bus. Unset, the
+    #: two are equal and the coupler is synchronous. A kit pairing a
+    #: single-mode bus with a wider multimode ring detunes the two
+    #: propagation constants, and the coupling is then governed by that
+    #: mismatch as much as by the gap
+    coupler_ring_width_um: float | None = None
+    #: modes of the ring guide the crossed power is resolved onto. One is
+    #: sufficient for a single-mode ring. A wider ring carries more than
+    #: one mode to receive the power, and coupling into a higher order is
+    #: loss to the resonance the fundamental forms
+    coupler_cross_bands: int = 1
+    #: half the window along the bus. The coupling integrand falls as the ring
+    #: curves away, so a window of 20 um at a 200 um radius omits about 2 % of
+    #: the interaction and a shorter one omits materially more
+    coupler_half_length_um: float = 20.0
+    coupler_stations: int = 201           # polygon vertices along the ring edge
+    coupler_port_width_um: float = 3.0    # mode monitor width at each port
+    coupler_margin_um: float = 1.5        # lateral clearance outside the guides
+    #: fractional half-width of the band over which the coupling is reported.
+    #: The coupling of a point coupler varies strongly with wavelength, so a
+    #: single frequency states less than it appears to
+    coupler_bandwidth_frac: float = 0.04
+    coupler_frequencies: int = 11
+    #: MMI geometry beyond what `mzm` already declares, being the length of the
+    #: access taper that carries each port from the guide width to the port
+    #: width. The multimode section, the port width and the port separation are
+    #: read from `mzm`, so the structure solved is the structure the layout
+    #: draws rather than a second declaration of it.
+    mmi_taper_length_um: float = 25.0
+    #: straight guide either side of the tapers, inside the PML
+    mmi_lead_um: float = 3.0
+    #: inputs to the multimode section. One is a splitter and two is a coupler
+    mmi_ports_in: Literal[1, 2] = 1
     #: band-structure check: bands solved at the zone edge, and the fraction of
     #: a band's energy that must sit in the core for it to count as guided
     num_bands: int = 16
@@ -715,6 +797,44 @@ class SplitCfg(BaseModel):
     label_height_um: float = 25.0
 
 
+class CompanionCfg(BaseModel):
+    """A second device on the same die, differing in more than one parameter.
+
+    A split ladder brackets one parameter of one design, and every rung is the
+    same device. A companion is a DIFFERENT device that has to share the die.
+
+    The case that motivated it: a coherent radar generates its microwave carrier
+    as the beat between a chirped laser and a single-tone reference, so the
+    carrier is the DIFFERENCE of two optical frequencies. Each laser's frequency
+    moves about 3.9 GHz per kelvin. Placed on separate die the two drift
+    independently and the beat drifts with them; placed on one die at one
+    temperature they drift together, and the beat moves only by the mismatch
+    between two nominally identical cavities.
+
+    The device is re-drawn from the same builder with the overrides applied, so a
+    companion is the design file's own physics evaluated at different values, and
+    never a second drawing maintained by hand.
+    """
+    #: what the companion is, used to label it on the die and in the report
+    name: str = ""
+    #: dotted paths into this design file, each with the value the companion takes
+    overrides: dict[str, Any] = Field(default_factory=dict)
+    #: how many copies of the companion to place
+    copies: int = 1
+    #: what the companion is for, carried into the reticle payload
+    purpose: str = ""
+
+
+class CompanionsCfg(BaseModel):
+    """Companion devices placed on the die beside the primary one."""
+    enabled: bool = False
+    devices: list[CompanionCfg] = Field(default_factory=list)
+    #: vertical spacing. Zero derives it from the device extent
+    pitch_um: float = 0.0
+    label_each: bool = True
+    label_height_um: float = 25.0
+
+
 class ChipFrameCfg(BaseModel):
     """The final chip boundary and the usable area inside it.
 
@@ -763,6 +883,7 @@ class ReticleCfg(BaseModel):
     chip_frame: ChipFrameCfg = Field(default_factory=ChipFrameCfg)
     marks: AlignmentMarkCfg = Field(default_factory=AlignmentMarkCfg)
     split: SplitCfg = Field(default_factory=SplitCfg)
+    companions: CompanionsCfg = Field(default_factory=CompanionsCfg)
     monitors: MonitorsCfg = Field(default_factory=MonitorsCfg)
     #: Place the device so that its input facet lies on the sawn edge, and open
     #: the seal ring where the guide crosses it.
@@ -959,6 +1080,22 @@ class LayoutCfg(BaseModel):
     #: value, so raising it widens the etch-clear region with it.
     bond_pad_um: float = 80.0
     cell_name: str = "EDBR"
+    #: the layer the grating posts are drawn on, by name in `layer_map`. Left
+    #: unset they are drawn on the guide layer with the ridge itself, which is
+    #: what every mask this chain emitted before 2026-09-03 carries.
+    #:
+    #: A process may ask for them elsewhere. LT-PRO reserves 2/11 for small
+    #: repeating features such as a Bragg reflector or a photonic crystal,
+    #: stating that it eases the rule check and the reticle assembly, while the
+    #: ridge itself is 2/10. Posts appended to the guide layer cannot be moved
+    #: by a layer map or by a derived layer, because by then they are the same
+    #: polygons as the guide.
+    #:
+    #: A rule written against the guide layer stops seeing the posts once they
+    #: move, so the rule set is to be extended to the new layer at the same
+    #: time. The DRC stage reports which layers a deck names and which of them
+    #: the mask leaves empty, which is where that omission shows.
+    grating_layer: str | None = None
     layer_map: dict[str, list[int]] = Field(
         default_factory=lambda: {
             "WG": [1, 0],
@@ -1340,6 +1477,50 @@ class Design(BaseModel):
     @property
     def source_path(self) -> Path | None:
         return getattr(self, "_source_path", None)
+
+    def materials_path(self) -> str | None:
+        """Where ``platform.materials_file`` actually is.
+
+        The path was previously handed to the loader as written, so it was
+        resolved against the working directory and a design carrying a foundry
+        material file ran from the repository root and failed from its own
+        folder. Three locations are searched in order, the first that exists
+        being taken: beside the design file, against the working directory,
+        and against the root of the chain installation, which is where the
+        vendored PDK material files live.
+
+        A path that matches none of the three raises here, naming what was
+        tried, rather than reaching the YAML loader as a bare file-not-found.
+        """
+        declared = self.platform.materials_file
+        if declared is None:
+            return None
+        p = Path(declared)
+        if p.is_absolute():
+            if p.exists():
+                return str(p)
+            raise FileNotFoundError(f"platform.materials_file: {p} does not exist")
+
+        here = Path(__file__).resolve()
+        candidates: list[Path] = []
+        src = self.source_path
+        if src is not None:
+            candidates.append(src.resolve().parent / p)
+        candidates.append(Path.cwd() / p)
+        candidates.append(here.parents[2] / p)     # the chain installation
+        candidates.append(here.parents[3] / p)     # the repository above it
+        tried: list[Path] = []
+        for c in candidates:
+            if c not in tried:
+                tried.append(c)
+        for candidate in tried:
+            if candidate.exists():
+                return str(candidate)
+        raise FileNotFoundError(
+            "platform.materials_file "
+            f"{declared!r} was not found. Tried: "
+            + ", ".join(str(t) for t in tried)
+        )
 
 
 def _deep_merge(base: dict, over: dict) -> dict:

@@ -1,0 +1,158 @@
+# The O-band travelling-wave modulator arm of the ltoi300 process, posed to the
+# chain.
+#
+# The geometry is that of `terminated_mzm_1x2mmi_oband` in the Luxtelligence
+# PDK: a coplanar ground-signal-ground line with a 5.5 um radio-frequency gap, a
+# 20 um central conductor and 50 um ground planes, carrying one optical arm on
+# the centre line of each gap. The modulation section of each arm is 2.5 um
+# wide, the terminal guide being tapered into it over 100 um. Every one of those
+# figures is read from
+# `design-chain/pdk/lxt_pdk_gf/ltoi300/cells.py` and from the builder defaults
+# in `_builders/mzms.py` and `_builders/phase_modulators.py`.
+#
+# The purpose of the run is to adjudicate three published half-wave figures for
+# this one geometry, and to establish which radio-frequency permittivity
+# reproduces the bandwidth the vendor claims.
+#
+# This file carries the LT-PRO material model, being the manual's optical
+# dispersion together with the manual's radio-frequency permittivity of 54
+# across the c axis and 43 along it.
+
+meta:
+  name: ltoi300_mzm_cband
+  title: "LTOI300 O-band travelling-wave MZM arm, foundry permittivity"
+  status: scaffold
+
+platform:
+  cut: x
+  materials_file: design-chain/pdk/LXT_LT_PRO/materials_lt_pro.yaml
+  film_material: LiTaO3
+  film_thickness_um: 0.300
+  etch_depth_um: 0.180
+  slab_offset_um: 6.0           # the PDK cross-sections draw the slab 6.0 um
+                                # either side of every ridge
+  sidewall_deg: 70.0            # the PDK layer stack declares 20 deg from vertical
+  box_thickness_um: 7.0
+  clad_thickness_um: 2.0
+  substrate_material: Si        # the PDK layer stack places a silicon handle
+                                # 10 um thick under the buried oxide
+
+waveguide:
+  top_width_um: 2.500           # the modulation section of the PDK MZM arm
+  wavelength_um: 1.55
+
+mesh:
+  d_fine_um: 0.010
+  d_coarse_um: 0.060
+  num_modes: 4                  # a 2.5 um ridge is deliberately multimode; the
+                                # PDK names this cross-section xs_rwg2500 and
+                                # the modulator drives its fundamental TE mode
+  polarisation: TE
+
+grating:
+  enabled: false                # a modulator carries no Bragg mirror
+
+electrodes:
+  enabled: true
+  topology: gsg                 # the PDK draws a coplanar ground-signal-ground
+                                # line with one arm in each gap
+  gap_um: 5.5                   # cells.py: rf_gap
+  width_um: 16.0                # cells.py: rf_central_conductor_width, C band
+  ground_width_um: 50.0         # _builders/mzms.py: rf_ground_planes_width
+  length_um: 5000.0             # cells.py: modulation_length, the cell default
+  thickness_um: 0.9             # ASSUMPTION: the PDK draws no metal thickness.
+                                # The bandwidth does not depend on it above
+                                # about 10 GHz, the skin depth in gold being
+                                # below either candidate thickness there, and a
+                                # probe against the thickness implied by the
+                                # foundry manual's metal sheet resistance is
+                                # reported in the study README
+  material: Au
+  eo_coefficient: r33           # x-cut, the c axis in plane and transverse, so
+                                # the gap field drives r33 on the TE mode
+  test_voltage_V: 1.0
+  drive_impedance_ohm: 50.0
+  travelling_wave: true
+  far_end_load_ohm: null        # the terminated variant of the cell, whose
+                                # resistor on the high-resistance layer is the
+                                # one polygon distinguishing it from the
+                                # unterminated one. Null states a termination
+                                # matched to the line. The kit declares the
+                                # resistor 58.112 um by 1.5 um and declares no
+                                # sheet resistance for the layer, so its value
+                                # cannot be computed from the kit and the match
+                                # is taken by declaration. For the unterminated
+                                # cell set 1e9, which is an open pad
+  convergence_check: true
+  refinement: 0.5
+  rf_mesh_fine_um: 0.025        # the cell the convergence ladder in the study
+                                # README settles on: the line parameters are
+                                # converged there and the overlap carries a
+                                # residual which is extrapolated rather than
+                                # meshed away
+
+modulator:
+  enabled: true
+  configuration: mach_zehnder
+  drive: push_pull              # the PDK circuit model drives the two arms at
+                                # +V_dc and -V_dc, which is push-pull
+  rf_band_GHz: [1.0, 110.0]     # the vendor page claims above 110 GHz
+
+cavity:
+  enabled: false
+
+warnings:
+  acknowledged:
+    - key: mode.cross_section_supports_4
+      reason: >-
+        The finding states a requirement of the extended-DBR laser this chain
+        was first written for and states nothing about a modulator arm. The PDK
+        widens each arm to 2.5 um through the modulation section and names that
+        cross-section `xs_rwg2500`, the width being chosen for the
+        electro-optic overlap and for the propagation loss. The device drives
+        the fundamental TE mode, which is what the electro-optic stage weights.
+    - key: eo.electrostatic_solve_converged_halving
+      reason: >-
+        Accepted with the residual carried as a declared uncertainty and
+        quantified rather than removed. The electro-optic overlap of this
+        cross-section converges as about the square root of the cell, the
+        cause being the sloped ridge sidewall across which the permittivity
+        steps by a factor of eleven. A four-point ladder from 50 nm to 6.25 nm
+        is reported in the study README together with the Richardson limit it
+        extrapolates to, and every half-wave voltage this study quotes carries
+        that extrapolation beside the figure the run returned. The line
+        parameters converge cleanly over the same ladder: the capacitance moves
+        by 1.7 per cent and the microwave index by 0.1 per cent.
+    - key: eo.lumped_rc_estimate_gives
+      reason: >-
+        Over 5 mm the electrode is a transmission line and the lumped estimate
+        is not the bandwidth, which is what the finding says. The
+        travelling-wave figure is the one this study reads and the lumped one
+        is reported beside it so that the two can be seen to differ.
+
+targets:
+  - metric: eo.VpiL_V_cm
+    value: 5.6
+    rel_tol: 0.20
+    severity: should
+    source: >-
+      the PDK compact model computes V_pi = 2 * 2.2e4 * wl / length / 1.31,
+      which is 8.8 V over the 5000 um cell default and therefore 4.4 V cm read
+      as a single arm
+
+  - metric: modulator.VpiL_device_V_cm
+    value: 2.8
+    rel_tol: 0.20
+    severity: should
+    source: >-
+      the Luxtelligence LT-PRO vendor page quotes about 2.2 V cm in the O band,
+      recorded in references/README.md
+
+  - metric: eo.travelling_wave.electro_optic_3dB_GHz
+    min: 110.0
+    severity: should
+    source: >-
+      the Luxtelligence LT-PRO vendor page claims an electro-optic bandwidth
+      above 110 GHz, recorded in references/README.md
+
+stages: [mode, eo, modulator, verify]

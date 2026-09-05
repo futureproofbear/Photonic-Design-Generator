@@ -94,6 +94,22 @@ def _semivec_matrix(t: np.ndarray, eps_line: np.ndarray) -> sp.csr_matrix:
     return sp.csr_matrix((vals, (rows, cols)), shape=(n, n))
 
 
+#: ARPACK starts its Arnoldi iteration from a random vector unless one is given,
+#: so an unchanged input returns a slightly different answer on every execution.
+#: On the LTOI300 edge coupler that moved the transmission of a twenty-two
+#: station cascade by 1.3 per cent and its mode-conversion figure by 20 per cent,
+#: and the five-figure values a study quotes read as measurements. A fixed start
+#: vector makes the solve a function of its arguments.
+#:
+#: The vector is drawn from a seeded generator rather than being a constant. A
+#: constant vector is symmetric about the centre of the window, and every odd
+#: mode of a symmetric cross-section is orthogonal to it, so ARPACK is left to
+#: find those modes from round-off alone. Starting from ones was tried and it
+#: raised the mode conversion of that same cascade by a factor of thirteen.
+def _start_vector(n: int) -> np.ndarray:
+    return np.random.default_rng(20260904).standard_normal(n)
+
+
 def solve_modes(
     x: np.ndarray,
     y: np.ndarray,
@@ -145,7 +161,8 @@ def solve_modes(
     n_max = float(np.sqrt(eps_dom.max()))
     sigma = (k0 * (n_guess if n_guess else n_max * 0.999)) ** 2
     k = min(num_modes + 2, nx * ny - 2)
-    vals, vecs = spla.eigs(A, k=k, sigma=sigma, which="LM")
+    vals, vecs = spla.eigs(A, k=k, sigma=sigma, which="LM",
+                           v0=_start_vector(A.shape[0]))
 
     beta2 = np.real(vals)
     order = np.argsort(-beta2)
@@ -344,9 +361,62 @@ def solve_slab(
     k0 = 2 * np.pi / wavelength_um
     A = (_second_derivative_matrix(y) + sp.diags(k0**2 * eps_line)).tocsc()
     k = min(num_modes + 2, len(y) - 2)
-    vals, _ = spla.eigs(A, k=k, sigma=(k0 * float(np.sqrt(eps_line.max()))) ** 2, which="LM")
+    vals, _ = spla.eigs(A, k=k, sigma=(k0 * float(np.sqrt(eps_line.max()))) ** 2,
+                        which="LM", v0=_start_vector(A.shape[0]))
     b2 = np.sort(np.real(vals))[::-1]
     return [float(np.sqrt(v) / k0) for v in b2 if v > 0][:num_modes]
+
+
+def solve_lateral_modes(
+    x: np.ndarray, n_line: np.ndarray, wavelength_um: float, num_modes: int = 8,
+    guided_only: bool = True,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Modes of a one-dimensional lateral index profile, with their fields.
+
+    The effective-index reduction of a partially etched platform replaces the
+    cross-section by an index that varies along one lateral coordinate: the
+    column through the ridge where the ridge stands, and the column through the
+    unetched slab beside it. The modes of that profile are what an eigenmode
+    expansion of a planar device matches at each interface, and they are the
+    same modes a two-dimensional time-domain solve of the same reduction
+    propagates.
+
+    ``solve_slab`` discards its eigenvectors, an index alone being all the
+    guidance floor requires. This returns both, since an overlap integral needs
+    the field.
+
+    Returns ``(n_eff, fields)`` with ``fields`` of shape ``(m, len(x))``,
+    ordered by descending effective index and truncated to those above the
+    lowest index in the profile, being the modes the profile actually guides.
+    """
+    k0 = 2 * np.pi / wavelength_um
+    eps = np.asarray(n_line, dtype=float) ** 2
+    A = (_second_derivative_matrix(x) + sp.diags(k0**2 * eps)).tocsc()
+    k = min(num_modes + 3, len(x) - 2)
+    vals, vecs = spla.eigs(
+        A, k=k, sigma=(k0 * float(np.sqrt(eps.max()))) ** 2, which="LM",
+        v0=_start_vector(A.shape[0]))
+    b2 = np.real(vals)
+    order = np.argsort(b2)[::-1]
+    floor = float(np.min(np.asarray(n_line, dtype=float)))
+    #: retaining the guided set alone leaves the continuity conditions at an
+    #: abrupt junction over-determined, and the mode-matching then returns
+    #: amplitudes above unity. `guided_only=False` keeps the discretised
+    #: radiation states of the window as well, which is what completes the basis
+    n_eff: list[float] = []
+    fields: list[np.ndarray] = []
+    for i in order:
+        if guided_only and b2[i] <= (k0 * floor) ** 2:
+            continue
+        if b2[i] <= 0.0:
+            continue
+        n_eff.append(float(np.sqrt(b2[i]) / k0))
+        fields.append(np.real(vecs[:, i]))
+        if len(n_eff) == num_modes:
+            break
+    if not n_eff:
+        raise RuntimeError("the lateral profile guides no mode at this wavelength")
+    return np.asarray(n_eff), np.asarray(fields)
 
 
 def group_index(

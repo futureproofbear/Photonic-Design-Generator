@@ -78,8 +78,21 @@ def travelling_wave(grid, eps_x, eps_y, drive, V, C_per_m, e, n_g, length_m, geo
                                      n_conductors=n_conductors)
         return R / (2.0 * Z0)
 
-    f_3dB = rf.bandwidth(length_m, alpha, n_m, n_g)
-    f_6dB = rf.bandwidth(length_m, alpha, n_m, n_g, level=0.5)
+    gamma = rf.load_reflection(e.far_end_load_ohm, Z0)
+    if gamma <= -0.999:
+        # A shorted far end holds the drive at zero everywhere at zero
+        # frequency, so the response has no value to be referred to and the
+        # bandwidth below is a number without a meaning. The kit draws no such
+        # cell; a design that declares one is told rather than given a figure.
+        raise ValueError(
+            "electrodes.far_end_load_ohm declares a short, for which the "
+            "modulation response is zero at zero frequency and the 3 dB "
+            "bandwidth is undefined. Declare the load the cell draws")
+    f_3dB = rf.bandwidth(length_m, alpha, n_m, n_g, reflection=gamma)
+    f_6dB = rf.bandwidth(length_m, alpha, n_m, n_g, level=0.5, reflection=gamma)
+    stub_m = e.far_end_stub_um * 1e-6
+    penalty = rf.far_end_penalty(length_m, alpha, n_m, n_g, gamma, 1e8, 2e11,
+                                 stub_m=stub_m)
     mismatch = abs((Z0 - e.drive_impedance_ohm) / (Z0 + e.drive_impedance_ohm))
 
     return {
@@ -95,6 +108,20 @@ def travelling_wave(grid, eps_x, eps_y, drive, V, C_per_m, e, n_g, length_m, geo
         "conductor_loss_dB_per_cm_at_10GHz": alpha(1e10) * rf.NEPER_TO_DB / 100,
         "electro_optic_3dB_GHz": f_3dB / 1e9,
         "electro_optic_6dB_GHz": f_6dB / 1e9,
+        # what the far end returns, and hence which of the two variants of the
+        # cell this bandwidth describes
+        "far_end_load_ohm": e.far_end_load_ohm,
+        "far_end_reflection": gamma,
+        "far_end_is_matched": gamma == 0.0,
+        # The two figures above are referred to this line's own value at zero
+        # frequency, which on an unmatched line is not the value a terminated
+        # one has. What a driver is sized against is the comparison between the
+        # two lines driven alike, and that is what these report.
+        "far_end_worst_penalty_dB": penalty["worst_dB"],
+        "far_end_worst_penalty_at_GHz": penalty["worst_at_Hz"] / 1e9,
+        "far_end_best_advantage_dB": penalty["best_dB"],
+        "far_end_best_advantage_at_GHz": penalty["best_at_Hz"] / 1e9,
+        "far_end_stub_um": e.far_end_stub_um,
         "electrode_length_mm": length_m * 1e3,
         "topology": str(e.topology),
         "conductors_carrying_the_return": n_conductors,

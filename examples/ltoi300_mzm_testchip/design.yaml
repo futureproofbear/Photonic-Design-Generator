@@ -1,0 +1,358 @@
+# A test chip that measures the electro-optic overlap of the LTOI300 arm.
+#
+# The concept is stated in DESIGN_CONCEPT.md and is read before this file. In
+# short: the chain and the foundry kit disagree by 38 per cent about the
+# half-wave voltage of this geometry, the disagreement is entirely in the
+# electro-optic overlap, and one device cannot separate the overlap from the
+# material constant it multiplies. A ladder over the electrode gap can.
+#
+# The geometry is that of `terminated_mzm_1x2mmi_cband` in the Luxtelligence
+# PDK, every figure read from `design-chain/pdk/lxt_pdk_gf/ltoi300/cells.py` and
+# from the builder defaults beside it, and confirmed against the drawn polygons
+# by `examples/ltoi300_mask/scripts/as_drawn.py`.
+#
+# The electrode length is the kit's own 5000 um. The length sweep reported in
+# the study shows the half-wave voltage is independent of it, so the length is
+# chosen to make the 5.5 um rung a direct comparison against the figure the kit
+# states for its own cell, rather than to optimise anything.
+
+meta:
+  name: ltoi300_mzm_testchip
+  title: "LTOI300 C-band MZM overlap test chip, a ladder over electrode gap"
+  status: scaffold
+
+platform:
+  cut: x
+  materials_file: design-chain/pdk/LXT_LT_PRO/materials_lt_pro.yaml
+  film_material: LiTaO3
+  film_thickness_um: 0.300
+  etch_depth_um: 0.180
+  slab_offset_um: 6.0
+  sidewall_deg: 70.0
+  box_thickness_um: 7.0
+  clad_thickness_um: 2.0
+  substrate_material: Si
+
+waveguide:
+  top_width_um: 2.500           # the modulation section of the PDK MZM arm
+  wavelength_um: 1.55
+
+mesh:
+  d_fine_um: 0.010
+  d_coarse_um: 0.060
+  num_modes: 4
+  polarisation: TE
+
+grating:
+  enabled: false                # an interferometer carries no Bragg mirror
+
+electrodes:
+  enabled: true
+  topology: gsg
+  gap_um: 5.5                   # cells.py: rf_gap. The nominal rung, and the
+                                # one the kit states a figure for
+  width_um: 16.0                # cells.py: rf_central_conductor_width, C band
+  ground_width_um: 50.0         # _builders/mzms.py: rf_ground_planes_width
+  length_um: 5000.0             # cells.py: modulation_length
+  thickness_um: 0.9             # ASSUMPTION: the PDK draws no metal thickness.
+                                # The bandwidth does not depend on it above
+                                # about 10 GHz, the skin depth in gold being
+                                # below either candidate thickness there
+  material: Au
+  eo_coefficient: r33
+  test_voltage_V: 1.0
+  drive_impedance_ohm: 50.0
+  travelling_wave: true
+  far_end_stub_um: 210.0        # the unmodulated metal this mask draws beyond
+                                # the modulation section at each end, measured
+                                # off the emitted layout: METAL runs 458.5 to
+                                # 5878.5 um and the modulation section 668.5 to
+                                # 5668.5, and 210 is the pad taper of 150 plus
+                                # the pad straight of 60. The microwave crosses
+                                # it twice and the optical carrier not at all,
+                                # so on an open line it rotates the returned
+                                # wave and moves the null. Left at zero until
+                                # 2026-09-05, which made the reported penalty
+                                # that of a line this mask does not draw
+  far_end_load_ohm: 1.0e9       # an open pad, because that is what this mask
+                                # draws. The kit's terminated cell carries a
+                                # 2815.9 um2 resistor on the high-resistance
+                                # layer and this chain draws no such layer, so
+                                # declaring the line terminated would describe a
+                                # device the mask does not carry. The foundry
+                                # deck catches it as M2_HRL_no_contact.
+                                #
+                                # The consequence for this chip is nil. An open
+                                # far end costs 1.85 dB at a null near 9.93 GHz
+                                # and is 5.37 dB better than a matched line at
+                                # 0.1 GHz, and the half-wave measurement this
+                                # chip exists for is taken at low frequency.
+  convergence_check: true
+  refinement: 0.5
+  rf_mesh_fine_um: 0.025
+
+modulator:
+  enabled: true
+  configuration: mach_zehnder
+  drive: push_pull
+  rf_band_GHz: [0.1, 5.0]       # the band a half-wave measurement is taken
+                                # over. Declaring 40 GHz was tried and the run
+                                # correctly reported the device beyond its own
+                                # 3 dB point at the top of it, that point being
+                                # 4.4 GHz on an open line. The chip is an
+                                # instrument for a low-frequency measurement and
+                                # the band it declares is now the one it uses
+
+mzm:
+  # the C-band 1x2 splitter of the kit, measured off the drawn cell
+  mmi_width_um: 4.5
+  mmi_length_um: 13.5
+  port_separation_um: 2.80        # the kit draws 2.55, and 2.55 carrying a
+                                  # 2.5 um arm leaves the two guides 50 nm
+                                  # apart where the access taper reaches full
+                                  # width, against a 300 nm rule. Opened to the
+                                  # least value the rule admits, which the
+                                  # preflight check names. The splitter is
+                                  # therefore not the kit's cell and the
+                                  # imaging length is re-solved rather than
+                                  # inherited
+  port_width_um: 1.95
+  count: 1                      # one primary device; the ladder is the split
+  labels: ["G5P5"]
+
+cavity:
+  enabled: false
+
+circuit:
+  enabled: false
+
+process:
+  bias_um: {}                   # ASSUMPTION: no bias is characterised
+  depth_bias_um: 0.0
+  precompensate: true
+  simulate: printed
+  grid_nm: 1.0                  # ASSUMPTION: the manual records no grid
+  max_snap_displacement_nm: 0.0
+
+layout:
+  enabled: true
+  device: mach_zehnder
+  cell_name: LTOI300_MZM_TESTCHIP
+  compare_backends: true
+  check_geometry: true
+  taper_length_um: 150.0
+  taper_tip_width_um: 0.40
+  taper_segments: 64
+  slab_min_width_um: 0.30
+  input_facet_angle_deg: 8.0
+  output_facet_angle_deg: 8.0
+  facet_route: angled
+  facet_bend_radius_um: 500.0
+  facet_angled_length_um: 40.0
+  draw_facets: true
+  facet_recess_um: 5.0
+  facet_keepout_um: 30.0
+  bond_pad_um: 100.0
+  draw_orientation_key: true
+
+reticle:
+  enabled: true
+  die_width_um: 10100.0         # a footprint the process offers
+  die_height_um: 5050.0
+  margin_um: 40.0
+  dicing_lane_um: 80.0
+  align_facet_to_edge: true
+  device_y: top
+  label: MZMOVL
+  revision: A
+  label_height_um: 40.0
+  label_layers: [LABEL]
+  seal_ring:
+    enabled: false
+  chip_frame:
+    enabled: true
+    exclusion_zone_um: 50.0
+    # the footprints the process offers, so that the die size is checked rather
+    # than assumed. Read from the LT-PRO manual entry in references/README.md
+    allowed_edges_um: [2500.0, 5050.0, 10100.0]
+  split:
+    # The instrument. Four further rungs beside the nominal 5.5 um, spanning a
+    # factor of four in gap, which the concept requires to separate the overlap
+    # from the material constant.
+    enabled: true
+    parameter: electrodes.gap_um
+    values: [3.5, 8.0, 11.0, 15.0]
+    pitch_um: 0.0               # derived from the device extent
+    label_each: true
+    label_height_um: 25.0
+
+mask:
+  enabled: true
+  target: die
+  connected_layers: [WG, METAL, PAD]
+  expectations_describe: device
+  extract_netlist: true
+  joined_layers: [[METAL, PAD]]
+  label_layer: LABEL
+  density_tile_um: 200.0
+  density_windows: []
+  fill:
+    enabled: false
+
+drc:
+  enabled: true
+  target: die
+  deck: ../../design-chain/pdk/LXT_KLayout_DRC_Runsets/LT_PRO_ltoi300.lydrc
+  rules:
+    - {name: RIDGE_min_width, kind: min_width, layer: WG,    value_um: 0.25, severity: error, ignore_angle_deg: 20.0}
+    - {name: RIDGE_min_space, kind: min_space, layer: WG,    value_um: 0.30, severity: error, ignore_angle_deg: 20.0}
+    - {name: M1_min_width,    kind: min_width, layer: METAL, value_um: 0.80, severity: error}
+    - {name: M1_min_space,    kind: min_space, layer: METAL, value_um: 1.00, severity: error}
+
+corners:
+  enabled: true
+  parameters:
+    # A lithographic excursion moves every feature on a layer together, so the
+    # arm, the splitter and the S-bends cannot move independently. The window is
+    # therefore taken on the layer bias rather than on one drawn dimension,
+    # which is what the corner stage asks for and what
+    # rules/generic/parameter-scans.md sets out. Varying
+    # waveguide.top_width_um alone was tried first and the stage objected.
+    process.bias_um.WG: 0.050         # ASSUMPTION: +/-50 nm on the guide layer
+    process.bias_um.METAL: 0.200      # ASSUMPTION: +/-200 nm on the metal, which
+                                      # moves the electrode gap coherently
+    platform.film_thickness_um: 0.010 # ASSUMPTION: +/-10 nm on the film
+  metrics:
+    - eo.eo_overlap_gamma
+    - eo.VpiL_V_cm
+    - modulator.Vpi_V
+    - eo.travelling_wave.far_end_worst_penalty_dB
+    - eo.travelling_wave.characteristic_impedance_ohm
+
+targets:
+  # --- the two must rows: whether the chip is an instrument at all ----------
+  - metric: modulator.Vpi_V
+    max: 25.0
+    severity: must
+    source: >-
+      the concept requires every rung to be reachable by an ordinary laboratory
+      source. Above 25 V the null cannot be found and the rung measures nothing
+
+  - metric: eo.eo_overlap_gamma
+    min: 0.05
+    severity: must
+    source: >-
+      the concept requires the overlap to be a quantity the chip measures. An
+      overlap below five per cent is a device that does not modulate, whatever
+      the ladder does
+
+  # --- the rows carrying the disagreement, deliberately should -------------
+  - metric: eo.VpiL_V_cm
+    value: 5.6
+    rel_tol: 0.20
+    severity: should
+    source: >-
+      the PDK compact model in ltoi300/models.py sets V_pi of a 5000 um C-band
+      phase shifter to 11.2 V, which is 5.6 V cm read as a single arm. The
+      concept states why this is a should and not a must: the disagreement is
+      the subject of the experiment and a must here would assert its answer
+
+  - metric: modulator.VpiL_device_V_cm
+    value: 2.8
+    rel_tol: 0.20
+    severity: should
+    source: >-
+      the same figure read through the push-pull convention, being half the arm
+      figure
+
+  - metric: eo.travelling_wave.far_end_worst_penalty_dB
+    min: -3.0
+    severity: should
+    source: >-
+      the concept requires the half-wave measurement not to be distorted at the
+      speed it is taken. On a line whose far end is open the 3 dB point is the
+      wrong quantity to ask that of: it is referred to a zero-frequency value
+      the open end has doubled, so it reports 4.4 GHz while the device is within
+      half a decibel of a matched line above 49 GHz. What a driver and a
+      measurement see is the comparison against a matched line, which
+      `far_end_worst_penalty_dB` gives, and its worst point over the whole band
+      is the figure bounded here
+
+  - metric: eo.travelling_wave.characteristic_impedance_ohm
+    min: 35.0
+    max: 65.0
+    severity: should
+    source: >-
+      50 ohm plus or minus 15. A mismatch costs drive and is corrected in the
+      measurement rather than in the mask, which is why this is a should
+
+warnings:
+  acknowledged:
+    - key: mode.cross_section_supports_3
+      reason: >-
+        The finding states a requirement of the extended-DBR laser this chain
+        was first written for and states nothing about a modulator arm. The PDK
+        widens each arm to 2.5 um through the modulation section and names that
+        cross-section `xs_rwg2500`. The device drives the fundamental TE mode,
+        which is what the electro-optic stage weights.
+    - key: eo.electrostatic_solve_converged_halving
+      reason: >-
+        Accepted with the residual carried as a declared uncertainty. The
+        overlap of this cross-section converges as about the square root of the
+        cell, the cause being the sloped ridge sidewall across which the
+        permittivity steps by a factor of eleven. The companion study reports a
+        four-point ladder and the Richardson limit it extrapolates to. This chip
+        exists to replace that extrapolation with a measurement, so the residual
+        is the reason for the design rather than a defect in it.
+    - key: modulator.3_db_bandwidth_4
+      reason: >-
+        The finding is correct about the number and the number is the wrong
+        figure of merit for this line. The mask draws an open far end, so the
+        3 dB point is referred to a zero-frequency value the open end has
+        doubled: it reports 4.4 GHz while the run puts the open line 5.37 dB
+        better than a matched one at 0.1 GHz.
+        What bounds this chip is the target on `far_end_worst_penalty_dB`, being
+        -1.85 dB at a null near 9.93 GHz, outside the 0.1 to 5 GHz declared
+        here. The drive figure the finding quotes is likewise self-referred.
+    - key: reticle.die_carries_seal_ring
+      reason: >-
+        The LT-PRO manual states that the foundry adds the seal ring, the filler
+        and the guard rails during mask preparation, so none is drawn here. The
+        entry is recorded in references/README.md.
+    - key: reticle.fill_placed_mask_stage
+      reason: >-
+        The same manual entry. The foundry places the fill, and the three
+        figures the mask stage would need to place it are a foundry statement
+        that this repository does not hold.
+    - key: drc.rule_deck_named_input
+      reason: >-
+        The deck was written for the graphical application and names no input
+        and no report. The chain binds it without altering a rule, which is what
+        the finding says it did.
+    - key: drc.rule_deck_names_12
+      reason: >-
+        The deck reads layer numbers this chain does not emit, so eight of its
+        twelve layers are evaluated against nothing. That is a property of the
+        layer map rather than of this design, it is recorded in the companion
+        mask study under section 3, and the remedy is to renumber
+        layout.layer_map to the process numbers before any submission. Until
+        then the deck verdict covers four layers and is read as covering four.
+    - key: drc.foundry_deck_reports_11
+      reason: >-
+        Read and resolved. Five were M2_HRL_no_contact, the deck requiring the
+        line to contact a terminating resistor that this chain draws no layer
+        for; the design now declares the far end open, which is what the mask
+        carries. Six were M2 outside CHIP_INNER, the electrode leads reaching
+        the die boundary, which follows from the same layer-number mismatch
+        recorded above.
+
+release:
+  enabled: true
+  revision: A
+  strict: true
+  # nothing is waived. The gate is being run to find out what it says about a
+  # chip whose purpose is measurement rather than function, and a waiver written
+  # before the verdict is read would decide the answer in advance.
+  waive: []
+
+stages: [mode, eo, modulator, layout, reticle, drc, mask, verify, release]

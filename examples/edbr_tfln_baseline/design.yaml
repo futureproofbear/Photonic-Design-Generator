@@ -69,27 +69,28 @@ grating:
   post_width_um: 0.30                 # paper: 300 nm wide posts
   post_gap_um: 0.63                   # paper: 630 nm from the waveguide top edge
   post_length_um: 0.30                # square posts -> duty cycle 0.30/1.27979
-  # MEASURED, by the MPB band structure on the identical two-dimensional
-  # structure, 2026-08-07.  The closed-form Fourier coefficient assumes a
-  # perfectly rectangular longitudinal index profile.  The band gap, which
-  # assumes nothing about the profile, gives kappa = 0.702 of the coupled-mode
-  # value, so the rectangular assumption overstates the third harmonic by 1.424.
-  # The smoothing length that reproduces that ratio is 57.1 nm, a full width of
-  # 135 nm against a post 300 nm long, which is an ordinary degree of corner
-  # rounding.  The suppression carries the order squared, so the same length
-  # costs the first harmonic only 4 %.
+  # WITHDRAWN, 2026-08-10, and the file is brought into line with that
+  # withdrawal on 2026-09-03. A smoothing of 57.1 nm was carried from
+  # 2026-08-07 and 42.86 nm briefly replaced it, both calibrated to reconcile
+  # the coupled-mode route with the band structure. The comparison behind them
+  # called the Fourier coefficient with four of its six arguments, so one side
+  # applied the smoothing the design declared and the other applied none. With
+  # the arguments supplied the disagreement reverses sign and every non-zero
+  # smoothing makes the agreement worse. See "The comparison was wrong for
+  # three days, and the correction changed the design" in
+  # TOOLCHAIN_VALIDATION.md.
   #
-  # The comparison is converged: the mesh moves kappa by 0.170 /cm between
-  # resolutions 14 and 20 against a difference of 1.099 /cm, so the effect stands
-  # clear of the mesh error by a factor of 6.5, and `fdtd.convergence.resolved`
-  # is true.  Three earlier attempts were not converged and were withdrawn.
+  # It is zero because no measurement supports a non-zero value, and not
+  # because the profile is believed rectangular. The value stood in this file
+  # for three weeks after the documents recorded its withdrawal, so every
+  # baseline figure published in that period describes a grating this file did
+  # not declare.
   #
-  # Adopting this value does NOT make any target pass.  Peak reflectivity moves
-  # from 0.975 to 0.913 against a bound of 0.90, and bandwidth from 21.4 to
-  # 16.5 GHz against a bound of 14.  A residual factor of 1.51 against the
-  # published device remains unexplained.  The value is adopted because an
-  # instrument measured it, and not to close a disagreement.
-  profile_sigma_um: 0.0571
+  # Restoring it does NOT make a target pass. Peak reflectivity moves from
+  # 0.913 to 0.975 against a bound of 0.90, and the bandwidth from 16.5 to
+  # 21.3 GHz against a bound of 14, so two rows move further from their
+  # criteria.
+  profile_sigma_um: 0.0
   apodisation: uniform                # paper: "designed with uniform coupling ... without apodization"
   span_GHz: 200.0
   points: 6001

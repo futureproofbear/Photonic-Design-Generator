@@ -55,6 +55,26 @@ def check(fn: Callable[[Design], list[Finding]]) -> Callable[[Design], list[Find
     return fn
 
 
+# --- layers that must exist ------------------------------------------------
+
+@check
+def the_grating_layer_is_in_the_layer_map(d: Design) -> list[Finding]:
+    """A layer named for the posts is drawn only where the map carries it.
+
+    The polygon container is built from the keys of `layout.layer_map`, so a
+    name absent from the map has no list to receive the posts and the grating
+    would be dropped from the mask without a polygon anywhere to show it.
+    """
+    name = getattr(d.layout, "grating_layer", None)
+    if not name or name in d.layout.layer_map:
+        return []
+    return [Finding(
+        "the_grating_layer_is_in_the_layer_map",
+        f"layout.grating_layer names {name!r}, which layout.layer_map does not "
+        f"carry. The map holds: " + ", ".join(sorted(d.layout.layer_map)),
+        ("layout.grating_layer", "layout.layer_map"))]
+
+
 # --- geometry that must fit ------------------------------------------------
 
 @check
@@ -321,6 +341,59 @@ def declared_magnitudes_are_plausible(d: Design) -> list[Finding]:
                 f"no bound",
                 (path,)))
     return out
+
+
+@check
+def the_splitter_ports_can_carry_the_arm(d: Design) -> list[Finding]:
+    """The two arms of an interferometer fit beside each other where they part.
+
+    The Mach-Zehnder builder leaves the multimode section at half the declared
+    port separation and at the declared port width, so the gap between the two
+    access guides opens at `port_separation - port_width`. Its own comment says
+    as much. The access taper then widens each guide to the modulation width
+    before the S-bend has pulled them apart, and the gap there is
+    `port_separation - waveguide.top_width_um`, which is a different and smaller
+    number.
+
+    On the kit's C-band splitter, whose ports sit 2.55 um apart, carrying the
+    2.5 um modulation arm closes that gap to 50 nm against a process minimum of
+    300. The device draws, the run completes, and the rule deck reports 148
+    violations at the two ends of every copy on the die. Every one of those
+    figures is knowable from three declared fields before anything is solved.
+
+    The remedy is to open `mzm.port_separation_um`, to narrow
+    `waveguide.top_width_um`, or to widen the arm after the S-bend rather than
+    at the port, which the builder does not currently offer.
+    """
+    if not d.layout.enabled or d.layout.device != "mach_zehnder":
+        return []
+    need = _min_wg_space(d)
+    if need <= 0:
+        return []
+    have = float(d.mzm.port_separation_um) - float(d.waveguide.top_width_um)
+    # A difference of two declared decimals carries binary representation error:
+    # 2.8 - 2.5 is 0.2999999999999998, which is not 0.3 and would refuse a
+    # design sitting exactly on the rule. The tolerance absorbs that and nothing
+    # larger, being a thousandth of the 1 nm grid the mask is snapped to.
+    if have >= need - 1e-9:
+        return []
+    return [Finding(
+        "the_splitter_ports_can_carry_the_arm",
+        f"mzm.port_separation_um is {d.mzm.port_separation_um} um and the arm "
+        f"is {d.waveguide.top_width_um} um wide, so the two arms come within "
+        f"{have:.3f} um of each other where the access taper reaches full "
+        f"width. The declared minimum space on {d.process.wg_layer} is "
+        f"{need:.3f} um. Open the port separation to at least "
+        f"{d.waveguide.top_width_um + need:.3f} um, or narrow the arm",
+        ("mzm.port_separation_um", "waveguide.top_width_um", "drc.rules"))]
+
+
+def _min_wg_space(d: Design) -> float:
+    """The tightest guide-to-guide space the declared rules require."""
+    wg = d.process.wg_layer
+    vals = [r.value_um for r in d.drc.rules
+            if r.kind == "min_space" and r.layer == wg and not r.other_layer]
+    return max(vals) if vals else 0.0
 
 
 def run_checks(design: Design) -> list[Finding]:
