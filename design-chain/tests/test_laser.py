@@ -1034,8 +1034,9 @@ def test_the_beat_is_solved_from_both_cavities_and_not_read_off_the_mirrors():
     src = inspect.getsource(s04_cavity)
     assert "f_lase_GHz_by_station" in src
     assert '"beat": _beat' in src
-    # the companion's cavity is solved, with the primary's solved grating hidden
-    assert "masked_for(_ov)" in src
+    # the companion's cavity is solved, with the primary's solved grating hidden,
+    # in its own directory so its arrays do not write over the primary's
+    assert 'masked_for(_ov, subdir=f"companions/{_name}")' in src
     assert "s02_grating.run(_var, _vctx, lib)" in src
     # the search runs over the primary's window and the companion's whole cycle
     assert "_in_primary_window" in src

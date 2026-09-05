@@ -170,7 +170,7 @@ class RunContext:
             node = node[p]
         return node
 
-    def masked_for(self, overrides) -> "RunContext":
+    def masked_for(self, overrides, subdir: str | None = None) -> "RunContext":
         """A copy of this context with the solved value hidden for each override.
 
         A stage that solves a quantity writes it into the metric tree, and later
@@ -178,8 +178,21 @@ class RunContext:
         primary device and wrong for a variant, whose tree would hold the
         primary's answer. Hiding the overridden leaves makes every reader fall
         back to the design file, where the override was written.
+
+        WHERE A VARIANT IS TO BE SOLVED AND NOT ONLY DRAWN, GIVE IT A `subdir`.
+        Stages write their arrays and payloads into `run_dir`, and a variant
+        solved in the primary's run directory writes over the primary's files.
+        On one design every run carrying a companion laser left `grating.npz`,
+        `cavity.npz` and `cavity.json` on disk belonging to the companion while
+        the metric tree described the primary, and a sweep that re-solved the
+        primary in a loop read the companion's grating back on its second pass
+        and returned a beat that did not move with the mirror. With a subdir the
+        variant's run directory is its own, the primary's artifacts are copied
+        into it so that stages needing an earlier stage's arrays still find
+        them, and the primary's directory is untouched.
         """
         import copy as _copy
+        import shutil
         v = _copy.copy(self)
         v.metrics = _copy.deepcopy(self.metrics)
         for dotted in (overrides or {}):
@@ -191,6 +204,14 @@ class RunContext:
                     break
             if isinstance(node, dict):
                 node.pop(parts[-1], None)
+        if subdir:
+            src = self.run_dir
+            v.run_id = f"{self.run_id}/{subdir}"
+            v.ensure()
+            if src.exists():
+                for f in src.iterdir():
+                    if f.is_file() and f.suffix in (".npz", ".json"):
+                        shutil.copy2(f, v.run_dir / f.name)
         return v
 
     def warn(self, msg: str, key: str | None = None) -> None:

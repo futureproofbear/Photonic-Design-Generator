@@ -325,7 +325,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         _d2 = design.model_copy(deep=True)
         _d2.electrodes.gap_um = float(_ps.gap_um)
         _d2.electrodes.convergence_check = False
-        _c2 = ctx.masked_for({"eo.eo_overlap_gamma": None})
+        _c2 = ctx.masked_for({"eo.eo_overlap_gamma": None}, subdir="phase_section_gap")
         _c2._solving_phase_section = True
         _c2.warnings = []; _c2.warning_records = []
         try:

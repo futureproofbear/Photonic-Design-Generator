@@ -137,3 +137,28 @@ def test_the_runner_records_every_stage_it_enters():
     n_set = src.count("ctx.current_stage = s\n") + src.count("ctx.current_stage = st\n")
     n_rec = src.count("ctx.stages_run.append(")
     assert n_rec >= n_set, "every site that sets the current stage must record it"
+
+
+def test_a_variant_solved_in_a_subdir_leaves_the_primary_artifacts_untouched(tmp_path):
+    """A variant's stages write into their own directory and read copies of the primary's.
+
+    Solved in the primary's run directory, a companion laser's grating and cavity
+    stages wrote over the primary's arrays; the metric tree described one device
+    and the files on disk another. With a subdir the primary's files are copied
+    in and the variant writes beside them, not over them.
+    """
+    import numpy as np
+    from picchain import artifacts
+
+    ctx = artifacts.RunContext(design_dir=tmp_path, run_id="r").ensure()
+    np.savez(ctx.run_dir / "grating.npz", period=np.array([1.42474]))
+    (ctx.run_dir / "grating.json").write_text('{"period_um": 1.42474}')
+    v = ctx.masked_for({"grating.period_um": 1.4248532}, subdir="companions/CW")
+    assert v.run_dir != ctx.run_dir
+    assert v.run_dir.is_dir()
+    # the primary's artifacts were copied in, so a stage needing them still finds them
+    assert (v.run_dir / "grating.npz").exists() and (v.run_dir / "grating.json").exists()
+    # a write in the variant's directory does not reach the primary's
+    np.savez(v.run_dir / "grating.npz", period=np.array([1.4248532]))
+    assert float(np.load(ctx.run_dir / "grating.npz")["period"][0]) == 1.42474
+    assert float(np.load(v.run_dir / "grating.npz")["period"][0]) == 1.4248532

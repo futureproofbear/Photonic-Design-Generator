@@ -997,7 +997,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             _var = design.model_copy(deep=True)
             for _k, _v in _ov.items():
                 _sd(_var, _k, _v)
-            _vctx = ctx.masked_for(_ov)
+            _vctx = ctx.masked_for(_ov, subdir=f"companions/{_name}")
             _vctx._solving_a_companion = True
             _vctx.warnings = []
             _vctx.warning_records = []
@@ -1104,11 +1104,17 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                     _entry["beat_GHz_at_setting"] = float(tgt)
                     _entry["smsr_margin_at_setting_dB"] = _margin(best)
                 else:
+                    # THE GRADED METRIC IS ABSENT, so a target on it fails as
+                    # missing. Reporting the nearest reachable beat under the
+                    # graded name let a run pass the carrier row at 15.0 GHz
+                    # while no setting satisfied both lasers; the nearest figure
+                    # is kept under its own name for the reader.
                     cands = [(abs(fp[i] - fc[j] - tgt), fp[i] - fc[j])
                              for i in range(Np) if _in_primary_window(360.0 * i / Np)
                              for j in range(Nc) if sc0[j] >= floor]
                     if cands:
-                        _entry["beat_GHz_at_setting"] = float(min(cands)[1])
+                        _entry["closest_reachable_beat_GHz"] = float(min(cands)[1])
+                        _entry["closest_reachable_beat_shortfall_GHz"] = float(min(cands)[0])
                     ctx.warn(
                         f"no pair of trimmer settings gives a {tgt:g} GHz beat against "
                         f"companion {_name!r} while the primary sits in its joint window "
