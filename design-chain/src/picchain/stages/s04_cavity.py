@@ -131,7 +131,24 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 
     # ---------------- threshold, linewidth ----------------
     R_peak = float(grat["peak_reflectivity"])
-    eta = 10 ** (-rs.coupling_loss_dB_per_facet / 10)          # power coupling, per pass
+    # The facet loss the facet stage computed, where it ran, and the declared
+    # figure otherwise.
+    #
+    # `coupling_loss_dB_per_facet` is a declared input, and a declared input can
+    # be left behind by the geometry it describes. On one design the taper tip
+    # moved from 0.20 to 0.26 um to clear a minimum-width rule and the declared
+    # loss stayed at 1.096 dB while the stage computed 1.4266. The cavity used
+    # the declared one, so the effective mirror, the threshold gain, and the
+    # fitted active thickness that the output power and the linewidth descend
+    # from were all optimistic by 0.66 dB of round trip. The facet stage warned
+    # and the warning was acknowledged; nothing used the number it computed.
+    _facet = ctx.get("facet") or {}
+    _loss_dB = _facet.get("total_loss_dB")
+    if _loss_dB is None:
+        _loss_dB, _loss_from = rs.coupling_loss_dB_per_facet, "cavity.rsoa (declared)"
+    else:
+        _loss_dB, _loss_from = float(_loss_dB), "facet.total_loss_dB (computed)"
+    eta = 10 ** (-_loss_dB / 10)                               # power coupling, per pass
     feed_loss = 10 ** (-design.platform.propagation_loss_dB_per_cm * cav.feed_length_um * 1e-4 / 10)
     R2_eff = R_peak * (eta**2) * (feed_loss**2)
     L_a_cm = rs.length_um * 1e-4
@@ -522,29 +539,381 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # of a case. Restricting the search to modes inside the band reported no
     # side mode at all and returned a NaN, which reads as a defect and would
     # carry a target to an error.
-    ms0_all = modes_at(0.0, floor=0.0)
-    ms0 = [m for m in ms0_all if m[2] >= R_floor]
-    n_in_band = len(ms0)
-    smsr_dB = float("nan")
-    dg_per_cm = float("nan")
-    side_in_band = None
-    if ms0_all:
-        main = max(ms0 or ms0_all, key=lambda t: t[2])
-        neighbours = [m for m in ms0_all if abs(m[0] - main[0]) == 1]
-        if neighbours:
-            side = max(neighbours, key=lambda t: t[2])
-            side_in_band = bool(side[2] >= R_floor)
-            R_main, R_side = main[2], side[2]
-            if R_side > 0:
-                # extra modal gain the side mode would need, per unit active length
-                dg_per_cm = (1 / (2 * L_a_cm)) * math.log(R_main / R_side)
-                deficit = 1.0 - math.exp(-2 * L_a_cm * dg_per_cm)
-                denom = (
-                    H * nu * v_g_a**2 * (alpha_m_per_cm * 100)
-                    * rs.spontaneous_emission_factor_nsp * (modal_gth_per_cm * 100) * tau_rt
-                )
-                if denom > 0 and P0 > 0:
-                    smsr_dB = 10 * math.log10(max(P0 * deficit / denom, 1e-30))
+    def _side_mode_at(extra_phase: float, shift: float = 0.0):
+        """Side-mode suppression at one setting of the cavity phase.
+
+        The cavity phase is the round-trip optical path modulo a wavelength, and
+        no process holds a centimetre-long cavity to that. It is therefore not a
+        property of the drawn design but of the particular die, unless the design
+        carries an actuator that sets it.
+        """
+        all_m = modes_at(shift, floor=0.0, extra=extra_phase)
+        in_band = [m for m in all_m if m[2] >= R_floor]
+        smsr = float("nan")
+        dg = float("nan")
+        in_b = None
+        if all_m:
+            main = max(in_band or all_m, key=lambda t: t[2])
+            nb = [m for m in all_m if abs(m[0] - main[0]) == 1]
+            if nb:
+                side = max(nb, key=lambda t: t[2])
+                in_b = bool(side[2] >= R_floor)
+                R_main, R_side = main[2], side[2]
+                if R_side > 0:
+                    dg = (1 / (2 * L_a_cm)) * math.log(R_main / R_side)
+                    deficit = 1.0 - math.exp(-2 * L_a_cm * dg)
+                    denom = (
+                        H * nu * v_g_a**2 * (alpha_m_per_cm * 100)
+                        * rs.spontaneous_emission_factor_nsp
+                        * (modal_gth_per_cm * 100) * tau_rt
+                    )
+                    if denom > 0 and P0 > 0:
+                        smsr = 10 * math.log10(max(P0 * deficit / denom, 1e-30))
+        return {"smsr_dB": smsr, "side_mode_gain_margin_per_cm": dg,
+                "n_cavity_modes_in_band": len(in_band),
+                "side_mode_within_mirror_band": in_b}
+
+    def _side_mode_over_the_drive(extra_phase: float, points: int = 9):
+        """Side-mode suppression at its worst over the whole drive.
+
+        Evaluating it at zero bias answers a question the radar never asks. The
+        mirror is swept across the chirp on every ramp, and the side mode moves
+        with it, so the figure that matters is the worst the suppression reaches
+        anywhere on the ramp.
+
+        On one design the difference decided the requirement: at the phase whose
+        zero-bias suppression was highest, 44.17 dB, the suppression fell to
+        27.47 dB by the top of the drive, 12.5 dB under a 40 dB bound. A separate
+        phase held 43.10 dB across the whole ramp. A maximum taken at zero bias
+        selects the first of those two and the second is the design.
+        """
+        Vs = np.linspace(0.0, V_span, max(int(points), 2)) if V_span > 0 else np.array([0.0])
+        out = [_side_mode_at(extra_phase, shift=S_Hz_per_V * float(V)) for V in Vs]
+        ok = [d for d in out if d["smsr_dB"] == d["smsr_dB"]]
+        worst = min(ok, key=lambda d: d["smsr_dB"]) if ok else out[0]
+        return {
+            "smsr_dB": worst["smsr_dB"],
+            "smsr_dB_at_zero_bias": out[0]["smsr_dB"],
+            "smsr_dB_at_full_drive": out[-1]["smsr_dB"],
+            "drive_points": len(Vs),
+            "n_cavity_modes_in_band": max(d["n_cavity_modes_in_band"] for d in out),
+            "side_mode_gain_margin_per_cm": worst["side_mode_gain_margin_per_cm"],
+            "side_mode_within_mirror_band": worst["side_mode_within_mirror_band"],
+        }
+
+    _at_drawn = _side_mode_at(0.0)
+    smsr_dB = _at_drawn["smsr_dB"]
+    dg_per_cm = _at_drawn["side_mode_gain_margin_per_cm"]
+    side_in_band = _at_drawn["side_mode_within_mirror_band"]
+    n_in_band = _at_drawn["n_cavity_modes_in_band"]
+
+    # The same quantities across one whole cycle of cavity phase.
+    #
+    # A design with no actuator gets whichever value its die happens to land on,
+    # so the worst of these is what it can promise. A design that can set the
+    # phase, and can show its actuator reaches a full mode spacing, gets the
+    # best of them, and the setting is a commissioning step rather than a hope.
+    # 96 stations, not 24.
+    #
+    # A quantity read at its maximum needs enough stations to establish that the
+    # maximum is resolved rather than sampled. At 24 the spacing is 15 degrees of
+    # cavity phase and a narrow peak between two stations would be missed
+    # entirely, so the figure quoted could be neither the true best nor a
+    # repeatable one.
+    _N = 96
+    _scan = [_side_mode_over_the_drive(2.0 * math.pi * k / _N) for k in range(_N)]
+    _valid = [d for d in _scan if d["smsr_dB"] == d["smsr_dB"]]
+    _best = max(_valid, key=lambda d: d["smsr_dB"]) if _valid else None
+    _phase_scan = {
+        "points": len(_scan),
+        "smsr_dB_worst": min((d["smsr_dB"] for d in _valid), default=float("nan")),
+        "smsr_dB_best": max((d["smsr_dB"] for d in _valid), default=float("nan")),
+        "n_cavity_modes_in_band_worst": max(d["n_cavity_modes_in_band"] for d in _scan),
+        "n_cavity_modes_in_band_best": min(d["n_cavity_modes_in_band"] for d in _scan),
+        # the whole trace, so a reader can check the maximum rather than take it
+        "smsr_dB_by_station": [d["smsr_dB"] for d in _scan],
+    }
+
+    # THE WIDTH OF THE WINDOW, which is what a commissioning setting needs.
+    #
+    # A row graded at the best of a scan states nothing about how precisely the
+    # setting has to be found. Where the peak is a knife edge the figure is
+    # unusable whatever its height, and where the whole cycle clears the bound
+    # the setting hardly matters. The fraction of the cycle that clears the bound
+    # is the tolerance, and it is reported beside the figure it qualifies.
+    _floor = None
+    for _t in getattr(design, "targets", []) or []:
+        if getattr(_t, "metric", "") == "cavity.smsr_dB_settable":
+            _floor = getattr(_t, "min", None)
+    if _floor is not None and _valid:
+        _ok = sum(1 for d in _scan if d["smsr_dB"] >= float(_floor))
+        _phase_scan["bound_graded_against"] = float(_floor)
+        _phase_scan["stations_clearing_the_bound"] = _ok
+        _phase_scan["fraction_of_the_cycle_clearing_the_bound"] = _ok / float(_N)
+        # the longest unbroken run of clearing stations, taken cyclically, which
+        # is the window a single setting has to land in
+        _flags = [d["smsr_dB"] >= float(_floor) for d in _scan]
+        _run = _longest = 0
+        for _f in _flags + _flags:
+            _run = _run + 1 if _f else 0
+            _longest = max(_longest, _run)
+        _longest = min(_longest, _N)
+        _phase_scan["widest_contiguous_window_stations"] = _longest
+        _phase_scan["widest_contiguous_window_deg"] = 360.0 * _longest / _N
+
+    # ---- BOTH CONDITIONS AT ONE PHASE ---------------------------------------
+    #
+    # A trimmer sets one variable, so two requirements graded on it must hold
+    # together at a single setting. Suppression is a maximum over phase and the
+    # hop-free excursion is a separate consequence of the same phase, and taking
+    # each at its own optimum would describe two devices rather than one.
+    #
+    # Both are therefore evaluated at the same stations. `_sweep` already accepts
+    # a further round-trip phase as a function of drive, so a constant function
+    # holds the cavity phase while the drive runs, and the hop-free span at that
+    # phase falls out of the segment the sweep exposes.
+    _JN = 24
+    _joint = []
+    for _k in range(_JN):
+        _ph = 2.0 * math.pi * _k / _JN
+        _sm = _side_mode_over_the_drive(_ph)
+        try:
+            _sw = _sweep(lambda V, _p=_ph: _p)
+            # `range_Hz` is the excursion of the longest hop-free segment the
+            # sweep exposes at this cavity phase, which is exactly the quantity
+            # a set comb is supposed to deliver.
+            _span = float(_sw.get("range_Hz") or 0.0) / 1e9
+            _nh = len(_sw.get("hop_indices") or [])
+        except Exception:
+            _span, _nh = float("nan"), -1
+        _joint.append({
+            "phase_deg": 360.0 * _k / _JN,
+            "smsr_dB": _sm["smsr_dB"],
+            "smsr_dB_at_zero_bias": _sm["smsr_dB_at_zero_bias"],
+            "hop_free_span_GHz": _span,
+            "hops_in_sweep": _nh,
+        })
+    _span_floor = None
+    for _t in getattr(design, "targets", []) or []:
+        if getattr(_t, "metric", "") == "cavity.mode_hop_free_range_degraded_GHz":
+            _span_floor = getattr(_t, "min", None)
+    _jn = {"points": _JN, "stations": _joint}
+    if _floor is not None and _span_floor is not None:
+        _fl, _sfl = float(_floor), float(_span_floor)
+        _both = [(d["smsr_dB"] == d["smsr_dB"] and d["smsr_dB"] >= _fl
+                  and d["hop_free_span_GHz"] >= _sfl) for d in _joint]
+        _r = _l = 0
+        for _f in _both + _both:
+            _r = _r + 1 if _f else 0
+            _l = max(_l, _r)
+        _l = min(_l, _JN)
+        _jn.update({
+            "smsr_bound_dB": _fl,
+            "span_bound_GHz": _sfl,
+            "stations_meeting_both": sum(_both),
+            "widest_contiguous_window_stations": _l,
+            "widest_contiguous_window_deg": 360.0 * _l / _JN,
+            "a_single_setting_meets_both": bool(_l > 0),
+        })
+        # THE SETTING THE DESIGN WILL ACTUALLY USE, and the figures there.
+        #
+        # Grading each requirement at its own optimum over phase describes two
+        # devices. Grading both at the centre of the widest window in which both
+        # hold describes one, and it is the setting a commissioning step should
+        # aim for: furthest from either edge, so the tolerance is symmetric.
+        #
+        # The excursion at that setting is a measured span and is smaller than
+        # `mode_hop_free_range_placed_GHz`, which is the analytic product
+        # eta * V_span and is reached at no phase.
+        if _l > 0:
+            _ext = _both + _both
+            _st = next(i for i in range(len(_ext))
+                       if all(_ext[i:i + _l])) % _JN
+            _mid = (_st + _l // 2) % _JN
+            _win = [_joint[(_st + i) % _JN] for i in range(_l)]
+            _jn.update({
+                "setting_station": _mid,
+                "setting_phase_deg": _joint[_mid]["phase_deg"],
+                "window_starts_at_deg": _joint[_st]["phase_deg"],
+                "smsr_dB_at_setting": _joint[_mid]["smsr_dB"],
+                "hop_free_span_GHz_at_setting": _joint[_mid]["hop_free_span_GHz"],
+                # the worst either quantity reaches anywhere inside the window,
+                # which is what a setting found only to the window's width gives
+                "smsr_dB_worst_in_window": min(d["smsr_dB"] for d in _win),
+                "hop_free_span_GHz_worst_in_window": min(
+                    d["hop_free_span_GHz"] for d in _win),
+            })
+
+        if _l == 0:
+            ctx.warn(
+                "no setting of the cavity phase meets the side-mode bound and "
+                "the hop-free excursion together: the two are optima at "
+                "different phases, so a design graded on both describes two "
+                "devices rather than one",
+                key="cavity.no_joint_phase_window",
+            )
+        elif _l <= 2:
+            ctx.warn(
+                f"the phase window meeting both bounds is only "
+                f"{360.0 * _l / _JN:.0f} degrees wide of a full cycle, so the "
+                "commissioning step has to find it to that precision and the "
+                "sampling may not have resolved it",
+                key="cavity.joint_phase_window_narrow",
+            )
+    _phase_scan["joint_with_the_hop_free_span"] = _jn
+
+    # ---- the thermal phase trimmer, and whether it can place the comb -----
+    #
+    # A round trip accumulates 2 * (2 pi / lambda) * n * L of phase, so a change
+    # dn over a length L moves it by 2 * (2 pi / lambda) * dn * L. Placing the
+    # comb anywhere in the mode spacing needs a full 2 pi of that, which is
+    # dn * L >= lambda / 2. The heater delivers dn = dn_dT * dT.
+    #
+    # Declaring a trimmer is not enough and this is checked rather than
+    # believed: a trimmer that cannot move the comb through one whole mode
+    # spacing cannot place it, and one the layout did not draw cannot set
+    # anything at all.
+    _pt = design.cavity.phase_trimmer
+    _drawn = (ctx.get("layout") or {}).get("phase_trimmer")
+    if not _pt.enabled or _pt.length_um <= 0:
+        _trimmer = {
+            "enabled": False,
+            "covers_a_full_fsr": False,
+            "reason": "no phase trimmer is declared, so the cavity phase cannot "
+                      "be set and the guaranteed excursion is what the design "
+                      "delivers",
+        }
+    else:
+        # THE PHASE A HEATER REACHES IS AN EFFECTIVE-INDEX CHANGE, and this
+        # calculation took a material one.
+        #
+        # It read `dn = dn_dT * dT` and multiplied that by the full geometric
+        # length, which is the phase a plane wave in bulk material would pick up.
+        # A guided mode carries only the fraction of its power that sits in the
+        # heated film, so the phase it actually accumulates is smaller by that
+        # fraction. Every other phase quantity in this stage is an effective
+        # index: the Pockels section uses `dn_eff_per_volt` throughout.
+        #
+        # On one design the correction moved the reach from 13.29 rad to
+        # 7.24 rad against the 6.283 rad of a mode spacing, so the margin fell
+        # from 2.12 times to 1.15 and the temperature for a full spacing rose
+        # from 18.9 K to 34.7 K. The claim survived; it had been overstated by
+        # the reciprocal of the confinement.
+        #
+        # The film confinement is the conservative choice. A heater warms its
+        # cladding too, and the cladding's own thermo-optic coefficient adds to
+        # this rather than subtracting, so the figure reported is a floor. Where
+        # the mode solve did not run, the confinement is unavailable and 1.0 is
+        # used with a warning, which is the old behaviour and is flagged as
+        # optimistic.
+        _conf = (ctx.get("mode") or {}).get("confinement_film")
+        _conf_from = "mode.confinement_film"
+        if _conf is None or not (0.0 < float(_conf) <= 1.0):
+            _conf, _conf_from = 1.0, "unavailable, taken as 1.0 and optimistic"
+            ctx.warn(
+                "the phase trimmer's reach is computed without a confinement "
+                "factor because the mode stage supplied none, so it is the phase "
+                "a plane wave in bulk material would accumulate and overstates "
+                "what a guided mode reaches by the reciprocal of the film "
+                "confinement",
+                key="cavity.trimmer_confinement_unavailable",
+            )
+        _conf = float(_conf)
+        # THE WEIGHTS ARE dn_eff/dn, AND THE CONFINEMENT IS ONLY A PROXY FOR THEM.
+        #
+        #   dn_eff/dT = S_film * (dn/dT)_film + S_clad * (dn/dT)_clad
+        #
+        # S_film is the fraction of the effective index that follows the film's
+        # own index, and the confinement is the fraction of the mode's POWER in
+        # the film. The two are not equal. Measured on one thin-film tantalate
+        # cross-section by perturbing each index by 2e-03 and re-solving:
+        #
+        #   dn_eff/dn_e     0.69834      confinement_film   0.54495
+        #   dn_eff/dn_o     0.00000      <- X-cut, so the mode sees only n_e
+        #   dn_eff/dn_clad  0.40130
+        #
+        # The confinement understated the film weight by 28 per cent and the
+        # cladding term, which is 0.40 of the oxide's own coefficient, had been
+        # left out entirely. Both errors ran against the design.
+        #
+        # Where the sensitivities are declared they are used. Where they are not,
+        # the confinement stands in for the film weight, the cladding weight is
+        # taken as zero, and a warning says the figure is a lower bound.
+        _dndt_clad = float(getattr(_pt, "dn_dT_cladding_per_K", 0.0) or 0.0)
+        _sf = getattr(_pt, "index_sensitivity_film", None)
+        _sc = getattr(_pt, "index_sensitivity_cladding", None)
+        if _sf is None:
+            _sf, _sc = _conf, 0.0
+            _w_from = f"the film confinement {_conf:.5f} as a proxy, cladding ignored"
+            ctx.warn(
+                "the phase trimmer's reach is weighted by the film confinement "
+                "rather than by dn_eff/dn, and the cladding's own coefficient is "
+                "ignored. The confinement is the fraction of the mode's power in "
+                "the film and the weight wanted is the fraction of its effective "
+                "index that follows the film, which on one measured cross-section "
+                "was 28 per cent larger. The reach reported is a lower bound. "
+                "Declare cavity.phase_trimmer.index_sensitivity_film and "
+                "index_sensitivity_cladding, measured by perturbing each index "
+                "and re-solving the mode",
+                key="cavity.trimmer_weighted_by_confinement",
+            )
+        else:
+            _sf = float(_sf)
+            _sc = float(_sc if _sc is not None else 0.0)
+            _w_from = str(getattr(_pt, "index_sensitivity_provenance", "")
+                          or "declared, provenance not stated")
+        _dndt_eff = _sf * float(_pt.dn_dT_per_K) + _sc * _dndt_clad
+        _dn_mat = float(_pt.dn_dT_per_K) * float(_pt.max_delta_T_K)
+        _dn = _dndt_eff * float(_pt.max_delta_T_K)   # the effective-index change
+        _lam_um = float(design.waveguide.wavelength_um)
+        _phase_rad = 2.0 * (2.0 * math.pi / _lam_um) * _dn * float(_pt.length_um)
+        _covers = _phase_rad >= 2.0 * math.pi
+        if _drawn is not None and not _drawn.get("drawn"):
+            _covers = False
+        _trimmer = {
+            "enabled": True,
+            "length_um": float(_pt.length_um),
+            "over": str(getattr(_pt, "over", "feed")),
+            "dn_dT_per_K": float(_pt.dn_dT_per_K),
+            "max_delta_T_K": float(_pt.max_delta_T_K),
+            "film_confinement": _conf,
+            "film_confinement_from": _conf_from,
+            "dn_dT_cladding_per_K": _dndt_clad,
+            "index_sensitivity_film": _sf,
+            "index_sensitivity_cladding": _sc,
+            "index_weights_from": _w_from,
+            "dn_dT_effective_per_K": _dndt_eff,
+            "index_change_material": _dn_mat,
+            "index_change": _dn,
+            "round_trip_phase_rad": _phase_rad,
+            "phase_needed_rad": 2.0 * math.pi,
+            "delta_T_for_a_full_fsr_K": (
+                _lam_um / (2.0 * _dndt_eff * float(_pt.length_um))
+                if _dndt_eff > 0 else float("inf")),
+            # THE COEFFICIENT AT WHICH THE ENTITLEMENT FLIPS.
+            #
+            # One boolean decides whether the design is graded on the best of the
+            # phase scan or the worst, and this is the number that decides the
+            # boolean. Reporting it turns an assumption into a stated condition
+            # that a measurement can settle.
+            "dn_dT_effective_break_even_per_K": (
+                _lam_um / (2.0 * float(_pt.max_delta_T_K) * float(_pt.length_um))),
+            "break_even_margin": (
+                _dndt_eff / (_lam_um / (2.0 * float(_pt.max_delta_T_K)
+                                        * float(_pt.length_um)))),
+            # the layout stage runs after this one, so this is None on a normal
+            # run and the layout stage carries the "is it drawn" check instead
+            "drawn_at_cavity_time": _drawn,
+            "covers_a_full_fsr": bool(_covers),
+        }
+        if not _covers:
+            ctx.warn(
+                f"the phase trimmer reaches {_phase_rad:.3f} rad of round-trip "
+                f"phase against the {2 * math.pi:.3f} a full mode spacing needs, "
+                f"or was not drawn, so it cannot place the comb and the degraded "
+                f"excursion stays at the guaranteed figure. It needs "
+                f"{_trimmer['delta_T_for_a_full_fsr_K']:.1f} K over "
+                f"{_pt.length_um:.0f} um, or a longer heater")
 
     payload: dict[str, Any] = {
         "enabled": True,
@@ -562,6 +931,16 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # phase-independent; write requirements against these
         "mode_hop_free_range_guaranteed_GHz": mhf_guaranteed_Hz / 1e9,
         "mode_hop_free_range_placed_GHz": laser_tuning_Hz_per_V * V_span / 1e9,
+        # Which of the two the design is entitled to, and why. The guaranteed
+        # figure is the placed one divided by `ceil(hops) + 1`, and the divisor
+        # is entirely the cavity phase: a design that cannot set that phase does
+        # not know where in the comb its sweep begins. One that can, and can
+        # show the actuator reaches a whole mode spacing, starts where it
+        # chooses.
+        "phase_trimmer": _trimmer,
+        "mode_hop_free_range_degraded_GHz": (
+            laser_tuning_Hz_per_V * V_span / 1e9 if _trimmer.get("covers_a_full_fsr")
+            else mhf_guaranteed_Hz / 1e9),
         "mirror_relative_drift_GHz": drift_Hz / 1e9,
         "laser_tuning_from_lever_MHz_per_V": eta_lever_Hz_per_V / 1e6,
         "laser_tuning_fitted_over_lever": eta_ratio,
@@ -594,6 +973,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "chirp_nonlinearity_rms_MHz": rms_nonlin / 1e6 if rms_nonlin == rms_nonlin else float("nan"),
         "chirp_nonlinearity_rms_percent": rel_nonlin * 100 if rel_nonlin == rel_nonlin else float("nan"),
         "mirror_reflectivity": R_peak,
+        "coupling_loss_dB_per_facet_used": _loss_dB,
+        "coupling_loss_dB_per_facet_from": _loss_from,
         "effective_mirror_R_at_soa": R2_eff,
         "alpha_mirror_per_cm": alpha_m_per_cm,
         "modal_threshold_gain_per_cm": modal_gth_per_cm,
@@ -603,6 +984,32 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "side_mode_gain_margin_per_cm": dg_per_cm,
         "smsr_dB": smsr_dB,
         "n_cavity_modes_in_band": n_in_band,
+        # across a whole cycle of cavity phase, and the figure a design with a
+        # verified trimmer is entitled to
+        "phase_scan": _phase_scan,
+        # THE TWO QUANTITIES AT ONE SETTING OF THE PHASE, which is what a
+        # commissioned device delivers. Both are absent where no single setting
+        # meets both bounds, so a target written against either fails as missing
+        # rather than passing on the other's optimum.
+        "smsr_dB_at_joint_setting": (
+            _phase_scan.get("joint_with_the_hop_free_span", {})
+            .get("smsr_dB_at_setting")),
+        "hop_free_span_GHz_at_joint_setting": (
+            _phase_scan.get("joint_with_the_hop_free_span", {})
+            .get("hop_free_span_GHz_at_setting")),
+        "smsr_dB_worst_in_joint_window": (
+            _phase_scan.get("joint_with_the_hop_free_span", {})
+            .get("smsr_dB_worst_in_window")),
+        "hop_free_span_GHz_worst_in_joint_window": (
+            _phase_scan.get("joint_with_the_hop_free_span", {})
+            .get("hop_free_span_GHz_worst_in_window")),
+        "smsr_dB_settable": (_phase_scan["smsr_dB_best"]
+                             if _trimmer.get("covers_a_full_fsr")
+                             else _phase_scan["smsr_dB_worst"]),
+        "n_cavity_modes_in_band_settable": (
+            _phase_scan["n_cavity_modes_in_band_best"]
+            if _trimmer.get("covers_a_full_fsr")
+            else _phase_scan["n_cavity_modes_in_band_worst"]),
         # False is the favourable case: the neighbouring mode falls outside the
         # mirror band and is suppressed by the rolloff rather than competing.
         "side_mode_within_mirror_band": side_in_band,

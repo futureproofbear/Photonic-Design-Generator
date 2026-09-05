@@ -5,6 +5,7 @@
     picchain report  <design.yaml> [--run latest]
     picchain sweep   <design.yaml> --param a.b.c --values 1,2,3 --metric x.y
     picchain show    <design.yaml> [--metric dotted.path]
+    picchain history <design.yaml> [--prune]
     picchain doctor
 
 Exit codes (this is the contract an agent or CI iterates against):
@@ -37,10 +38,28 @@ app = typer.Typer(add_completion=False, help="Headless PIC design chain")
 EXIT_OK, EXIT_ERROR, EXIT_VERIFY_FAIL, EXIT_USAGE = 0, 1, 2, 3
 
 
+def _library(d: Design) -> MaterialLibrary:
+    """The material library this design names, derived from the design itself.
+
+    Held apart from `_load` so that it can be rebuilt after an override. The
+    library was previously constructed once from the design as it arrived on
+    disk, and every override path then re-read the design and discarded the
+    library that came with it. `--set platform.materials_file=...` therefore
+    reached `design.resolved.json` and never reached a solver: the run recorded
+    one material file and solved with another.
+
+    The symptom was silence. A sweep of the radio-frequency permittivity across
+    plus and minus fifteen per cent returned a capacitance identical in the last
+    bit at every point, which reads as a quantity the design is insensitive to
+    rather than as an override that was dropped.
+    """
+    resolved = d.materials_path()
+    return MaterialLibrary(resolved) if resolved else MaterialLibrary()
+
+
 def _load(design_path: Path) -> tuple[Design, MaterialLibrary]:
     d = Design.load(design_path)
-    lib = MaterialLibrary(d.platform.materials_file) if d.platform.materials_file else MaterialLibrary()
-    return d, lib
+    return d, _library(d)
 
 
 def _resolve_stages(requested: list[str]) -> list[str]:
@@ -116,6 +135,7 @@ def run(
             raise typer.Exit(EXIT_USAGE)
         key, val = ov.split("=", 1)
         _apply_override(d, key, val)
+    lib = _library(d)          # an override may have named another material file
 
     chosen = _resolve_stages([s.strip() for s in stages.split(",") if s.strip()] or d.stages)
     ctx = RunContext(design_dir=design.parent, run_id=new_run_id(tag or d.meta.name)).ensure()
@@ -159,6 +179,7 @@ def run(
         t0, c0 = time.perf_counter(), time.process_time()
         try:
             ctx.current_stage = s
+            ctx.stages_run.append(s)
             STAGES[s](d, ctx, lib)
         except Exception as exc:
             timings[s] = round(time.perf_counter() - t0, 3)
@@ -396,6 +417,124 @@ def show(
 
 
 @app.command()
+def history(
+    design: Path = typer.Argument(..., exists=True),
+    prune: bool = typer.Option(False, "--prune",
+        help="delete the regenerable artefacts of every run but the newest complete one"),
+    out: Optional[Path] = typer.Option(None, "--out",
+        help="directory for the summary; default is `history/` beside the design"),
+):
+    """Roll the run tree up into one summary, and optionally prune it.
+
+    THE CHAIN WRITES A RUN DIRECTORY PER INVOCATION AND NOTHING ROLLS IT UP. On
+    a design of any age the findings therefore exist only as a pile of
+    timestamped directories, and the pile is mostly field data: on the tree that
+    prompted this command, 912 MB of 931 was `.npz`, another 103 MB was repeated
+    copies of the same mask, and everything carrying a conclusion came to about
+    four megabytes spread over 67 `metrics.json` files.
+
+    That shape has two costs. Nobody can see what a hundred runs established
+    without opening a hundred files, and the tree cannot be pruned without
+    losing the findings, so it is not pruned and it grows.
+
+    This writes `RUNS.md` and `runs.json`, one row per run that produced a
+    metric. `--prune` then deletes what regenerates: the field arrays, the
+    figures and every mask but the newest complete run's. Each run keeps its
+    `design.resolved.json`, so any of them can be rebuilt.
+    """
+    runs_dir = design.parent / "runs"
+    if not runs_dir.is_dir():
+        typer.echo(f"no run tree under {runs_dir}", err=True)
+        raise typer.Exit(EXIT_USAGE)
+    dest = out or (design.parent / "history")
+    dest.mkdir(parents=True, exist_ok=True)
+
+    def dig(doc: dict, *path: str) -> Any:
+        node: Any = doc
+        for k in path:
+            if not isinstance(node, dict):
+                return None
+            node = node.get(k)
+        return node
+
+    FIELDS = [
+        ("kappa", ("grating", "kappa_per_cm")),
+        ("R", ("grating", "peak_reflectivity")),
+        ("fwhm", ("grating", "fwhm_GHz")),
+        ("fsr", ("cavity", "fsr_GHz")),
+        ("lever", ("cavity", "pockels_lever")),
+        ("sync", ("cavity", "mode_hop_free_range_synchronous_GHz")),
+        ("smsr", ("cavity", "smsr_dB")),
+        ("linewidth", ("cavity", "schawlow_townes_henry_linewidth_kHz")),
+        ("tuning", ("eo", "tuning_MHz_per_V")),
+        ("gamma", ("eo", "eo_overlap_gamma")),
+        ("adiabaticity", ("taper", "min_adiabaticity")),
+        ("facet_dB", ("facet", "total_loss_dB")),
+        ("drc", ("drc", "error_violations")),
+    ]
+    rows: list[dict] = []
+    for mp in sorted(runs_dir.glob("*/metrics.json")):
+        try:
+            doc = load_json(mp)
+        except Exception:
+            continue
+        met = doc.get("metrics", {})
+        vp = mp.parent / "verify.json"
+        ver = {}
+        if vp.exists():
+            try:
+                ver = load_json(vp)
+            except Exception:
+                ver = {}
+        row = {"run": mp.parent.name, "verdict": ver.get("verdict")}
+        row.update({name: dig(met, *path) for name, path in FIELDS})
+        # The external solver is the expensive one and its disagreements are the
+        # point, so it is carried separately rather than averaged into a column.
+        row["fdtd_structure"] = dig(met, "fdtd", "structure")
+        row["fdtd_kappa"] = dig(met, "fdtd", "kappa_per_cm")
+        rows.append(row)
+
+    dump_json(dest / "runs.json", rows)
+    names = ["run", "verdict"] + [n for n, _ in FIELDS]
+    fmt = lambda v: "" if v is None else (f"{v:.4g}" if isinstance(v, float) else str(v))
+    lines = [
+        "# Every run that produced a metric",
+        "",
+        "Written by `picchain history`. The run tree holds the field data, which is",
+        "large and regenerable; this is what the runs established, so that pruning",
+        "the tree costs nothing. `runs.json` carries the same rows as data.",
+        "",
+        "| " + " | ".join(names) + " |",
+        "|" + "---|" * len(names),
+    ]
+    lines += ["| " + " | ".join(fmt(r[n]) for n in names) + " |" for r in rows]
+    fd = [r for r in rows if r["fdtd_kappa"] is not None]
+    if fd:
+        lines += ["", "## Runs of the external solver", "",
+                  "| run | structure | kappa /cm |", "|---|---|---|"]
+        lines += [f"| {r['run']} | {r['fdtd_structure']} | {fmt(r['fdtd_kappa'])} |" for r in fd]
+    (dest / "RUNS.md").write_text(chr(10).join(lines) + chr(10), encoding="utf-8")
+    typer.echo(f"{len(rows)} runs summarised into {dest}")
+
+    if not prune:
+        return
+    complete = [mp.parent for mp in sorted(runs_dir.glob("*/metrics.json"))]
+    keep = complete[-1].name if complete else ""
+    freed = removed = 0
+    for path in runs_dir.rglob("*"):
+        if not path.is_file() or path.parent.name == keep:
+            continue
+        regenerable = path.suffix in {".npz", ".png"} or (
+            path.suffix in {".gds", ".oas"} and "markers" not in path.name)
+        if regenerable:
+            freed += path.stat().st_size
+            path.unlink()
+            removed += 1
+    typer.echo(f"pruned {removed} regenerable files, {freed / 1e6:.0f} MB; "
+               f"field data retained for {keep or 'no complete run'}")
+
+
+@app.command()
 def sweep(
     design: Path = typer.Argument(..., exists=True),
     param: str = typer.Option(..., "--param", help="dotted design field to sweep"),
@@ -415,11 +554,13 @@ def sweep(
     for i, v in enumerate(vals):
         d, _ = _load(design)
         _apply_override(d, param, v)
+        lib_i = _library(d)    # the swept parameter may be the material file
         ctx = RunContext(design_dir=design.parent, run_id=new_run_id(f"sweep{i:03d}")).ensure()
         try:
             for s in chosen:
                 ctx.current_stage = s
-                STAGES[s](d, ctx, lib)
+                ctx.stages_run.append(s)
+                STAGES[s](d, ctx, lib_i)
             ctx.finalise("ok", update_latest=False)
             row = {"param": param, "value": v}
             row.update({m: ctx.get(m) for m in want} if want else {"metrics": ctx.metrics})
@@ -613,7 +754,8 @@ def corners(
         for s in chosen:
             try:
                 ctx.current_stage = s
-                STAGES[s](dc, ctx, lib)
+                ctx.stages_run.append(s)
+                STAGES[s](dc, ctx, _library(dc))
             except Exception as exc:
                 status = f"failed:{s}"
                 ctx.warn(f"stage {s} raised: {exc}")
@@ -709,7 +851,26 @@ def corners(
 
 
 def _read_dotted(obj: Any, dotted: str) -> Any:
-    return get_dotted(obj, dotted)
+    """The nominal value of a corner parameter.
+
+    A per-layer process bias is held in a dict keyed by layer name, and a layer
+    carrying no bias has no key rather than a key of zero. Walking to it then
+    raises, which is what happened to every design that took the corner stage's
+    own advice: the stage recommends `process.bias_um.<layer>` where a window
+    varies a drawn dimension, and following that recommendation on a design
+    declaring `bias_um: {}` crashed with a KeyError naming the layer.
+
+    The absence of a bias is a bias of zero, which is the value returned here.
+    Nothing else about a missing field is forgiven; only the bias dictionaries,
+    whose empty state is meaningful.
+    """
+    try:
+        return get_dotted(obj, dotted)
+    except (KeyError, AttributeError):
+        head, _, leaf = dotted.rpartition(".")
+        if head.endswith(("bias_um", "depth_bias_um")) and leaf:
+            return 0.0
+        raise
 
 
 def _corners_markdown(doc: dict) -> str:
@@ -765,10 +926,12 @@ def golden(
     for ov in set_:
         key, val = ov.split("=", 1)
         _apply_override(d, key, val)
+    lib = _library(d)
 
     ctx = RunContext(design_dir=design.parent, run_id=new_run_id("golden")).ensure()
     for s in _resolve_stages(["layout"]):
         ctx.current_stage = s
+        ctx.stages_run.append(s)
         STAGES[s](d, ctx, lib)
     emitted = Path((ctx.get("layout") or {})["gds"])
 
@@ -956,7 +1119,8 @@ def search(
         try:
             for st in chosen:
                 ctx.current_stage = st
-                STAGES[st](d, ctx, lib)
+                ctx.stages_run.append(st)
+                STAGES[st](d, ctx, _library(d))
             ctx.finalise("ok", update_latest=False)
             return ctx.metrics
         except Exception as exc:
@@ -1200,8 +1364,6 @@ def sensitivity(
     from . import search as S
 
     d0, lib = _load(design)
-    chosen = _resolve_stages([s.strip() for s in stages.split(",") if s.strip()]
-                             or d0.search.stages or d0.stages)
 
     names = [p.strip() for p in params.split(",") if p.strip()]
     if not names:
@@ -1212,6 +1374,29 @@ def sensitivity(
         raise typer.Exit(3)
 
     want = [m.strip() for m in metrics.split(",") if m.strip()] or [t.metric for t in d0.targets]
+
+    # The stages actually needed are those producing the metrics measured,
+    # closed over their dependencies, which is what a corner sweep already
+    # derives and for the same two reasons. A sweep multiplies every cost in the
+    # stage list. And a stage that raises rather than reporting a metric stops
+    # the sweep before its first parameter: `release` is a readiness gate, so a
+    # design whose submission is blocked could not be swept at all, the nominal
+    # evaluation failing on a verdict no sensitivity figure depends on.
+    asked = [s.strip() for s in stages.split(",") if s.strip()]
+    if asked:
+        chosen = _resolve_stages(asked)
+    else:
+        base = list(d0.search.stages or d0.stages)
+        needed = sorted({m.split(".", 1)[0] for m in want if "." in m} & set(STAGES))
+        chosen = _resolve_stages(needed or base)
+        skipped = [s for s in base if s not in chosen]
+        if skipped:
+            typer.echo(
+                f"sensitivity runs {len(chosen)} stages producing the measured "
+                f"metrics: {', '.join(chosen)}. Not run, no measured metric "
+                f"requiring them: {', '.join(skipped)}. Pass --stages to override",
+                err=True,
+            )
     n = {"i": 0}
 
     def evaluate(over):
@@ -1223,7 +1408,8 @@ def sensitivity(
         try:
             for st in chosen:
                 ctx.current_stage = st
-                STAGES[st](d, ctx, lib)
+                ctx.stages_run.append(st)
+                STAGES[st](d, ctx, _library(d))
             ctx.finalise("ok", update_latest=False)
             return ctx.metrics
         except Exception as exc:
@@ -1253,12 +1439,35 @@ def sensitivity(
     rows = {}
     for path in names:
         try:
-            v0 = float(get_dotted(d0, path))
+            v0 = float(_read_dotted(d0, path))
         except Exception:
             typer.echo(f"  skipped {path}: not a numeric design field", err=True)
             continue
-        lo_t = evaluate({path: v0 * (1 - probe)})
-        hi_t = evaluate({path: v0 * (1 + probe)})
+
+        # The probe is a fraction of the nominal, and a parameter whose nominal
+        # is zero cannot be moved by one. A per-layer process bias is exactly
+        # that case: an uncharacterised process declares no bias, the nominal is
+        # zero, and the two parameters a lithographic excursion actually moves
+        # were dropped from the table with a message saying they were not
+        # numeric. They are numeric and they are zero.
+        #
+        # Where the corner window declares an excursion for such a parameter,
+        # that excursion is the step, which is the same figure the contribution
+        # column is computed over. Where it does not, the parameter is skipped
+        # and the message says why.
+        if v0 == 0.0:
+            step = float(d0.corners.parameters.get(path) or 0.0)
+            if step <= 0:
+                typer.echo(
+                    f"  skipped {path}: its nominal is zero and a fractional "
+                    f"probe cannot move it. Declare an excursion for it under "
+                    f"corners.parameters to sweep it", err=True)
+                continue
+            lo_t = evaluate({path: -step})
+            hi_t = evaluate({path: +step})
+        else:
+            lo_t = evaluate({path: v0 * (1 - probe)})
+            hi_t = evaluate({path: v0 * (1 + probe)})
         e = {}
         for m in present:
             a, b = mval(lo_t, m), mval(hi_t, m)

@@ -127,3 +127,58 @@ def test_summary_reports_all_three_frames():
     assert set(s) >= {"nominal", "drawn", "printed", "bias_um", "precompensate"}
     assert s["printed"]["post_gap_um"] == pytest.approx(s["nominal"]["post_gap_um"])
     assert s["drawn"]["post_gap_um"] == pytest.approx(s["nominal"]["post_gap_um"] + BIAS)
+
+
+# --- the corner stage's own advice, added 2026-09-05 ------------------------
+
+def test_a_layer_with_no_declared_bias_has_a_nominal_bias_of_zero():
+    """The corner stage recommends `process.bias_um.<layer>` and must reach it.
+
+    Where a corner window varies a drawn dimension, the stage objects that a
+    lithographic excursion moves every feature on a layer together and
+    recommends the per-layer bias instead. A design declaring `bias_um: {}` has
+    no key for that layer, so following the recommendation raised a KeyError
+    naming the layer and the sweep died before its first corner.
+    """
+    import yaml
+    from picchain.cli import _read_dotted
+    from picchain.config import Design
+
+    d = Design.model_validate(yaml.safe_load("""
+meta: {name: t, title: t}
+grating: {enabled: false, period_um: 0.4}
+waveguide: {top_width_um: 2.5, wavelength_um: 1.55}
+process: {bias_um: {}}
+"""))
+    assert _read_dotted(d, "process.bias_um.WG") == 0.0
+    assert _read_dotted(d, "process.bias_um.METAL") == 0.0
+
+
+def test_a_declared_bias_is_read_and_not_defaulted():
+    import yaml
+    from picchain.cli import _read_dotted
+    from picchain.config import Design
+
+    d = Design.model_validate(yaml.safe_load("""
+meta: {name: t, title: t}
+grating: {enabled: false, period_um: 0.4}
+waveguide: {top_width_um: 2.5, wavelength_um: 1.55}
+process: {bias_um: {WG: 0.04}}
+"""))
+    assert _read_dotted(d, "process.bias_um.WG") == 0.04
+
+
+def test_an_unrelated_missing_field_still_raises():
+    """Only the bias dictionaries are forgiven, their empty state being meaningful."""
+    import pytest
+    import yaml
+    from picchain.cli import _read_dotted
+    from picchain.config import Design
+
+    d = Design.model_validate(yaml.safe_load("""
+meta: {name: t, title: t}
+grating: {enabled: false, period_um: 0.4}
+waveguide: {top_width_um: 2.5, wavelength_um: 1.55}
+"""))
+    with pytest.raises((KeyError, AttributeError)):
+        _read_dotted(d, "waveguide.no_such_field")

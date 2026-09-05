@@ -78,7 +78,28 @@ def _build(design: Design, *, with_posts: bool, electrodes: bool, name: str,
         electrode_width_um=geom.electrode_width_um,
         electrode_thickness_um=e.thickness_um,
         electrode_material=e.material,
+        # the topology is a property of the RF line and does not touch the
+        # optical cross-section, which carries one guide either way
+        electrode_topology=(e.topology if electrodes else "slot"),
+        ground_width_um=e.ground_width_um,
+        slab_offset_um=p.slab_offset_um,
         include_substrate=electrodes,
+        # The buried oxide is modelled to its declared thickness for the RF
+        # problem and truncated for the optical one.
+        #
+        # The truncation exists for the mode solve, where the handle wafer is
+        # excluded entirely and a shallow oxide costs nothing, the real oxide
+        # already isolating the mode. The RF problem is the opposite case: it
+        # includes the handle, and the oxide is what holds the silicon away from
+        # the electrodes. Truncating it there moves a permittivity of 11.7 to
+        # within 1.8 um of the film whatever the platform declares.
+        #
+        # Measured on a 7.0 um oxide: the microwave index read 2.5422 against
+        # 2.3220, and the bandwidth of a 13 mm electrode read 18.2 GHz against
+        # 33.0 GHz. The error is a factor of 1.81 and it is in the unsafe
+        # direction, a design being shortened to escape a limit that is an
+        # artefact of the truncation.
+        box_model_depth_um=(p.box_thickness_um if electrodes else 1.8),
         window_pad_x_um=(e.rf_window_pad_um if electrodes else 3.0),
         window_pad_y_um=(e.rf_window_pad_um if electrodes else 0.0),
         name=name,
@@ -106,19 +127,39 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     mesh = design.mesh
     dlam = 0.01
 
-    # one mesh, built from the *superset* geometry so both solves share nodes
-    xs_posts = _build(design, with_posts=True, electrodes=False, name="with_posts")
+    # The posted cross-section is solved only where the device carries a
+    # grating. The posts were previously built and solved whatever the design
+    # declared, which cost a mode solve on a device that has none and, worse,
+    # drew them: the published cross-section of a modulator showed two Bragg
+    # posts flanking the guide, and a figure carries no units and no provenance,
+    # so a reader has nothing to check it against. A drawing of a device that
+    # includes a structure the device does not contain is a defect.
+    #
+    # The window is still taken from the posted geometry where one exists, so
+    # that the bare and posted solves share nodes and their difference is a
+    # difference on one mesh.
+    posts = design.grating.enabled
     xs_bare = _build(design, with_posts=False, electrodes=False, name="bare")
-    xs_bare.window = xs_posts.window
-    grid = build_grid(xs_posts, mesh.d_fine_um, mesh.d_coarse_um, mesh.fine_margin_um)
+    if posts:
+        xs_posts = _build(design, with_posts=True, electrodes=False, name="with_posts")
+        xs_bare.window = xs_posts.window
+        grid = build_grid(xs_posts, mesh.d_fine_um, mesh.d_coarse_um, mesh.fine_margin_um)
+    else:
+        xs_posts = xs_bare
+        grid = build_grid(xs_bare, mesh.d_fine_um, mesh.d_coarse_um, mesh.fine_margin_um)
 
     m_bare = _solve(design, xs_bare, grid, lib, lam)
     m_bare_p = _solve(design, xs_bare, grid, lib, lam + dlam, m_bare.n_eff)
     m_bare_m = _solve(design, xs_bare, grid, lib, lam - dlam, m_bare.n_eff)
     n_g = m_bare.n_eff - lam * (m_bare_p.n_eff - m_bare_m.n_eff) / (2 * dlam)
 
-    m_post = _solve(design, xs_posts, grid, lib, lam, m_bare.n_eff)
-    dn_eff = m_post.n_eff - m_bare.n_eff
+    if posts:
+        m_post = _solve(design, xs_posts, grid, lib, lam, m_bare.n_eff)
+        n_eff_posts = m_post.n_eff
+        dn_eff = n_eff_posts - m_bare.n_eff
+    else:
+        n_eff_posts = None
+        dn_eff = None
 
     # How hard the effective index leans on the film thickness. One extra solve
     # on a slightly thicker film, differenced against the bare one.
@@ -170,7 +211,9 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "grid": {"nx": int(len(grid.x)), "ny": int(len(grid.y)),
                  "d_fine_um": mesh.d_fine_um, "d_coarse_um": mesh.d_coarse_um},
         "n_eff_bare": m_bare.n_eff,
-        "n_eff_with_posts": m_post.n_eff,
+        # null where the design declares no grating, rather than a number
+        # describing posts the device does not carry
+        "n_eff_with_posts": n_eff_posts,
         "dn_eff_posts": dn_eff,
         # per micron of film thickness; NaN where mesh.film_sensitivity is off
         "dn_eff_d_film_per_um": dn_dfilm,
@@ -197,23 +240,23 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     })
 
     ctx.put("mode", payload)
-    ctx.write_stage(
-        "mode",
-        payload,
-        {
-            "x_um": grid.x,
-            "y_um": grid.y,
-            "field_bare": m_bare.field,
-            "field_posts": m_post.field,
-            "mask_film": mask_film,
-        },
-    )
+    arrays = {
+        "x_um": grid.x,
+        "y_um": grid.y,
+        "field_bare": m_bare.field,
+        "mask_film": mask_film,
+    }
+    # written only where the posted solve was performed, so that a reader of the
+    # archive finds the field of a structure the device actually contains
+    if posts:
+        arrays["field_posts"] = m_post.field
+    ctx.write_stage("mode", payload, arrays)
     if not payload["single_mode"]:
         ctx.warn(
             f"cross-section supports {n_guided} guided modes; the E-DBR requires "
             "single-mode operation - reduce width or etch depth"
         )
-    if dn_eff <= 0:
+    if posts and dn_eff <= 0:
         ctx.warn("dn_eff from the Bragg posts is <= 0; check post geometry")
 
     # A measured index declared in the library and gated off is a value that was

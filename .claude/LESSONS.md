@@ -2430,3 +2430,185 @@ coupled one. And a comparison that cannot resolve the question establishes
 nothing: report the mesh shift beside the disagreement, so that a later reader
 sees which exceeded which, and record the outcome as a finding about the
 instrument rather than quoting a number from it.
+
+### L032 — A self-referred figure of merit cannot compare two devices
+
+A modulation response is conventionally quoted against its own value at zero
+frequency. Where the device itself sets that value, the quotient measures the
+reference rather than the device. A line left open at its far end returns the
+wave, which adds to the forward wave at zero frequency, so the reference is twice
+that of the same line terminated. The roll-off so reported is the decay of that
+doubling: one 5 mm electrode read a self-referred 3 dB point of 4.4 GHz while
+sitting within half a decibel of a matched line above 49 GHz.
+
+**The comparison that carries information is against the alternative driven
+identically**, both evaluated at the same incident wave with the normalisation
+removed from both. Recorded as a rule at `rules/generic/figures-of-merit.md`.
+
+### L033 — A bound on a factor is not a bound on the product
+
+Where a quantity is a geometric term multiplied by an integral over a field, an
+argument that varies the geometry and holds the integral fixed gives an estimate
+and not a bound, and its sign is not established either. Weighting the reciprocal
+gap of a periodically loaded electrode predicted a 5.9 per cent error in the
+half-wave voltage; homogenising both drawn cross-sections gives 6.7, the overlap
+having fallen 23 per cent in the open section. **Run the correction rather than
+bounding it.** The corrected calculation also returned the microwave index, the
+walk-off bandwidth and the impedance, about which the estimate is silent.
+
+### L034 — A local-mode cascade whose stations carry different radiation sets is not unitary
+
+Projecting the local modes of one station onto the next is unitary only where the
+two span the same space. Where one station binds one guided mode and the next
+binds two, the remaining basis members are radiation states discretised by the
+window, and the deficit is redistributed rather than lost. **The failure
+announces itself above unity**: guided power read 0.821 at 22 stations, 0.852 at
+44 and 1.503 at 66. Adding stations adds junctions and compounds it, so the
+parameter that ordinarily refines the answer makes it worse. Every propagated
+figure computed before the guard was applied was withdrawn.
+
+### L035 — A corner sweep can declare three parameters and exercise one
+
+A pre-compensated bias moves nothing by construction, and a parameter whose
+nominal is zero has no relative excursion. A window may therefore satisfy the
+guard requiring it to vary a process bias rather than a drawn dimension, and vary
+nothing at all. The tell is the sensitivity table: the elasticity column is blank
+for every metric with respect to a parameter the sweep could not move, and one
+parameter's half-span contribution doubling to the full window is the arithmetic
+signature. **Report which metrics each declared parameter moved.** Refines L021.
+
+### L036 — Passivity and reciprocity are the first test of a supplied compact model
+
+Over one supplied library a subset delivered more power than it was given, and
+the subset partitioned exactly on a property read off the file: every violating
+model had ports of differing width, and no model whose ports were all one width
+violated anything. The class was measured from the drawn pin geometry rather than
+inferred from cell names. **The direction of the excess names the cause**: it sat
+in the direction entering the wide port, which a reciprocal structure cannot do,
+indicating a mode power normalised inconsistently between two ports of different
+width.
+
+### L037 — A model declared non-dispersive is exact in transmission and wrong in every group-index quantity
+
+Freezing the material index at band centre costs the group index between 1.5 and
+4.9 per cent on a nitride strip in oxide, worst at short wavelength. A free
+spectral range computed from such a model is too large by that amount. Read the
+model's own dispersion declaration before taking any group-index quantity from
+it.
+
+### L038 — A kit describes a layer three times, and the three may disagree
+
+The layer map names a number, the layer stack gives that name a thickness, and
+the cells draw polygons. On one library eight of eighteen drawn layers were named
+by neither map nor stack, among them the layer carrying every device of the kit's
+second guiding material. A cell name is not a description of its polygons, and a
+layer may exist as a name and nothing else. The instrument is the emitted file.
+
+### L039 — A repository head and a published release are different artifacts
+
+A reference entry written from a repository was correct. A later study read the
+release, found figures that differed, and corrected two accurate entries into
+inaccurate ones. **Record the artifact beside the version**, and check a
+correction before applying it: the direction of a proposed correction is not
+evidence for it, and this one read exactly like a repair.
+
+### L040 — A product of two unknowns is separated by a ladder, not by a better single measurement
+
+One measurement of a product constrains the product and nothing else. Separation
+requires a parameter entering the two factors differently: a material constant
+multiplies every geometry alike while a field overlap changes shape with it, so a
+ladder stepping that geometry tests the overlap independently of the constant.
+**A target on the disputed quantity is written at the lower severity
+deliberately**, a blocking requirement on the quantity an experiment exists to
+settle being the chain asserting its own answer in advance.
+
+### L041 — A disagreement is measured against the whole process window before it is attributed to the process
+
+The corner sweep already computes the spread of the disputed metric, so the
+comparison is one division. On one design the disagreement was 31 per cent
+against a window of 7.0, which eliminates the process. The test runs both ways: a
+disagreement inside the window is not evidence about the model. The window used
+must be one whose parameters are live, per L035.
+
+### T065 — A model with no far end, a mask with no terminator, and a normalisation that removed the loss
+
+Three defects on one electrode, each concealing the next. The model carried one
+forward wave, so every figure described a matched line whatever was declared. The
+first implementation took its reference as the same line at the same attenuation,
+so the conductor loss cancelled and a 5 mm electrode reported 1.4 THz, and **a
+figure that improves on correcting a defect is to be examined before it is
+quoted**. And the design declared a termination the mask does not draw, which a
+foundry deck reported five times.
+
+**A boundary condition declared to a model is a claim about a polygon.** Name the
+drawn feature that realises it, or the condition is an assumption.
+
+### T066 — An eigensolver started from a random vector, so no result was a function of its inputs
+
+Single-cross-section quantities were unaffected; everything built from many
+solves was not. One 22-station cascade moved 1.3 per cent in transmission and 20
+in mode conversion between runs. **The obvious fixed vector is wrong**: a
+constant vector is orthogonal to every odd mode of a symmetric cross-section, and
+starting from ones raised that cascade's conversion by a factor of thirteen.
+Determinism is a precondition of any convergence guard, and is established by
+running one input twice.
+
+### T067 — A checker keyed on a port where the identity is a port and a mode
+
+The sixteen entries of a two-port two-mode converter collapsed into four and the
+last read won, so every mode converter in a supplied library was reported as
+passing under two per cent of its power. **A key must be as wide as the identity
+of the thing it indexes**, which is T054 in another form. And a failing check is
+trusted at the moment it is least examined: a verdict of non-compliance about
+somebody else's product is inherently plausible, and what caught this was that
+the number was absurd rather than merely bad.
+
+### T068 — A ladder that drew a different device, and that overwrote its own swept parameter
+
+A reticle split called one device's builder unconditionally, and logic belonging
+to a grating computed a clearance from schema defaults on a device carrying none,
+which would have replaced every rung below it. **A ladder's independent variable
+is immune to any automatic adjustment, or the ladder is not a ladder.** A
+conditional written for one device is conditioned on that device and not on the
+absence of an alternative.
+
+### T069 — An invariant stated in a comment, and violated by the code beneath it
+
+A builder's comment stated the relation its port geometry must satisfy, and the
+taper beneath it left two guides at a sixth of the minimum space. A rule deck
+found it; nothing in the chain did. **A comment is not an enforcement**, and the
+relation was among declared fields and is now a precondition. The remedy improved
+the device: opening the separation to the least value the rule admits raised the
+imaging section's transmission by 0.233 dB. **A design-rule violation is not
+evidence that the design was at its optimum.**
+
+### T070 — A stage that recommended a field and then crashed on it
+
+A corner stage recommends the per-layer process bias where a window varies a
+drawn dimension, and raised a key error on a design declaring an empty mapping. A
+sensitivity sweep separately could not run while a release gate was blocking, and
+silently dropped parameters whose nominal is zero. **A tool's own recommendation
+is a code path the tool supports.** An empty container and an absent key are
+distinct states. **A gate is scoped to the act it gates**: a sweep is not a
+submission.
+
+### T071 — A semi-vectorial solver has a contrast limit, and it is not a mesh limit
+
+At an index step of 2.03 the finite-difference solver fails its own guard, four
+halvings giving 2.664073, 2.573708, 2.527801 and 2.504328 and still moving by
+2.4e-2. A uniform mesh was worse, wandering and reversing, because it staircases
+the interface and refining moves the boundary as well as the sampling. The same
+ladder settles to 2.4e-4 at an index step of 0.71. **Choose the solver from the
+index contrast before scheduling any run**; where the contrast is high the
+finite-element path is the instrument and not the cross-check.
+
+### T072 — A boundary check with no input reports a clean boundary
+
+`tools/check_ip_boundary.py` reads term lists from `projects/<scope>/`. Where no
+project scope exists it prints that there is nothing to enforce and exits zero.
+Over one session that exit was reported as a clean boundary several times, and it
+was silence from a rule with nothing to compare. The constraints actually in
+force were a foundry agreement and a kit licence, neither of which is a project
+scope, and both were enforced by hand. **A check that cannot fail is not
+evidence.** Report what was compared and against what, and where the answer is
+nothing, say so.

@@ -71,6 +71,17 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     unconfirmed = lib.unconfirmed(used)
     blocked = bool(unconfirmed) and not design.allow_unconfirmed_materials
 
+    # Raised here rather than at the end of the stage, so that the accounting
+    # below counts it. It is a finding about the DESIGN and not about the
+    # accounting, and it was previously invisible to the very mechanism that
+    # exists to leave no finding unowned.
+    if unconfirmed:
+        ctx.warn(
+            "materials with unconfirmed data in this design: " + ", ".join(unconfirmed)
+            + " - results are indicative until foundry PCM data replaces them",
+            key="verify.materials_unconfirmed_data_design",
+        )
+
     # --- findings, against what the design has acknowledged -----------------
     #
     # The acceptance verdict grades targets. A chain also raises findings that
@@ -83,10 +94,36 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # on before the standing findings are acknowledged would fail every released
     # design at once and teach the reader to bypass the gate.
     acked = {a.key: a.reason for a in design.warnings.acknowledged}
-    emitted = [w for w in ctx.warning_records if w["stage"] != "verify"]
+    # Only the two findings that are ABOUT this accounting are held out of it.
+    # Counting them would be self-referential: reporting an unacknowledged
+    # finding is itself a finding, which would never reach zero.
+    #
+    # The filter was previously by stage, which excluded every finding the verify
+    # stage raises whatever it was about. The unconfirmed-material finding is a
+    # statement about the design rather than about the count, and it was dropped
+    # with the rest, so the standing caveat that a design's material data is not
+    # the foundry's went unowned and unreported in the one place the denominator
+    # is quoted.
+    META = {"verify.findings_unacknowledged", "verify.acknowledgements_stale",
+            "verify.acknowledgements_stage_not_run"}
+    emitted = [w for w in ctx.warning_records if w["key"] not in META]
     seen = {w["key"] for w in emitted}
     unacknowledged = sorted(seen - set(acked))
-    stale = sorted(set(acked) - seen)
+
+    # An acknowledgement is stale where the finding it names was fixed or
+    # reworded. It is NOT stale merely because the stage that raises it was left
+    # out of the run.
+    #
+    # A key is `<stage>.<slug>`, so the stage that owns each acknowledgement is
+    # read from the key and compared against the stages this run executed. A
+    # design whose `stages:` line omits the layout stages reported six stale
+    # entries on a run that had simply not drawn a mask, and a check that cries
+    # wolf on a partial run is a check a reader learns to skip.
+    ran = set(getattr(ctx, "stages_run", None) or ctx.metrics.keys())
+    def _stage_of(key: str) -> str:
+        return key.split(".", 1)[0] if "." in key else key
+    not_run = sorted(k for k in set(acked) - seen if _stage_of(k) not in ran)
+    stale = sorted(k for k in set(acked) - seen if _stage_of(k) in ran)
     enforce = bool(getattr(design.warnings, "enforce", False))
 
     payload = {
@@ -102,6 +139,9 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "findings_acknowledged": len(seen & set(acked)),
         "findings_unacknowledged": unacknowledged,
         "findings_acknowledged_but_absent": stale,
+        # acknowledgements whose stage this run did not execute, so nothing is
+        # established about them either way
+        "findings_acknowledged_stage_not_run": not_run,
         "findings_enforced": enforce,
         "verdict": ("PASS" if (n_must_fail == 0 and not blocked
                                and not (enforce and unacknowledged)) else "FAIL"),
@@ -126,9 +166,14 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             "wording changed and the key with it",
             key="verify.acknowledgements_stale",
         )
-    if unconfirmed:
+    if not_run:
         ctx.warn(
-            "materials with unconfirmed data in this design: " + ", ".join(unconfirmed)
-            + " - results are indicative until foundry PCM data replaces them"
+            f"{len(not_run)} acknowledgement(s) name a stage this run did not "
+            f"execute, so they were neither confirmed nor cleared: "
+            + ", ".join(not_run)
+            + ". A run that omits stages establishes what those stages would "
+            "have found, and a release is to be assembled from a run of the "
+            "whole chain",
+            key="verify.acknowledgements_stage_not_run",
         )
     return payload

@@ -109,6 +109,9 @@ the run invokes.
 | generic | [parameter-scans.md](generic/parameter-scans.md) | a scan is invalid unless every dependent field moves with it |
 | generic | [corrections-and-fits.md](generic/corrections-and-fits.md) | adopting, testing and withdrawing a correction factor |
 | generic | [expensive-solves.md](generic/expensive-solves.md) | scoping, launching and reading a solve that costs hours |
+| generic | [figures-of-merit.md](generic/figures-of-merit.md) | a figure of merit carries a reference, and a self-referred one cannot compare two devices |
+| generic | [vendor-kits.md](generic/vendor-kits.md) | a supplied kit is audited before a design is built on it |
+| generic | [first-exercise.md](generic/first-exercise.md) | the first run of a configuration is a test of the configuration |
 | generic | [slides-and-figures.md](generic/slides-and-figures.md) | a slide that overflows loses its conclusion silently |
 | generic | [prose-and-register.md](generic/prose-and-register.md) | the register every document takes; a house standard, adopted by decision rather than derived from evidence |
 | platform | [thin_film_pockels/](platform/thin_film_pockels/) | thin-film lithium niobate and lithium tantalate |

@@ -71,13 +71,36 @@ def _readiness(design: Design, ctx: RunContext) -> list[dict[str, Any]]:
     ret = ctx.get("reticle") or {}
     geom = lay.get("geometry") or {}
     grid = lay.get("grid") or {}
+    env = environment_fingerprint()
 
     rows = [
-        {"condition": "every grating period is drawn",
+        # A mask produced by a modified working tree cannot be regenerated from
+        # any commit, so the manifest's revision identifies nothing. The stamp
+        # was previously taken from whichever repository the command was invoked
+        # in, which for a design directory is the application and never the
+        # chain, so this condition could not have been evaluated at all.
+        {"condition": "the chain that produced this is a committed revision",
+         "met": bool((env.get("chain") or {}).get("revision"))
+                and not (env.get("chain") or {}).get("dirty", True),
+         "detail": (f"{(env.get('chain') or {}).get('revision')}, "
+                    + (f"{(env.get('chain') or {}).get('modified_files')} uncommitted files"
+                       if (env.get("chain") or {}).get("dirty")
+                       else "clean")),
+         "field": "environment.chain"},
+        # Named for whatever the device's mask can be a fraction of. A grating is
+        # drawn a period at a time and an interferometer is not, so on a device
+        # with no grating this read "None of None" and passed: a condition that
+        # cannot go red is worse than an absent one, being counted in the total.
+        {"condition": ("every grating period is drawn" if lay.get("device") != "mach_zehnder"
+                       else "the drawn electrode is the electrode that was solved"),
          "met": bool(lay.get("mask_is_complete")),
-         "detail": f"{(lay.get('fidelity') or {}).get('periods_drawn')} of "
-                   f"{(lay.get('fidelity') or {}).get('periods_total')}",
-         "field": "layout.draw_periods"},
+         "detail": (f"{(lay.get('fidelity') or {}).get('periods_drawn')} of "
+                    f"{(lay.get('fidelity') or {}).get('periods_total')}"
+                    if lay.get("device") != "mach_zehnder" else
+                    f"{(lay.get('fidelity') or {}).get('electrode_length_drawn_um')} um drawn "
+                    f"against {(lay.get('fidelity') or {}).get('electrode_length_simulated_um')} um solved"),
+         "field": ("layout.draw_periods" if lay.get("device") != "mach_zehnder"
+                   else "electrodes.length_um")},
         {"condition": "the two layout backends agree",
          "met": bool((lay.get("backend_xor") or {}).get("agree")),
          "detail": str((lay.get("backend_xor") or {}).get("residual_area_um2")),
@@ -112,15 +135,23 @@ def _readiness(design: Design, ctx: RunContext) -> list[dict[str, Any]]:
          "detail": ", ".join(ver.get("unconfirmed_materials") or []) or "all confirmed",
          "field": "platform.materials_file"},
         # the density that stands after any fill was placed, not before it
+        # A window that was never declared was never checked, and `all()` over
+        # nothing is true. A design declaring no density window reported this
+        # condition met, with the detail "within", having measured nothing
+        # against nothing. Silence from a check that did not run is recorded as
+        # silence and may be waived with a reason like any other.
         {"condition": "density is within the declared windows",
-         "met": all(not (v.get("tiles_below_window") or v.get("tiles_above_window"))
-                    for v in _final_density(mask).values()),
-         "detail": "; ".join(
-             f"{k}: {v.get('fill_area_required_um2', 0):.0f} um2 of fill required"
-             for k, v in _final_density(mask).items()
-             if v.get("tiles_below_window") or v.get("tiles_above_window"))
-         or ("within, after fill" if (mask.get("fill") or {}).get("performed")
-             else "within"),
+         "met": bool(_final_density(mask)) and all(
+             not (v.get("tiles_below_window") or v.get("tiles_above_window"))
+             for v in _final_density(mask).values()),
+         "detail": ("no density window is declared, so nothing was measured"
+                    if not _final_density(mask) else
+                    "; ".join(
+                        f"{k}: {v.get('fill_area_required_um2', 0):.0f} um2 of fill required"
+                        for k, v in _final_density(mask).items()
+                        if v.get("tiles_below_window") or v.get("tiles_above_window"))
+                    or ("within, after fill"
+                        if (mask.get("fill") or {}).get("performed") else "within")),
          "field": "mask.density_windows"},
         {"condition": "a die frame is present",
          "met": bool(ret.get("enabled")),
@@ -232,7 +263,15 @@ def _markdown(doc: dict[str, Any]) -> str:
     L.append(f"| resolved design SHA-256 | `{doc['resolved_design_sha256']}` |")
     env = doc["environment"]
     L.append(f"| python | {env['python']} on {env['platform']} |")
-    L.append(f"| git revision | `{env['git_rev']}` |")
+    chain = env.get("chain") or {}
+    L.append(f"| chain revision | `{chain.get('revision')}`"
+             + (f" **plus {chain.get('modified_files')} uncommitted files**"
+                if chain.get("dirty") else " (clean)") + " |")
+    inv = env.get("invocation_repo") or {}
+    if inv.get("root") and inv.get("root") != chain.get("root"):
+        L.append(f"| design repository | `{inv.get('revision')}`"
+                 + (f" plus {inv.get('modified_files')} uncommitted files"
+                    if inv.get("dirty") else " (clean)") + " |")
     pk = ", ".join(f"{k} {v}" for k, v in env["packages"].items() if v)
     L.append(f"| packages | {pk} |")
     L += ["", "## Files", "", "| file | bytes | SHA-256 |", "|---|---:|---|"]

@@ -32,6 +32,28 @@ class Platform(BaseModel):
     film_material: str = "LiNbO3"
     film_thickness_um: float = 0.400
     etch_depth_um: float = 0.200
+    #: how far the unetched slab extends either side of a guide, um.
+    #:
+    #: Left unset the slab is a blanket, unbroken across the whole cross-section
+    #: and across the whole die. That is what a design released from this chain
+    #: drew: one polygon 19326 by 1669 um spanning both modulators and both
+    #: facets. A slab of index above the cladding guides, so an unbroken sheet
+    #: offers a facet-to-facet path that bypasses the device, couples the arms of
+    #: an interferometer along their whole length, and carries a strong signal
+    #: across to a weak one. It also puts high-permittivity material under every
+    #: conductor, which the microwave solve then reports.
+    #:
+    #: Set, the slab is drawn as a strip of `width + 2 * offset` around each
+    #: guide and the conductors sit on the buried oxide outside those strips.
+    #: `lxt_pdk_gf` uses 6.0 um.
+    slab_offset_um: float | None = None
+    #: the handle wafer's resistivity, ohm.cm. Left unset the handle is modelled
+    #: as a lossless dielectric and no dielectric-loss term enters the
+    #: bandwidth. The outcome is a binary rather than a tolerance: at 10 ohm.cm
+    #: the loss tangent at 15 GHz is of order unity and the line is unusable
+    #: over centimetres, and at 1 kohm.cm it is negligible. The energy fraction
+    #: the handle carries is computed and reported either way
+    substrate_resistivity_ohm_cm: float | None = None
     sidewall_deg: float = 90.0
     box_material: str = "SiO2"
     box_thickness_um: float = 4.7
@@ -115,6 +137,14 @@ class Electrodes(BaseModel):
     material: str = "Au"
     eo_coefficient: str = "r33"
     test_voltage_V: float = 1.0
+    #: the electro-optically active electrode run, um. Where it is unset the
+    #: grating length is used, which is correct for a mirror whose electrodes
+    #: flank the grating and wrong for every other electro-optic device. A
+    #: modulator carries no grating, so its length is declared here and the
+    #: capacitance, the lumped RC figure and the travelling-wave bandwidth all
+    #: follow from the figure declared rather than from a grating that is
+    #: absent. The chain reports which of the two was used.
+    length_um: float | None = None
     #: the largest drive the electrode will actually see, volts. The mode-hop
     #: search is bounded by it, so a tuning range is reported over the excursion
     #: a driver can deliver rather than over whatever span the sweep happened to
@@ -135,6 +165,81 @@ class Electrodes(BaseModel):
     #: conductor for the skin-effect loss. 4.1e7 S/m is bulk gold; an evaporated
     #: thin film is lower, and the loss scales as its reciprocal square root
     conductivity_S_per_m: float = 4.1e7
+    #: what sits at the far end of the travelling-wave line, ohm. Unset states a
+    #: termination matched to the line, which returns nothing and is the model
+    #: the chain carried alone until 2026-09-04. A resistor of a declared value
+    #: returns (Z_L - Z0)/(Z_L + Z0) of the wave. A pad with nothing behind it
+    #: is an open end, and is stated as 1e9 or above.
+    #:
+    #: A kit that ships terminated and unterminated variants of the same
+    #: modulator described them by the same bandwidth while this was absent, so
+    #: a design pointing at the unterminated cell was graded by the model of the
+    #: terminated one.
+    far_end_load_ohm: float | None = None
+    #: the unmodulated line between the end of the modulation section and the
+    #: far-end load, um. The optical carrier does not travel it and the
+    #: microwave does, twice, so on a line that reflects it rotates the returned
+    #: wave and moves the null. It does nothing where the far end is matched.
+    #:
+    #: The LTOI300 unterminated modulator draws its signal metal to 5220 um
+    #: against 5045 for the terminated one, on a modulation section of 5000, so
+    #: the two variants differ by 175 um of stub as well as by the resistor.
+    far_end_stub_um: float = 0.0
+
+    # --- the convergence guard on the electrostatic solve -------------------
+    # The capacitance sets the microwave index, the impedance and the bandwidth,
+    # and it is an integral of a field over a mesh. A design was released whose
+    # bandwidth moved between 19.6 and 26.1 GHz across four refinements, and at
+    # one of them two `must` rows failed at the worst corner that pass at the
+    # mesh as run. A figure read off an unconverged solve carries no margin.
+    #: the fine cell of the electrostatic mesh, um. Where this is unset the
+    #: cell is five times the optical one and never below 50 nm. That floor was
+    #: found to hold the solve short of convergence whatever the optical mesh
+    #: was set to, so the quantity is declarable rather than derived
+    rf_mesh_fine_um: float | None = None
+    #: how far the fine cell extends either side of a material interface, um
+    rf_mesh_fine_margin_um: float = 2.0
+    #: re-solve the electrostatic problem on a finer mesh and report the shift
+    convergence_check: bool = True
+    #: the factor the fine cell size is multiplied by for the refined solve
+    refinement: float = 0.5
+    #: the fractional shift in capacitance below which the solve is called
+    #: resolved. The microwave index goes as the square root of it, so a 2 per
+    #: cent capacitance shift is one per cent of index
+    convergence_tolerance: float = 0.02
+    #: "slot" places two conductors either side of one guide, which is the mirror
+    #: of a distributed-reflector laser. "gsg" places a signal conductor between
+    #: two grounds with a guide centred in EACH gap, which is the coplanar line a
+    #: push-pull interferometer carries.
+    #:
+    #: The two are different transmission lines. Solving a slot line for a device
+    #: drawn as ground-signal-ground overstates the impedance and understates the
+    #: capacitance and the conductor loss, and the drive a 50 ohm source actually
+    #: launches into the line follows from the impedance.
+    topology: Literal["slot", "gsg"] = "slot"
+    #: ground conductor width for the gsg topology; defaults to the signal width
+    ground_width_um: float | None = None
+
+
+class ModulatorCfg(BaseModel):
+    """A Mach-Zehnder amplitude modulator, as distinct from one of its arms.
+
+    The electro-optic stage solves one guide between two electrodes. What a link
+    budget consumes is the interferometer, which reaches its half-wave point at
+    half the single-arm voltage when the arms are driven in opposition. The
+    convention is declared here so that a reported V_pi states which device it
+    belongs to.
+    """
+    enabled: bool = False
+    configuration: Literal["mach_zehnder"] = "mach_zehnder"
+    #: push_pull drives the two arms in opposition and halves V_pi; single_arm
+    #: leaves the second arm as a passive reference and does not
+    drive: Literal["push_pull", "single_arm"] = "push_pull"
+    #: the band the device must pass, GHz. A modulator carrying a signal about a
+    #: carrier is required to work across a band, and a 3 dB bandwidth quoted at
+    #: the carrier describes a device 3 dB down where it is used. Declaring the
+    #: band causes the response to be reported at its edges
+    rf_band_GHz: list[float] = Field(default_factory=list)
 
 
 class GainMedium(BaseModel):
@@ -222,6 +327,66 @@ class PhaseSection(BaseModel):
     separation_um: float = 50.0
 
 
+
+class PhaseTrimmer(BaseModel):
+    """A thermal actuator that sets the cavity phase once, at commissioning.
+
+    It exists to answer one question: whether the mode comb can be placed. The
+    excursion a laser guarantees before commissioning is smaller than the one it
+    delivers after, by `ceil(hops) + 1`, and the difference is entirely the
+    cavity phase, which no process controls. A design with no way to set that
+    phase is graded on the guaranteed figure, and the framework's rules say so.
+
+    Declaring one is not enough, and this block is checked rather than believed:
+    the cavity stage computes the round-trip phase the trimmer can actually
+    deliver and reports whether it reaches a full free spectral range. A trimmer
+    that cannot move the comb through one whole mode spacing cannot place it.
+
+    It is thermal rather than electro-optic on purpose. The degraded mode this
+    supports is the one with the Pockels phase section unpowered, so an actuator
+    sharing that section's failure would be no answer at all.
+    """
+    enabled: bool = False
+    #: the guide length the heater runs over, um
+    length_um: float = 0.0
+    #: thermo-optic coefficient of the guiding film, per kelvin. It belongs to
+    #: the material and is declared here until the material file carries it
+    dn_dT_per_K: float = 3.0e-5
+    #: the cladding's own thermo-optic coefficient. A heater warms the cladding
+    #: as well as the film, and the mode's effective index moves by the
+    #: sensitivity-weighted sum of the two. Left at zero the reach is understated
+    #: by the cladding's share, which is the conservative direction.
+    dn_dT_cladding_per_K: float = 0.0
+    #: dn_eff/dn for the guiding film and for the cladding, MEASURED by
+    #: perturbing each index and re-solving the mode.
+    #:
+    #: These are the correct weights. The film confinement was used as a proxy
+    #: for the first and understated it by 28 per cent on one design, the
+    #: confinement being the fraction of POWER in the film while this is the
+    #: fraction of the effective index that follows the film's own. Left unset,
+    #: the confinement is used and a warning says so.
+    #:
+    #: They are pure properties of the cross-section, so they are measured once
+    #: and declared rather than re-solved on every run: two extra mode solves
+    #: per run is the cost, and the mode solve is the expensive stage.
+    index_sensitivity_film: float | None = None
+    index_sensitivity_cladding: float | None = None
+    #: where the two above came from, carried into the payload so a reader can
+    #: find the runs that measured them
+    index_sensitivity_provenance: str = ""
+    #: the temperature rise the heater is driven to, K
+    max_delta_T_K: float = 40.0
+    #: drawn width of the resistive wire, um
+    width_um: float = 1.5
+    #: which intracavity section the wire runs over. Both lie inside the
+    #: cavity and either sets the round-trip phase; they differ in how much
+    #: length is available and therefore in the temperature rise required.
+    #: The feed carries no electrode to clear; the phase section is longer.
+    over: Literal["feed", "phase_section"] = "feed"
+    #: the landing at each end of the wire, um square
+    pad_um: float = 60.0
+
+
 class Cavity(BaseModel):
     enabled: bool = True
     #: passive PIC length between the chip facet and the start of the grating
@@ -229,6 +394,8 @@ class Cavity(BaseModel):
     rsoa: RSOA = Field(default_factory=RSOA)
     #: an intracavity phase electrode, driven synchronously with the mirror
     phase_section: PhaseSection = Field(default_factory=PhaseSection)
+    #: a thermal actuator that sets the cavity phase once, at commissioning
+    phase_trimmer: PhaseTrimmer = Field(default_factory=PhaseTrimmer)
 
 
 class DynamicsCfg(BaseModel):
@@ -345,8 +512,53 @@ class FDTDCfg(BaseModel):
     #: which structure is solved. "taper" measures the radiation of the input
     #: taper; "grating" measures the reflection of a finite grating, which is an
     #: independent check on the coupled-mode kappa
-    structure: Literal["taper", "grating", "bandstructure"] = "taper"
+    structure: Literal["taper", "grating", "bandstructure", "coupler", "mmi"] = "taper"
     grating_periods: int = 100           # a finite section, not the full mirror
+    #: Point-coupler geometry, being a bus running past a ring of the given
+    #: radius. The chain carries no resonator block, so the geometry is declared
+    #: beside the solve that consumes it. The guide width is the ridge width the
+    #: design already states, and the two indices come from the same
+    #: effective-index reduction the taper uses.
+    #:
+    #: The two-dimensional reduction is valid only where the partially etched
+    #: slab is continuous across the gap, which is what sets the decay of the
+    #: evanescent field. Where a platform draws no slab between the two guides,
+    #: `dimensions: 3` is required.
+    coupler_gap_um: float = 1.0
+    coupler_ring_radius_um: float = 200.0
+    #: width of the ring guide where it differs from the bus. Unset, the
+    #: two are equal and the coupler is synchronous. A kit pairing a
+    #: single-mode bus with a wider multimode ring detunes the two
+    #: propagation constants, and the coupling is then governed by that
+    #: mismatch as much as by the gap
+    coupler_ring_width_um: float | None = None
+    #: modes of the ring guide the crossed power is resolved onto. One is
+    #: sufficient for a single-mode ring. A wider ring carries more than
+    #: one mode to receive the power, and coupling into a higher order is
+    #: loss to the resonance the fundamental forms
+    coupler_cross_bands: int = 1
+    #: half the window along the bus. The coupling integrand falls as the ring
+    #: curves away, so a window of 20 um at a 200 um radius omits about 2 % of
+    #: the interaction and a shorter one omits materially more
+    coupler_half_length_um: float = 20.0
+    coupler_stations: int = 201           # polygon vertices along the ring edge
+    coupler_port_width_um: float = 3.0    # mode monitor width at each port
+    coupler_margin_um: float = 1.5        # lateral clearance outside the guides
+    #: fractional half-width of the band over which the coupling is reported.
+    #: The coupling of a point coupler varies strongly with wavelength, so a
+    #: single frequency states less than it appears to
+    coupler_bandwidth_frac: float = 0.04
+    coupler_frequencies: int = 11
+    #: MMI geometry beyond what `mzm` already declares, being the length of the
+    #: access taper that carries each port from the guide width to the port
+    #: width. The multimode section, the port width and the port separation are
+    #: read from `mzm`, so the structure solved is the structure the layout
+    #: draws rather than a second declaration of it.
+    mmi_taper_length_um: float = 25.0
+    #: straight guide either side of the tapers, inside the PML
+    mmi_lead_um: float = 3.0
+    #: inputs to the multimode section. One is a splitter and two is a coupler
+    mmi_ports_in: Literal[1, 2] = 1
     #: band-structure check: bands solved at the zone edge, and the fraction of
     #: a band's energy that must sit in the core for it to count as guided
     num_bands: int = 16
@@ -516,6 +728,19 @@ class MonitorsCfg(BaseModel):
     disabled individually.
     """
     enabled: bool = True
+    #: how far the unetched slab reaches either side of a monitor's ridge, um.
+    #:
+    #: A monitor measures the process the device runs in, and a ridge with no
+    #: slab under it is a different waveguide. A die released from this chain
+    #: drew its slab across the device band only and left 18.3 per cent of the
+    #: ridge area outside it: the loss cutback, the critical-dimension vernier
+    #: and the electrode ladder all sat on bare oxide, so none of the four
+    #: quantities they measure described the device beside them.
+    #:
+    #: Where `platform.slab_offset_um` is declared the device's own convention is
+    #: used instead of this, so a design drawing local slab draws it the same way
+    #: everywhere.
+    slab_offset_um: float = 6.0
     #: gratings of stepped post gap, by which kappa against gap is measured
     #: directly on the delivered process rather than taken from a model
     kappa_ladder: bool = True
@@ -572,6 +797,44 @@ class SplitCfg(BaseModel):
     label_height_um: float = 25.0
 
 
+class CompanionCfg(BaseModel):
+    """A second device on the same die, differing in more than one parameter.
+
+    A split ladder brackets one parameter of one design, and every rung is the
+    same device. A companion is a DIFFERENT device that has to share the die.
+
+    The case that motivated it: a coherent radar generates its microwave carrier
+    as the beat between a chirped laser and a single-tone reference, so the
+    carrier is the DIFFERENCE of two optical frequencies. Each laser's frequency
+    moves about 3.9 GHz per kelvin. Placed on separate die the two drift
+    independently and the beat drifts with them; placed on one die at one
+    temperature they drift together, and the beat moves only by the mismatch
+    between two nominally identical cavities.
+
+    The device is re-drawn from the same builder with the overrides applied, so a
+    companion is the design file's own physics evaluated at different values, and
+    never a second drawing maintained by hand.
+    """
+    #: what the companion is, used to label it on the die and in the report
+    name: str = ""
+    #: dotted paths into this design file, each with the value the companion takes
+    overrides: dict[str, Any] = Field(default_factory=dict)
+    #: how many copies of the companion to place
+    copies: int = 1
+    #: what the companion is for, carried into the reticle payload
+    purpose: str = ""
+
+
+class CompanionsCfg(BaseModel):
+    """Companion devices placed on the die beside the primary one."""
+    enabled: bool = False
+    devices: list[CompanionCfg] = Field(default_factory=list)
+    #: vertical spacing. Zero derives it from the device extent
+    pitch_um: float = 0.0
+    label_each: bool = True
+    label_height_um: float = 25.0
+
+
 class ChipFrameCfg(BaseModel):
     """The final chip boundary and the usable area inside it.
 
@@ -620,6 +883,7 @@ class ReticleCfg(BaseModel):
     chip_frame: ChipFrameCfg = Field(default_factory=ChipFrameCfg)
     marks: AlignmentMarkCfg = Field(default_factory=AlignmentMarkCfg)
     split: SplitCfg = Field(default_factory=SplitCfg)
+    companions: CompanionsCfg = Field(default_factory=CompanionsCfg)
     monitors: MonitorsCfg = Field(default_factory=MonitorsCfg)
     #: Place the device so that its input facet lies on the sawn edge, and open
     #: the seal ring where the guide crosses it.
@@ -706,6 +970,81 @@ class ReleaseCfg(BaseModel):
     strict: bool = True
 
 
+class MzmCfg(BaseModel):
+    """The geometry of a Mach-Zehnder, beyond what the electrode already fixes.
+
+    The arm separation is not declared: it follows from the line, an arm sitting
+    on the centre line of each gap, so it is `electrode_width/2 + gap/2` and
+    cannot drift from the electrode the electro-optic stage solved.
+    """
+    #: the multimode section of the 1x2 splitter, and the two access tapers that
+    #: leave it. The defaults are those of `lxt_pdk_gf.ltoi300.cells.mmi1x2_cband`,
+    #: which is qualified on this stack.
+    #:
+    #: The output gap is `port_separation_um - port_width_um`, and it is drawn
+    #: open rather than closed. A junction whose two ports meet at the end face
+    #: forces that gap through zero and breaks any minimum-space rule over the
+    #: length of the access taper; the qualified cell leaves 0.60 um, which is
+    #: twice the rule, so the gap never approaches it.
+    mmi_width_um: float = 4.5
+    mmi_length_um: float = 13.5
+    #: centre-to-centre separation of the two access tapers at the end face
+    port_separation_um: float = 2.55
+    #: the width of each access taper where it meets the multimode section
+    port_width_um: float = 1.95
+    #: the S-bend that carries each arm from the splitter out to its gap. A
+    #: raised cosine, so the curvature is zero where it meets a straight guide
+    sbend_length_um: float = 220.0
+    sbend_segments: int = 96
+    #: how many modulators the cell carries. Mod 1 and Mod 2 are the same design
+    #: and differ only in what drives them, so the pair is one cell rather than a
+    #: parameter ladder: they must share a die, a process run and a thermal
+    #: environment, their outputs being combined coherently
+    count: int = 2
+    #: centre-to-centre spacing of the modulators, um
+    pitch_um: float = 1500.0
+    #: a grounded strip between them. Mod 1 carries the transmit reference at
+    #: full drive and Mod 2 the received echo, so a copy of the reference
+    #: crossing into the echo path lands in band and coherent
+    shield: bool = True
+    shield_width_um: float = 60.0
+    #: names drawn beside each modulator, in order
+    labels: list[str] = Field(default_factory=lambda: ["MOD1-TX-REF", "MOD2-RX-ECHO"])
+    #: the access taper from the multimode section out to the guide width
+    port_taper_um: float = 25.0
+    #: the minimum same-layer space the process declares, used only to report how
+    #: far the splitting region falls below it
+    min_space_um: float = 0.30
+    #: straight guide between the taper and the splitter
+    lead_straight_um: float = 50.0
+
+    # --- the electrical terminals -------------------------------------------
+    # A coplanar line with no terminals cannot be probed, driven or terminated,
+    # and a device drawn without them is not a device. The pad structure follows
+    # `lxt_pdk_gf`: the line is scaled up to the probe pitch over a taper, and
+    # the two optical arms run in the two slots the whole way, so metal never
+    # crosses a guide.
+    #: ground-signal-ground probe pads at each end of the line
+    pads: bool = True
+    #: probe pitch, signal centre to ground centre, at the pad face. The whole
+    #: cross-section is scaled to reach it, so the ratio of gap to conductor is
+    #: held and with it the characteristic impedance
+    pad_probe_pitch_um: float = 100.0
+    #: the constant-width landing the probe sits on
+    pad_straight_um: float = 60.0
+    #: the taper from the pad cross-section down to the line
+    pad_taper_um: float = 150.0
+    pad_taper_segments: int = 96
+    #: straps tying the shield to the ground planes on either side of it. The
+    #: shield is otherwise a floating conductor as long as the electrode, which
+    #: resonates at multiples of c/(2 n_m L) and cannot shield
+    shield_straps: bool = True
+    #: strap spacing. It is to stay well below a quarter of the microwave
+    #: wavelength at the top of the band, which the layout stage checks
+    shield_strap_pitch_um: float = 1000.0
+    shield_strap_width_um: float = 20.0
+
+
 class LayoutCfg(BaseModel):
     enabled: bool = True
     #: how many grating periods to draw. None draws the whole device, which is
@@ -715,8 +1054,21 @@ class LayoutCfg(BaseModel):
     #: the die-level work: a split ladder multiplies the polygons by the number
     #: of copies and the fill placer and the netlist extraction scale with them
     draw_periods: int | None = None
+    #: which device is drawn. "edbr" is a gain chip butt-coupled to a passive
+    #: circuit terminated in a distributed reflector; "mach_zehnder" is a
+    #: push-pull interferometer on a coplanar ground-signal-ground line. The
+    #: emission, the grid snap, the geometry check and the backend comparison are
+    #: common to both, and only the polygons differ
+    device: Literal["edbr", "mach_zehnder"] = "edbr"
     taper_length_um: float = 150.0
     taper_tip_width_um: float = 0.4
+    #: stations at which the taper's profile is sampled when it is drawn. The
+    #: curve itself is `taper.profile`, shared with the stage that evaluates it
+    taper_segments: int = 64
+    #: the narrowest slab feature the process allows, um. The slab derived from
+    #: the ridges is opened by half of this, which removes the spikes sizing
+    #: leaves at the acute tip of a facet taper
+    slab_min_width_um: float = 0.30
     input_facet_angle_deg: float = 8.0
     output_facet_angle_deg: float = 0.0
     #: Side of the square bond pad on each electrode, in micrometres. This was a
@@ -728,6 +1080,22 @@ class LayoutCfg(BaseModel):
     #: value, so raising it widens the etch-clear region with it.
     bond_pad_um: float = 80.0
     cell_name: str = "EDBR"
+    #: the layer the grating posts are drawn on, by name in `layer_map`. Left
+    #: unset they are drawn on the guide layer with the ridge itself, which is
+    #: what every mask this chain emitted before 2026-09-03 carries.
+    #:
+    #: A process may ask for them elsewhere. LT-PRO reserves 2/11 for small
+    #: repeating features such as a Bragg reflector or a photonic crystal,
+    #: stating that it eases the rule check and the reticle assembly, while the
+    #: ridge itself is 2/10. Posts appended to the guide layer cannot be moved
+    #: by a layer map or by a derived layer, because by then they are the same
+    #: polygons as the guide.
+    #:
+    #: A rule written against the guide layer stops seeing the posts once they
+    #: move, so the rule set is to be extended to the new layer at the same
+    #: time. The DRC stage reports which layers a deck names and which of them
+    #: the mask leaves empty, which is where that omission shows.
+    grating_layer: str | None = None
     layer_map: dict[str, list[int]] = Field(
         default_factory=lambda: {
             "WG": [1, 0],
@@ -839,6 +1207,18 @@ class MaskCfg(BaseModel):
     #: as `drc.target`. Density in particular is a property of the die and
     #: not of the device, the frame and the monitors contributing to it
     target: Literal["device", "die"] = "device"
+    #: a region within which violations are counted separately rather than as
+    #: real, given as [x0, y0, x1, y1] in die coordinates. It exists for the
+    #: process monitors: a critical-dimension vernier has to straddle the
+    #: minimum width to find where printing fails, so its narrowest rungs breach
+    #: the rule on purpose. Checked against the device cell those shapes are out
+    #: of scope and the report is silent about them; checked against the die
+    #: they are reported as real, and a reader cannot tell them from a defect.
+    #: Left unset, every violation counts as real.
+    #:
+    #: The box is read from the reticle stage where that stage declares one, so
+    #: it follows the monitors rather than being written out by hand.
+    declared_region_from_reticle: bool = True
     #: layers whose shapes are merged and counted as connected regions
     connected_layers: list[str] = Field(default_factory=lambda: ["WG", "METAL", "PAD"])
     #: how many connected regions each layer should have when correct
@@ -1043,6 +1423,8 @@ class Design(BaseModel):
     waveguide: Waveguide = Field(default_factory=Waveguide)
     grating: Grating = Field(default_factory=Grating)
     electrodes: Electrodes = Field(default_factory=Electrodes)
+    mzm: MzmCfg = Field(default_factory=MzmCfg)
+    modulator: ModulatorCfg = Field(default_factory=ModulatorCfg)
     cavity: Cavity = Field(default_factory=Cavity)
     chirp: ChirpDrive = Field(default_factory=ChirpDrive)
     dynamics: DynamicsCfg = Field(default_factory=DynamicsCfg)
@@ -1095,6 +1477,50 @@ class Design(BaseModel):
     @property
     def source_path(self) -> Path | None:
         return getattr(self, "_source_path", None)
+
+    def materials_path(self) -> str | None:
+        """Where ``platform.materials_file`` actually is.
+
+        The path was previously handed to the loader as written, so it was
+        resolved against the working directory and a design carrying a foundry
+        material file ran from the repository root and failed from its own
+        folder. Three locations are searched in order, the first that exists
+        being taken: beside the design file, against the working directory,
+        and against the root of the chain installation, which is where the
+        vendored PDK material files live.
+
+        A path that matches none of the three raises here, naming what was
+        tried, rather than reaching the YAML loader as a bare file-not-found.
+        """
+        declared = self.platform.materials_file
+        if declared is None:
+            return None
+        p = Path(declared)
+        if p.is_absolute():
+            if p.exists():
+                return str(p)
+            raise FileNotFoundError(f"platform.materials_file: {p} does not exist")
+
+        here = Path(__file__).resolve()
+        candidates: list[Path] = []
+        src = self.source_path
+        if src is not None:
+            candidates.append(src.resolve().parent / p)
+        candidates.append(Path.cwd() / p)
+        candidates.append(here.parents[2] / p)     # the chain installation
+        candidates.append(here.parents[3] / p)     # the repository above it
+        tried: list[Path] = []
+        for c in candidates:
+            if c not in tried:
+                tried.append(c)
+        for candidate in tried:
+            if candidate.exists():
+                return str(candidate)
+        raise FileNotFoundError(
+            "platform.materials_file "
+            f"{declared!r} was not found. Tried: "
+            + ", ".join(str(t) for t in tried)
+        )
 
 
 def _deep_merge(base: dict, over: dict) -> dict:

@@ -115,7 +115,7 @@ being the only target of severity `must` that was not met.
 | `grating.bragg_wavelength_nm` | 1545.9 nm ± 2 %, that is 1515.0 to 1576.8 | 1545.9 nm measured, stated as 1.2 % from the design value | 1530.8 nm | must | pass |
 | `grating.peak_reflectivity` | 0.75 ± 20 %, that is 0.600 to 0.900 | Fig. 1d, approximately 75 % simulated | 0.975 | must | **fail** |
 | `grating.fwhm_GHz` | 5.0 to 14.0 GHz | 6.5 GHz simulated, 8 GHz measured off chip | 21.38 GHz | should | **fail** |
-| `eo.tuning_MHz_per_V` | 550 MHz/V ± 30 %, that is 385 to 715 | Fig. 2a, 550 MHz/V measured at the mirror | 708.1 MHz/V | must | pass |
+| `eo.tuning_MHz_per_V` | 550 MHz/V ± 30 %, that is 385 to 715 | Fig. 2a, 550 MHz/V measured at the mirror | 747.6 MHz/V, and 825 converged | must | **fail**, see below |
 | `eo.VpiL_ideal_V_cm` | 4.0 V·cm ± 25 %, that is 3.00 to 5.00 | 4 V·cm simulated, quoted without overlap derating | 3.56 V·cm | should | pass |
 | `eo.mode_overlap_with_metal` | ≤ 1 × 10⁻⁵ | electrodes described as placed conservatively to avoid loss | 1.30 × 10⁻⁸ | must | pass |
 | `cavity.mode_hop_free_range_GHz` | ≥ 8.0 GHz | abstract, continuous tuning in excess of 10 GHz | 3.85 GHz | should | **fail** |
@@ -123,6 +123,54 @@ being the only target of severity `must` that was not met.
 | `cavity.smsr_dB` | ≥ 40 dB | 63 dB at 0.02 nm resolution bandwidth | 52.6 dB | should | pass |
 | `drc.error_violations` | ≤ 0 | not applicable; a chain requirement | 0 of 5 rules | must | pass |
 | `layout.mask_is_complete` | ≥ 1 | not applicable; a chain requirement | true | info | pass |
+
+#### The mirror tuning rate, re-measured on a converged mesh, 2026-09-03
+
+**The verdict on this row has inverted, and it inverted on the mesh rather than
+on the device.** The row was recorded at 708.1 MHz/V against a ceiling of 715,
+which is one per cent of margin. The chain now returns 747.6 MHz/V on the
+design as it stands, and the row fails.
+
+The change is attributed to the correction at `8eb7c02`, which made the edges of
+the window the overlap is integrated over into fixed points of the electrostatic
+mesh, the tails of the mode having been sampled on the coarse cell until then.
+That commit postdates this document. The attribution is by inspection of the
+commit rather than by re-running the superseded code.
+
+**The figure of 747.6 MHz/V is itself unconverged, and converging it moves the
+disagreement further.** The stage warns that halving the cell moves the overlap
+by 3.8 per cent against a 2 per cent tolerance. Refining the electrostatic cell
+gives:
+
+| `electrodes.rf_mesh_fine_um` | overlap Γ | tuning, MHz/V | shift on halving |
+|---|---:|---:|---:|
+| default, being five times the optical cell | 0.39358 | 747.6 | 3.8 % |
+| 0.030 | 0.40543 | 770.1 | 2.6 % |
+| 0.020 | 0.41178 | 782.2 | 2.0 % |
+| 0.015 | 0.41591 | 790.0 | 1.5 % |
+| 0.010 | 0.41987 | 797.5 | 1.2 % |
+
+Fitting Γ(h) = Γ∞ − C·h^p over those four points gives Γ∞ = 0.43431 at an order
+of 0.636, and a converged tuning rate of about 825 MHz/V. The order is
+consistent with a staircased sidewall, the same measurement on a 70° sidewall
+elsewhere in this repository returning 0.55.
+
+**Against the measured 550 MHz/V the converged chain is high by 50 per cent.**
+The earlier agreement rested on an unconverged mesh, and the two errors
+happened to oppose each other.
+
+The target is left as it stands and no correction factor is applied, in keeping
+with rules 2 and 8 of the operating manual. What is established is the size and
+the direction of the disagreement. Three explanations remain open and are
+distinguished by evidence this repository does not hold: an effective r33 in the
+poled film below the bulk 30.5 pm/V carried in the material library; a drive
+condition behind Fig. 2a that differs from the ideal one modelled here; and an
+electrode gap on the fabricated device wider than the design figure.
+
+**The remaining rows of the table above have not been re-run against the current
+chain**, and at least one is known to have moved: `eo.mode_overlap_with_metal`
+reads 8.79 × 10⁻⁹ on the run of 2026-09-03 against the 1.30 × 10⁻⁸ recorded
+here.
 
 Two of the criteria are deliberately looser than the published figure they cite.
 The linewidth is admitted at a factor of two, the RSOA parameters on which it

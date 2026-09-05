@@ -136,6 +136,10 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         return _run_grating(design, ctx, cfg, backend, status, n_core, n_clad)
     if cfg.structure == "bandstructure":
         return _run_bands(design, ctx, cfg, backend, status, n_core, n_clad)
+    if cfg.structure == "coupler":
+        return _run_coupler(design, ctx, cfg, backend, status, n_core, n_clad)
+    if cfg.structure == "mmi":
+        return _run_mmi(design, ctx, cfg, backend, status, n_core, n_clad)
 
     job = {
         "wavelength_um": design.waveguide.wavelength_um,
@@ -202,6 +206,243 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             "the FDTD solve is two-dimensional by effective index, so only the lateral "
             "radiation channel is represented. The vertical channel requires "
             "fdtd.dimensions: 3"
+        )
+    return payload
+
+
+def _run_mmi(design, ctx, cfg, backend, status, n_core, n_clad):
+    """Transmission, balance and reflection of the multimode splitter.
+
+    The splitter is drawn by the layout stage and was evaluated by nothing. Its
+    excess loss enters every arm of an interferometer twice, and its imbalance
+    sets the extinction the device can reach whatever the phase control does.
+
+    The geometry is read from `mzm`, so the structure solved is the structure
+    the mask carries. A passive splitter cannot return more than it is given,
+    so the sum over the ports and the reflection is the solve's own check.
+    """
+    w, m = design.waveguide, design.mzm
+    lam = w.wavelength_um
+    half_band = cfg.coupler_bandwidth_frac
+    job = {
+        "wavelength_um": lam,
+        "lambda_min_um": lam * (1.0 - half_band),
+        "lambda_max_um": lam * (1.0 + half_band),
+        "nfreq": cfg.coupler_frequencies,
+        "n_core": n_core,
+        "n_background": n_clad,
+        "width_um": float(w.top_width_um),
+        "mmi_width_um": float(m.mmi_width_um),
+        "mmi_length_um": float(m.mmi_length_um),
+        "port_width_um": float(m.port_width_um),
+        "port_separation_um": float(m.port_separation_um),
+        "taper_length_um": cfg.mmi_taper_length_um,
+        "lead_um": cfg.mmi_lead_um,
+        "ports_in": int(cfg.mmi_ports_in),
+        "taper_stations": cfg.taper_stations,
+        # The monitor may not reach the neighbouring port. Set to the port
+        # separation it spans as far as the next guide's centre line, and the
+        # eigenmode decomposition then solves the modes of a two-guide section
+        # and calls the supermode band 1, which under-reports each port.
+        "port_width_monitor_um": float(min(0.8 * m.port_separation_um,
+                                           4.0 * w.top_width_um)),
+        "margin_um": cfg.coupler_margin_um,
+        "pml_um": cfg.pml_um,
+        "resolution": cfg.resolution,
+        "convergence_resolution": (
+            cfg.convergence_resolution
+            if cfg.convergence_resolution is not None
+            else max(8, cfg.resolution // 2)
+        ),
+    }
+    result = bridge.run_mmi(job, ctx.run_dir, backend, timeout_s=cfg.timeout_s)
+    guard = result.get("guard") or {}
+
+    payload: dict[str, Any] = {
+        "enabled": True,
+        "structure": "mmi",
+        "solver": "meep",
+        "solver_version": status.get("version", "unknown"),
+        "backend": backend.kind,
+        "dimensions": cfg.dimensions,
+        "resolution": cfg.resolution,
+        "ports_in": int(cfg.mmi_ports_in),
+        "n_core_effective_index": n_core,
+        "n_slab_effective_index": n_clad,
+        "mmi_width_um": float(m.mmi_width_um),
+        "mmi_length_um": float(m.mmi_length_um),
+        "transmission": result["transmission_at_design"],
+        "excess_loss_dB": result["excess_loss_dB_at_design"],
+        "imbalance_dB": result["imbalance_dB_at_design"],
+        "reflection": result["reflection_at_design"],
+        "accounted": result["accounted_at_design"],
+        "transmission_spectrum": result["port_transmission"],
+        "wavelength_um": result["wavelength_um"],
+        "convergence": {
+            "guarded": bool(guard),
+            "coarse_resolution": guard.get("resolution"),
+            "transmission_coarse": guard.get("transmission_at_design"),
+            "shift_fraction": guard.get("shift_fraction"),
+            "resolved": (abs(guard["shift_fraction"]) < 0.05) if guard else False,
+        },
+    }
+    ctx.put("fdtd", payload)
+    ctx.write_stage("fdtd", payload)
+
+    if payload["accounted"] > 1.0 + 1e-3:
+        ctx.warn(
+            f"the splitter accounts for {payload['accounted']:.4f} of its input, which "
+            "a passive structure cannot exceed. The solve is at fault: widen the "
+            "monitors or raise fdtd.resolution",
+            key="fdtd.mmi_gain")
+    if payload["accounted"] < 0.97:
+        ctx.warn(
+            f"the ports and the reflection account for {payload['accounted']:.4f} of "
+            "the input, so {:.1%} left laterally".format(1 - payload["accounted"]) +
+            ". In two dimensions that is radiation from the multimode section rather "
+            "than a numerical shortfall, and it is the excess loss of the splitter",
+            key="fdtd.mmi_radiates")
+    if abs(payload["imbalance_dB"]) > 0.2:
+        ctx.warn(
+            f"the two ports differ by {payload['imbalance_dB']:.2f} dB, which bounds "
+            "the extinction any interferometer built on this splitter can reach",
+            key="fdtd.mmi_imbalanced")
+    if guard and abs(guard.get("shift_fraction") or 0.0) >= 0.05:
+        ctx.warn(
+            f"the transmission moves by {abs(guard['shift_fraction']):.1%} between "
+            f"resolution {guard['resolution']} and {cfg.resolution}, so the mesh error "
+            "is comparable with the excess loss being measured",
+            key="fdtd.mmi_unconverged")
+    if cfg.dimensions == 2:
+        ctx.warn(
+            "the splitter solve is two-dimensional by effective index, so the vertical "
+            "radiation channel is absent and the excess loss reported is the lateral "
+            "part alone",
+            key="fdtd.mmi_two_dimensional")
+    return payload
+
+
+def _run_coupler(design, ctx, cfg, backend, status, n_core, n_clad):
+    """Power coupling of a ring-to-bus point coupler, measured in the plane.
+
+    The quantity a resonator turns on is the fraction of power the bus hands to
+    the ring in one pass. A mode solver cannot supply it and the transfer matrix
+    that closes the ring assumes it, so it is measured here.
+
+    The clad index of the effective-index reduction is the film *beside* the
+    ridge, which on a partially etched platform is the unetched slab. That is
+    the index the evanescent field decays against, and it is a great deal
+    closer to the mode index than the cladding is: taking the cladding instead
+    overstates the decay constant and understates the coupling by an order of
+    magnitude at a gap of a micrometre.
+
+    The solve carries its own check. A point coupler at this separation has no
+    radiation channel, so the through and cross powers must account for the
+    input, and a departure from unity is a defect in the solve.
+    """
+    w = design.waveguide
+    lam = w.wavelength_um
+    half_band = cfg.coupler_bandwidth_frac
+    job = {
+        "wavelength_um": lam,
+        "lambda_min_um": lam * (1.0 - half_band),
+        "lambda_max_um": lam * (1.0 + half_band),
+        "nfreq": cfg.coupler_frequencies,
+        "n_core": n_core,
+        "n_background": n_clad,
+        "width_um": float(w.top_width_um),
+        "gap_um": cfg.coupler_gap_um,
+        "ring_width_um": (float(cfg.coupler_ring_width_um)
+                          if cfg.coupler_ring_width_um else None),
+        "ring_radius_um": cfg.coupler_ring_radius_um,
+        "cross_bands": int(cfg.coupler_cross_bands),
+        "half_length_um": cfg.coupler_half_length_um,
+        "ring_stations": cfg.coupler_stations,
+        "port_width_um": cfg.coupler_port_width_um,
+        "margin_um": cfg.coupler_margin_um,
+        "pml_um": cfg.pml_um,
+        "resolution": cfg.resolution,
+        "convergence_resolution": (
+            cfg.convergence_resolution
+            if cfg.convergence_resolution is not None
+            else max(8, cfg.resolution // 2)
+        ),
+    }
+    result = bridge.run_coupler(job, ctx.run_dir, backend, timeout_s=cfg.timeout_s)
+
+    kappa2 = float(result["kappa2_at_design"])
+    unitarity = float(result["unitarity_at_design"])
+    guard = result.get("guard") or {}
+
+    # the loss at which a ring of this radius would be critically coupled, being
+    # the single number that turns this measurement into a design statement
+    circumference_cm = 2.0 * np.pi * cfg.coupler_ring_radius_um * 1e-4
+    critical_loss = (
+        float(-10.0 * np.log10(max(1.0 - kappa2, 1e-12)) / circumference_cm)
+        if circumference_cm > 0 else float("nan")
+    )
+
+    payload: dict[str, Any] = {
+        "enabled": True,
+        "structure": "coupler",
+        "solver": "meep",
+        "solver_version": status.get("version", "unknown"),
+        "backend": backend.kind,
+        "processes": cfg.processes,
+        "dimensions": cfg.dimensions,
+        "resolution": cfg.resolution,
+        "n_core_effective_index": n_core,
+        "n_slab_effective_index": n_clad,
+        "gap_um": cfg.coupler_gap_um,
+        "ring_width_um": float(cfg.coupler_ring_width_um or w.top_width_um),
+        "ring_radius_um": cfg.coupler_ring_radius_um,
+        "kappa2": kappa2,
+        "t2": float(result["t2_at_design"]),
+        "unitarity": unitarity,
+        "kappa2_spectrum": result["kappa2"],
+        "kappa2_by_band": result.get("kappa2_by_band_at_design"),
+        "wavelength_um": result["wavelength_um"],
+        "critical_coupling_loss_dB_cm": critical_loss,
+        "convergence": {
+            "guarded": bool(guard),
+            "coarse_resolution": guard.get("resolution"),
+            "kappa2_coarse": guard.get("kappa2_at_design"),
+            "shift_fraction": guard.get("shift_fraction"),
+            "resolved": (abs(guard["shift_fraction"]) < 0.10) if guard else False,
+        },
+    }
+
+    ctx.put("fdtd", payload)
+    ctx.write_stage("fdtd", payload)
+
+    if abs(unitarity - 1.0) > 0.01:
+        ctx.warn(
+            f"the coupler solve accounts for {unitarity:.4f} of its input across the "
+            "two ports. A point coupler carries no radiation channel, so the shortfall "
+            "is numerical: widen fdtd.coupler_port_width_um or fdtd.coupler_margin_um, "
+            "or raise fdtd.resolution",
+            key="fdtd.coupler_unitarity",
+        )
+    if guard and abs(guard.get("shift_fraction") or 0.0) >= 0.10:
+        ctx.warn(
+            f"the coupling moves by {abs(guard['shift_fraction']):.1%} between "
+            f"resolution {guard['resolution']} and {cfg.resolution}, so the mesh error "
+            "is comparable with the quantity. Raise fdtd.resolution until the shift "
+            "falls well below the difference the measurement has to distinguish",
+            key="fdtd.coupler_unconverged",
+        )
+    if not guard:
+        ctx.warn(
+            "the coupler solve carries no convergence guard, so its mesh error is "
+            "unmeasured. Set fdtd.convergence_resolution to a coarser mesh",
+            key="fdtd.coupler_unguarded",
+        )
+    if cfg.dimensions == 2:
+        ctx.warn(
+            "the coupler solve is two-dimensional by effective index. The lateral "
+            "channel is represented and power radiated vertically out of the slab is "
+            "not, and the reduction assumes the slab is continuous across the gap",
+            key="fdtd.coupler_two_dimensional",
         )
     return payload
 

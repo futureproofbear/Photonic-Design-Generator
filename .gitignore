@@ -1,5 +1,7 @@
 # environments and caches
 .venv/
+# one environment per kit, kits disagreeing about which gdsfactory they want
+.venv-*/
 __pycache__/
 *.pyc
 *.egg-info/
@@ -44,6 +46,14 @@ design-chain/pdk/lxt_pdk_gf/
 
 # Foundry rule decks are obtained from the foundry under their own terms.
 design-chain/pdk/LXT_KLayout_DRC_Runsets/
+
+# Every other vendor PDK, on the same terms as the two above: obtained from its
+# supplier, installed rather than vendored, and not this repository's to carry.
+# One of them reached a commit here as 5238 files and half a million lines
+# because the pattern list named two PDKs by name and the tree held three.
+design-chain/pdk/*/
+!design-chain/pdk/.gitkeep
+design-chain/pdk/*.zip
 
 # --- Deliberately tracked ---------------------------------------------------
 #

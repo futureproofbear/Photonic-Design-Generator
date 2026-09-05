@@ -884,3 +884,133 @@ def test_a_cross_check_between_two_of_your_own_implementations_is_weak():
     # the mirror's own delay, and the assembly which must exceed it
     tau_dbr = 67.1349e-12
     assert tau_dbr + 2 * tau > tau_dbr
+
+
+# --- the thermal phase trimmer ----------------------------------------------
+
+
+def test_the_side_mode_suppression_is_evaluated_across_cavity_phase():
+    """One sample of cavity phase is not a property of the design.
+
+    The suppression swings with the round-trip path modulo a wavelength, which
+    no process holds on a centimetre-long cavity. A single value therefore
+    describes the die that happened to be drawn. The stage must scan the phase
+    and report the range it spans.
+    """
+    from picchain.stages import s04_cavity
+
+    src = inspect.getsource(s04_cavity)
+    assert "_side_mode_at" in src
+    assert "phase_scan" in src
+    for k in ("smsr_dB_worst", "smsr_dB_best",
+              "n_cavity_modes_in_band_worst", "n_cavity_modes_in_band_best"):
+        assert k in src, k
+    # the scan must be driven through the phase argument of the mode finder.
+    # Perturbing a geometry to move the phase would move other quantities too.
+    assert "extra=extra_phase" in src
+
+
+def test_the_best_of_the_scan_is_claimed_only_with_a_verified_trimmer():
+    """A design entitled to the best of the phase scan must carry the actuator.
+
+    Without one the die lands where it lands, so the worst of the scan is what
+    the design can promise. The choice is made by the stage from the trimmer's
+    computed range, and never by an assertion in a design file.
+    """
+    from picchain.stages import s04_cavity
+
+    src = inspect.getsource(s04_cavity)
+    # the payload assignment, not the earlier mentions in the tolerance scan
+    i = src.index('"smsr_dB_settable": (_phase_scan["smsr_dB_best"]')
+    window = src[i:i + 400]
+    assert "covers_a_full_fsr" in window
+    assert "smsr_dB_best" in window and "smsr_dB_worst" in window
+
+
+def test_the_suppression_is_taken_at_its_worst_over_the_drive():
+    """Zero mirror bias is a question the radar never asks.
+
+    The mirror is swept across the chirp on every ramp and the side mode moves
+    with it. A suppression read at zero bias selected, on one design, the phase
+    whose figure was highest there and worst across the ramp: 44.17 dB at zero
+    bias and 27.47 dB by the top of the drive, against a 40 dB bound. A separate
+    phase held 43.10 dB the whole way.
+    """
+    from picchain.stages import s04_cavity
+
+    src = inspect.getsource(s04_cavity)
+    assert "_side_mode_over_the_drive" in src
+    # the scan must use the over-the-drive figure, not the zero-bias one
+    assert "_scan = [_side_mode_over_the_drive(" in src
+    # and the zero-bias value stays visible, so the two can be compared
+    assert "smsr_dB_at_zero_bias" in src
+
+
+def test_both_graded_quantities_are_read_at_one_setting_of_the_phase():
+    """A trimmer sets one variable, so two rows graded on it hold together.
+
+    Taking each requirement at its own optimum over phase describes two devices.
+    The stage evaluates the suppression and the swept excursion at the same
+    stations, reports the widest window in which both bounds hold, and refuses
+    to name a setting where that window is empty.
+    """
+    from picchain.stages import s04_cavity
+
+    src = inspect.getsource(s04_cavity)
+    assert "joint_with_the_hop_free_span" in src
+    assert "a_single_setting_meets_both" in src
+    assert "cavity.no_joint_phase_window" in src
+    # the excursion at each station must be the SWEPT one, which tracks the mode
+    # and sees hops, rather than the analytic product of slope and span
+    assert '_sw.get("range_Hz")' in src
+
+
+def test_the_trimmer_reach_is_an_effective_index_and_states_its_break_even():
+    """A material coefficient times a geometric length is not a mode's phase.
+
+    The reach was computed as a bulk one, overstating it by the reciprocal of
+    the confinement. It is now the confinement-weighted sum of the film and
+    cladding coefficients, and the coefficient at which the entitlement flips is
+    reported so that a measurement can settle it.
+    """
+    from picchain.stages import s04_cavity
+
+    src = inspect.getsource(s04_cavity)
+    assert "_dndt_eff" in src
+    assert "dn_dT_cladding_per_K" in src
+    assert "dn_dT_effective_break_even_per_K" in src
+    assert "film_confinement" in src
+
+
+def test_a_trimmer_reaches_a_full_mode_spacing_only_if_its_length_allows():
+    """The trimmer's claim is arithmetic and is checked rather than declared.
+
+    Two passes of the intracavity section accumulate 2*(2*pi/lambda)*dn*L of
+    round-trip phase, and a full mode spacing is 2*pi of it. Halving the wire
+    halves the phase, so the same heater on a shorter section loses the claim.
+    """
+    import math
+
+    def round_trip_phase(length_um, dn_dT, dT, lam_um=1.588):
+        return 2.0 * (2.0 * math.pi / lam_um) * (dn_dT * dT) * length_um
+
+    full = 2.0 * math.pi
+    assert round_trip_phase(1400.0, 3e-5, 40.0) > full
+    assert round_trip_phase(600.0, 3e-5, 40.0) < full
+    # and the temperature a full spacing costs is the inverse of that
+    dT_full = full / (2.0 * (2.0 * math.pi / 1.588) * 3e-5 * 1400.0)
+    assert 18.0 < dT_full < 20.0
+
+
+def test_a_declared_trimmer_that_is_drawn_on_nothing_is_raised():
+    """The cavity stage runs before the layout stage and cannot see the mask.
+
+    A trimmer declared in the design file and absent from the polygons would
+    otherwise buy a `must` row with a wire that does not exist, so the layout
+    stage carries the check.
+    """
+    from picchain.stages import s05_layout
+
+    src = inspect.getsource(s05_layout)
+    assert "phase_trimmer" in src
+    assert "HEATER" in src

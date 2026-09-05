@@ -318,3 +318,41 @@ def test_the_roots_are_returned_in_increasing_frequency():
     r = resonance_roots(f, phase, 2)
     assert len(r) == 4
     assert r == sorted(r)
+
+
+def test_graded_axis_admits_no_degenerate_cell():
+    """A margin edge landing on a feature must not leave a cell of zero width.
+
+    `f - fine_margin` is rarely bit-identical to the feature it lands on, so two
+    breakpoints an epsilon apart survive a `unique` and leave a cell of width
+    1e-16. The energy integral over such a mesh diverges: one electrode
+    thickness in a sweep returned a capacitance of 6.7e26 pF/cm and an impedance
+    of 1.7e-12 ohm, with both neighbouring thicknesses sound.
+    """
+    import numpy as np
+
+    from picchain.geometry import graded_axis
+
+    # the case that failed: the electrode top at 2.12 puts a margin edge on the
+    # slab top at 0.12, to within a floating-point epsilon
+    feats = [-7.0, 0.0, 0.12, 0.3, 2.12]
+    ax = graded_axis(-48.8, 2.92, feats, 0.025, 0.6, 2.0)
+    d = np.diff(ax)
+    assert d.min() > 1e-9, "a degenerate cell survived"
+    for f in feats:
+        assert np.any(np.isclose(ax, f, atol=1e-12)), f"{f} is not a node"
+
+
+def test_graded_axis_refines_monotonically():
+    """Halving the cell must only add nodes, never move the interfaces."""
+    import numpy as np
+
+    from picchain.geometry import graded_axis
+
+    feats = [-7.0, 0.0, 0.12, 0.3, 1.02]
+    coarse = graded_axis(-10.0, 2.0, feats, 0.05, 0.6, 2.0)
+    fine = graded_axis(-10.0, 2.0, feats, 0.025, 0.6, 2.0)
+    assert len(fine) > len(coarse)
+    for f in feats:
+        assert np.any(np.isclose(coarse, f, atol=1e-12))
+        assert np.any(np.isclose(fine, f, atol=1e-12))

@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import math
+
 import numpy as np
 
 
@@ -106,35 +108,64 @@ def graded_axis(
     d_coarse: float,
     fine_margin: float = 0.4,
 ) -> np.ndarray:
-    """Piecewise-uniform axis: fine spacing across the feature span (padded by
-    ``fine_margin``), coarse spacing outside.  Feature coordinates are snapped
-    onto the grid so material boundaries land on nodes."""
-    if not features:
-        return np.arange(lo, hi + 0.5 * d_coarse, d_coarse)
-    f_lo = max(lo, min(features) - fine_margin)
-    f_hi = min(hi, max(features) + fine_margin)
+    """Piecewise-uniform axis with every feature coordinate on a node.
 
-    def _uniform(a: float, b: float, d: float) -> np.ndarray:
-        n = max(1, int(round((b - a) / d)))
-        return np.linspace(a, b, n + 1)
+    The feature coordinates are breakpoints of the mesh, so each is a node
+    exactly and each interval between consecutive breakpoints is uniform. An
+    interval within ``fine_margin`` of a feature is meshed at ``d_fine`` and the
+    rest at ``d_coarse``.
 
-    parts = []
-    if f_lo > lo + 1e-9:
-        parts.append(_uniform(lo, f_lo, d_coarse))
-    parts.append(_uniform(f_lo, f_hi, d_fine))
-    if hi > f_hi + 1e-9:
-        parts.append(_uniform(f_hi, hi, d_coarse))
-    axis = np.unique(np.concatenate(parts))
-    # snap the nearest node onto each feature coordinate
-    for f in features:
-        if lo <= f <= hi:
-            axis[np.argmin(np.abs(axis - f))] = f
-    return np.unique(axis)
+    The earlier form laid a uniform axis and then moved the nearest node onto
+    each feature. That displaces the two cells either side of every interface by
+    an amount depending on where the uniform mesh happened to fall, so the
+    discretisation error moves with the mesh instead of falling with it. On a
+    thin-film stack the effect was large: refining the electrostatic mesh in
+    four steps moved the microwave index non-monotonically and the bandwidth
+    between 19.6 and 31.3 GHz, and two `must` rows failed at one refinement and
+    passed at the next. Inserting the breakpoints instead makes refinement
+    monotone, because every interface stays put and only the cell count grows.
+    """
+    # Two breakpoints a floating-point epsilon apart leave a cell of zero
+    # width, and `np.unique` keeps both because they differ in the last bit.
+    # The energy integral over such a mesh diverges: one electrode thickness in
+    # a sweep returned a capacitance of 6.7e26 pF/cm and an impedance of
+    # 1.7e-12 ohm, between two neighbouring thicknesses that were both sound.
+    # A margin edge landing on a feature is the way it arises, `f - margin`
+    # rarely being bit-identical to the feature it lands on.
+    tol = max(1e-9, 1e-12 * abs(hi - lo))
 
+    def _merge(values: list[float]) -> list[float]:
+        out: list[float] = []
+        for v in sorted(values):
+            if not out or v - out[-1] > tol:
+                out.append(v)
+        return out
 
-# --------------------------------------------------------------------------
-# rasterisation
-# --------------------------------------------------------------------------
+    feats = _merge([float(f) for f in features if lo + tol < f < hi - tol])
+    if not feats:
+        n = max(1, int(math.ceil((hi - lo) / d_coarse - 1e-9)))
+        return np.linspace(lo, hi, n + 1)
+
+    marks = [float(lo), float(hi)]
+    for f in feats:
+        marks.append(f)
+        marks.append(max(lo, f - fine_margin))
+        marks.append(min(hi, f + fine_margin))
+    edges = _merge(marks)
+
+    parts: list[np.ndarray] = []
+    for a, b in zip(edges, edges[1:]):
+        if b - a <= tol:
+            continue
+        mid = 0.5 * (a + b)
+        near = any(abs(mid - f) <= fine_margin + tol for f in feats)
+        d = d_fine if near else d_coarse
+        n = max(1, int(math.ceil((b - a) / d - 1e-9)))
+        parts.append(np.linspace(a, b, n + 1))
+    axis = np.concatenate(parts)
+    keep = np.concatenate(([True], np.diff(axis) > tol))
+    return axis[keep]
+
 def _point_in_poly(px: np.ndarray, py: np.ndarray, poly: list[tuple[float, float]]) -> np.ndarray:
     """Vectorised even-odd point-in-polygon test."""
     inside = np.zeros(px.shape, dtype=bool)
@@ -240,6 +271,18 @@ def edbr_cross_section(
     electrode_width_um: float = 20.0,
     electrode_thickness_um: float = 0.9,
     electrode_material: str = "Au",
+    #: "slot" places two conductors either side of one guide, which is the
+    #: mirror of a distributed-reflector laser. "gsg" places a signal conductor
+    #: between two grounds with a guide centred in EACH gap, which is the
+    #: coplanar line of a push-pull interferometer. The two differ in the
+    #: capacitance, the impedance and the conductor loss, and a device drawn as
+    #: one and solved as the other reports the line it does not have.
+    electrode_topology: str = "slot",
+    #: ground conductor width for "gsg"; defaults to the signal width
+    ground_width_um: float | None = None,
+    #: how far the unetched slab reaches either side of a guide. Left unset the
+    #: slab is a blanket across the whole cross-section
+    slab_offset_um: float | None = None,
     window_pad_x_um: float = 3.0,
     window_pad_y_um: float = 0.0,
     include_substrate: bool = True,
@@ -257,9 +300,20 @@ def edbr_cross_section(
     if slab < -1e-9:
         raise ValueError("etch depth exceeds film thickness")
 
+    gsg = electrodes and str(electrode_topology).lower() == "gsg"
+    w_gnd = float(ground_width_um) if ground_width_um else electrode_width_um
+    # the guides of a gsg line sit centred in the two gaps, so the cross-section
+    # is symmetric about the signal conductor and carries two ridges
+    arm_offset = (electrode_width_um / 2 + electrode_gap_um / 2) if gsg else 0.0
+    if gsg:
+        electrode_extent = electrode_width_um / 2 + electrode_gap_um + w_gnd
+    elif electrodes:
+        electrode_extent = electrode_gap_um / 2 + electrode_width_um
+    else:
+        electrode_extent = 0.0
     half_x = max(
-        electrode_gap_um / 2 + electrode_width_um if electrodes else 0.0,
-        wg_top_width_um / 2 + post_gap_um + post_width_um,
+        electrode_extent,
+        arm_offset + wg_top_width_um / 2 + post_gap_um + post_width_um,
     ) + window_pad_x_um
     box_model = min(box_thickness_um, box_model_depth_um)
     y_lo = -box_model
@@ -286,15 +340,65 @@ def edbr_cross_section(
     if include_substrate:
         xs.add(Shape.rect(substrate_material, -xe, xe, y_bottom - 1.0, y_lo, "substrate"))
     xs.add(Shape.rect(box_material, -xe, xe, y_lo, 0.0, "box"))
-    # unetched slab
+    # The unetched slab, blanket or in strips around each guide.
+    #
+    # A blanket slab puts high-permittivity film under every conductor and
+    # offers a lateral path the whole width of the window. Where an offset is
+    # declared the slab is drawn only around the guides, as the process draws
+    # it, and the conductors then sit on the buried oxide across most of their
+    # width. The two give materially different capacitances and the difference
+    # is a fact about the device rather than about the model.
+    guide_centres = [-arm_offset, arm_offset] if gsg else [0.0]
+    slab_spans: list[tuple[float, float]] = []
     if slab > 1e-9:
-        xs.add(Shape.rect(film_material, -xe, xe, 0.0, slab, "slab"))
-    # ridge
-    xs.add(
-        Shape.trapezoid(
-            film_material, 0.0, wg_top_width_um, etch_depth_um, slab, sidewall_deg, "ridge"
+        if slab_offset_um is None:
+            slab_spans = [(-xe, xe)]
+        else:
+            half = wg_top_width_um / 2 + float(slab_offset_um)
+            raw = sorted((c - half, c + half) for c in guide_centres)
+            for a, b in raw:                       # merge any that touch
+                if slab_spans and a <= slab_spans[-1][1] + 1e-9:
+                    slab_spans[-1] = (slab_spans[-1][0], max(slab_spans[-1][1], b))
+                else:
+                    slab_spans.append((a, b))
+        for i, (a, b) in enumerate(slab_spans):
+            tag = "slab" if len(slab_spans) == 1 else f"slab_{i}"
+            xs.add(Shape.rect(film_material, a, b, 0.0, slab, tag))
+
+    def _metal_base(x_lo: float, x_hi: float) -> list[tuple[float, float, float]]:
+        """Split a conductor at the slab edges, with its floor at each piece.
+
+        Metal over the slab starts at the slab's top face. Metal beyond it
+        reaches down to the buried oxide, the film having been etched away, so
+        the conductor is 120 nm thicker there. Splitting the shape states that
+        step rather than averaging it away.
+        """
+        edges = {x_lo, x_hi}
+        for a, b in slab_spans:
+            if x_lo < a < x_hi:
+                edges.add(a)
+            if x_lo < b < x_hi:
+                edges.add(b)
+        marks = sorted(edges)
+        out = []
+        for a, b in zip(marks, marks[1:]):
+            if b - a <= 1e-9:
+                continue
+            mid = 0.5 * (a + b)
+            on_slab = any(lo - 1e-9 <= mid <= hi + 1e-9 for lo, hi in slab_spans)
+            out.append((a, b, slab if on_slab else 0.0))
+        return out
+    # ridge, or one ridge per gap for a gsg line
+    if gsg:
+        for sgn, tag in ((-1.0, "ridge_L"), (+1.0, "ridge_R")):
+            xs.add(Shape.trapezoid(film_material, sgn * arm_offset, wg_top_width_um,
+                                   etch_depth_um, slab, sidewall_deg, tag))
+    else:
+        xs.add(
+            Shape.trapezoid(
+                film_material, 0.0, wg_top_width_um, etch_depth_um, slab, sidewall_deg, "ridge"
+            )
         )
-    )
     # Bragg posts (the grating perturbation, seen in this cut when the plane
     # passes through a post)
     if with_posts:
@@ -308,18 +412,22 @@ def edbr_cross_section(
                 )
             )
     # coplanar electrodes, sitting in cladding recesses in contact with the slab
-    if electrodes:
+    def _add_conductor(x_lo: float, x_hi: float, tag: str) -> None:
+        top = slab + electrode_thickness_um
+        pieces = _metal_base(min(x_lo, x_hi), max(x_lo, x_hi))
+        for j, (a, b, floor) in enumerate(pieces):
+            name = tag if len(pieces) == 1 else f"{tag}_{j}"
+            xs.add(Shape.rect(electrode_material, a, b, floor, top, name))
+
+    if gsg:
+        # signal on axis, a ground beyond each gap, and a guide in each gap
+        _add_conductor(-electrode_width_um / 2, electrode_width_um / 2, "electrode_S")
+        for sgn, tag in ((-1.0, "electrode_GL"), (+1.0, "electrode_GR")):
+            x_in = sgn * (electrode_width_um / 2 + electrode_gap_um)
+            _add_conductor(x_in, x_in + sgn * w_gnd, tag)
+    elif electrodes:
         for sgn in (-1.0, +1.0):
             x_in = sgn * electrode_gap_um / 2
-            x_out = x_in + sgn * electrode_width_um
-            xs.add(
-                Shape.rect(
-                    electrode_material,
-                    min(x_in, x_out),
-                    max(x_in, x_out),
-                    slab,
-                    slab + electrode_thickness_um,
-                    f"electrode_{'L' if sgn < 0 else 'R'}",
-                )
-            )
+            _add_conductor(x_in, x_in + sgn * electrode_width_um,
+                           f"electrode_{'L' if sgn < 0 else 'R'}")
     return xs

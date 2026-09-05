@@ -113,6 +113,32 @@ unreachable by that window.** The two are distinguished by naming which declared
 excursion moves it, and a metric no excursion reaches is to be reported as
 unreached rather than as stable.
 
+## A sweep exercises the parameters its metrics respond to, and not the parameters it declares
+
+A factorial sweep reports a corner count and a spread. Neither states how many of
+the declared parameters reached the physics. One sweep of seven corners over
+three parameters was a sweep over one.
+
+**Two mechanisms produce a dead parameter and both are silent.** A
+pre-compensated bias moves nothing by construction, so a window declared on it
+represents the residual only where pre-compensation is switched off. A parameter
+whose nominal value is zero has no relative excursion, so a window expressed as a
+fraction of the nominal collapses to a point and the parameter is dropped.
+
+**A guard that names the correct parameter does not establish that the parameter
+is live.** The guard requiring a window to vary the process bias rather than a
+drawn dimension is correct and was followed, and the resulting window varied
+nothing at all.
+
+**The tell is the sensitivity table.** The elasticity column is blank for every
+metric with respect to a parameter the sweep could not move. A second signature
+is arithmetic: where one parameter's half-span contribution doubles exactly to
+the full window, the window has one live parameter.
+
+**Report, for each declared corner parameter, which metrics it moved.** A
+parameter that moved none is named as unexercised, and the corner count is not
+quoted without it.
+
 ## Evidence
 
 `.claude/LESSONS.md` L014 (a lithographic bias moves a high-order grating in two

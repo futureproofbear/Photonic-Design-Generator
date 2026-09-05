@@ -1,0 +1,17 @@
+{
+  "width_um": 0.7,
+  "gap_um": 1.25,
+  "ring_radius_um": 200.0,
+  "half_length_um": 20.0,
+  "pml_um": 1.0,
+  "margin_um": 1.5,
+  "port_width_um": 3.0,
+  "n_core": 1.84589,
+  "n_background": 1.58654,
+  "wavelength_um": 1.31,
+  "lambda_min_um": 1.26,
+  "lambda_max_um": 1.36,
+  "nfreq": 11,
+  "ring_stations": 201,
+  "resolution": 50
+}

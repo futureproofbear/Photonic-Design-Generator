@@ -25,6 +25,9 @@ partial mask outright.
 from __future__ import annotations
 
 import math
+
+from picchain import taper_profile
+
 from typing import Any
 
 from .. import process
@@ -50,6 +53,7 @@ def _facet_shear(angle_deg: float, width_um: float) -> float:
 
 def _angled_lead_in(angle_deg: float, radius_um: float, straight_um: float,
                     width_um: float, tip_width_um: float | None = None,
+                    profile: str = "linear",
                     n_seg: int = 24):
     """The guide that meets a perpendicular die edge at ``angle_deg``.
 
@@ -94,7 +98,7 @@ def _angled_lead_in(angle_deg: float, radius_um: float, straight_um: float,
     for k in range(n_str + 1):
         t = k / n_str
         centre.append((straight_um * t * math.cos(th), straight_um * t * math.sin(th)))
-        halves.append(0.5 * (w0 + (w1 - w0) * t))
+        halves.append(0.5 * float(taper_profile.widths_at(w0, w1, t, profile)))
         tang.append((math.cos(th), math.sin(th)))
 
     # the arc back to parallel: centre of curvature is perpendicular to the
@@ -211,6 +215,496 @@ def snap_polygons(polys: dict, grid_nm: float) -> tuple[dict, dict]:
     }
 
 
+# ---------------------------------------------------------------------------
+# The Mach-Zehnder modulator
+# ---------------------------------------------------------------------------
+def _cos_sbend(x0: float, y0: float, y1: float, length: float, width: float,
+               n_seg: int = 96) -> list[list[tuple[float, float]]]:
+    """A raised-cosine S-bend of constant width, as a strip of quadrilaterals.
+
+        y(s) = y0 + (y1 - y0) * (1 - cos(pi s / L)) / 2
+
+    The raised cosine is used rather than two circular arcs because its
+    curvature falls to zero at both ends, so the bend meets a straight guide
+    with no step in curvature and no mode mismatch at the junction. Its peak
+    curvature is pi^2 |dy| / (2 L^2), and the tightest radius the bend stage
+    solves is the bound that has to be met.
+
+    Emitted as segments rather than as one polygon, so that a long bend reaches
+    no vertex limit and every piece is a simple convex quadrilateral.
+    """
+    dy = y1 - y0
+    pts = []
+    for i in range(n_seg + 1):
+        s = length * i / n_seg
+        y = y0 + dy * (1.0 - math.cos(math.pi * s / length)) / 2.0
+        # the centre line's normal, so the strip holds its width through the bend
+        slope = dy * math.pi * math.sin(math.pi * s / length) / (2.0 * length)
+        norm = math.hypot(1.0, slope)
+        pts.append((x0 + s, y, -slope / norm, 1.0 / norm))
+    half = width / 2.0
+    out = []
+    for (xa, ya, na, nb), (xb, yb, nc, nd) in zip(pts, pts[1:]):
+        out.append([
+            (xa + na * half, ya + nb * half),
+            (xb + nc * half, yb + nd * half),
+            (xb - nc * half, yb - nd * half),
+            (xa - na * half, ya - nb * half),
+        ])
+    return out
+
+
+def _sbend_peak_radius(dy: float, length: float) -> float:
+    """The tightest radius of curvature a raised-cosine S-bend reaches."""
+    if length <= 0:
+        return float("inf")
+    kappa = (math.pi ** 2) * abs(dy) / (2.0 * length ** 2)
+    return float("inf") if kappa <= 0 else 1.0 / kappa
+
+
+def _cos_sbend_path(x0: float, y0: float, y1: float, length: float,
+                    n_seg: int = 96) -> list[tuple[float, float]]:
+    """The centre line of a raised-cosine S-bend, as points."""
+    dy = y1 - y0
+    return [(x0 + length * i / n_seg,
+             y0 + dy * (1.0 - math.cos(math.pi * i / n_seg)) / 2.0)
+            for i in range(n_seg + 1)]
+
+
+def _slot_trajectory(scale_a: float, scale_b: float, n: int) -> list[float]:
+    """A raised cosine from one cross-section scale to another.
+
+    The pad tapers the whole coplanar cross-section by one scale factor, so the
+    ratio of gap to conductor is held and the characteristic impedance with it.
+    The scale follows a raised cosine, whose derivative vanishes at both ends,
+    so the optical arm riding the slot centre meets the straight line and the
+    straight pad with no step in curvature.
+    """
+    return [scale_a + (scale_b - scale_a) * (1.0 - math.cos(math.pi * i / n)) / 2.0
+            for i in range(n + 1)]
+
+
+def _gsg_pad(x0: float, length: float, sig: float, gap: float, gnd: float,
+             scale_a: float, scale_b: float, n_seg: int,
+             reverse: bool = False) -> tuple[list, list]:
+    """One tapered ground-signal-ground pad, and the path its two slots take.
+
+    Returns the metal polygons and the slot-centre trajectory. The optical arms
+    are drawn on that same trajectory by the caller, so an arm sits on its
+    slot's centre line at every station and metal never crosses a guide.
+
+    The three conductors and the two gaps are scaled together. At scale 1 the
+    cross-section is the line the electro-optic stage solved; at the pad face it
+    is whatever scale carries the slots out to the probe pitch.
+    """
+    scales = _slot_trajectory(scale_a, scale_b, n_seg)
+    if reverse:
+        scales = scales[::-1]
+    xs = [x0 + length * i / n_seg for i in range(n_seg + 1)]
+    slot = [(sig / 2.0 + gap / 2.0) * k for k in scales]
+
+    sig_edge = [(sig / 2.0) * k for k in scales]
+    gnd_in = [(sig / 2.0 + gap) * k for k in scales]
+    gnd_out = [(sig / 2.0 + gap + gnd) * k for k in scales]
+
+    metal: list = []
+    for i in range(n_seg):
+        xa, xb = xs[i], xs[i + 1]
+        metal.append([(xa, -sig_edge[i]), (xb, -sig_edge[i + 1]),
+                      (xb, sig_edge[i + 1]), (xa, sig_edge[i])])
+        for sgn in (-1.0, 1.0):
+            metal.append([(xa, sgn * gnd_in[i]), (xb, sgn * gnd_in[i + 1]),
+                          (xb, sgn * gnd_out[i + 1]), (xa, sgn * gnd_out[i])])
+    return metal, list(zip(xs, slot))
+
+
+def _strip_on_path(path: list[tuple[float, float]], width: float,
+                   sgn: float = 1.0) -> list[list[tuple[float, float]]]:
+    """A constant-width strip following a centre-line path, as quadrilaterals."""
+    half = width / 2.0
+    out = []
+    for (xa, ya), (xb, yb) in zip(path, path[1:]):
+        out.append([(xa, sgn * ya - half), (xb, sgn * yb - half),
+                    (xb, sgn * yb + half), (xa, sgn * ya + half)])
+    return out
+
+
+def slab_from_ridges(polys: dict, offset_um: float, dbu: float = DBU,
+                     min_width_um: float = 0.30) -> list:
+    """The unetched slab, as a strip of `offset_um` around every drawn ridge.
+
+    Derived from the ridges rather than declared, so a structure added to the
+    mask carries its slab whether or not whoever added it remembered. A die
+    released from this chain drew one blanket slab under the devices and left
+    sixty of its sixty-two ridge regions outside it: the loss cutback and the
+    electrode ladder, whose whole purpose is to measure the process the device
+    runs in, sat on bare oxide and measured a different waveguide.
+
+    A blanket slab is the other failure. It guides, so it offers a path from
+    facet to facet that bypasses the device and couples everything on the die.
+    """
+    import klayout.db as db
+
+    ridges = db.Region()
+    for poly in polys.get("WG", []):
+        ridges.insert(db.Polygon([db.Point(int(round(x / dbu)), int(round(y / dbu)))
+                                  for x, y in poly]))
+    grown = ridges.merged().sized(int(round(float(offset_um) / dbu))).merged()
+    # Sizing mitres the corners, and at the acute tip of a facet taper that
+    # leaves a spike narrower than the minimum width. An opening, an erosion
+    # followed by a dilation of the same amount, removes anything thinner than
+    # twice it and leaves the body of the strip where it was.
+    t = int(round(0.5 * float(min_width_um) / dbu))
+    if t > 0:
+        grown = grown.sized(-t).sized(t).merged()
+    out = []
+    for poly in grown.each():
+        out.append([(pt.x * dbu, pt.y * dbu) for pt in poly.each_point_hull()])
+    return out
+
+
+def _taper_profile_name(design: Design) -> str:
+    """The taper profile the mask is to draw.
+
+    The `taper` stage evaluates `taper.profile`, and where that stage is
+    disabled the layout still needs a curve. The declared profile is used in
+    both cases, so enabling the stage never changes what is drawn.
+    """
+    return str(getattr(design.taper, "profile", "linear") or "linear")
+
+
+def build_mzm_polygons(design: Design, ctx: RunContext) -> tuple[dict, dict]:
+    """A push-pull Mach-Zehnder on a coplanar ground-signal-ground line.
+
+    The device, along x from the input facet:
+
+        taper - straight - MMI splitter - S-bend - [ arms under the electrode ]
+        - S-bend - MMI combiner - straight - taper
+
+    An arm sits centred in each of the two gaps of the line, so the two see
+    opposite fields and the interferometer is driven push-pull. The metal spans
+    the straight section only, the arms having bent clear of it at either end.
+
+    Returns the polygons and a record of the geometry, so that every dimension a
+    document quotes is one this function placed.
+    """
+    lay, e, m = design.layout, design.electrodes, design.mzm
+    geom = process.geometry(design, "drawn")
+    wg = geom.wg_top_width_um
+    gap = geom.electrode_gap_um
+    sig = geom.electrode_width_um
+    gnd = float(e.ground_width_um or sig)
+
+    arm_y = sig / 2.0 + gap / 2.0          # the arm on its gap's centre line
+    L_elec = float(e.length_um)
+
+    out: dict[str, list] = {k: [] for k in
+                            ("WG", "SLAB", "METAL", "PAD", "LABEL", "FACET",
+                             "ORIENT", "FLOORPLAN")}
+    texts: list[dict] = []
+    # the modulators sit symmetrically about the cell axis
+    n_dev = max(1, int(m.count))
+    y_dev = [(i - (n_dev - 1) / 2.0) * m.pitch_um for i in range(n_dev)]
+
+    # ---- the run of the device along x -----------------------------------
+    x = 0.0
+    x += lay.taper_length_um
+    x += m.lead_straight_um
+    x_mmi_in = x
+    x += m.mmi_length_um
+    x_port_out = x
+    x += m.port_taper_um
+    x_sb_out = x
+    x += m.sbend_length_um
+    x_pad0 = x                              # the probe landing, at pad scale
+    x += m.pad_straight_um if m.pads else 0.0
+    x_padtap0 = x                           # tapering down to the line
+    x += m.pad_taper_um if m.pads else 0.0
+    x_elec0 = x
+    x += L_elec
+    x_elec1 = x
+    x += m.pad_taper_um if m.pads else 0.0  # tapering back up
+    x_padtap1 = x
+    x += m.pad_straight_um if m.pads else 0.0
+    x_pad1 = x
+    x += m.sbend_length_um
+    x_port_in = x
+    x += m.port_taper_um
+    x_mmi_out = x
+    x += m.mmi_length_um
+    x += m.lead_straight_um
+    x_taper_out = x
+    x += lay.taper_length_um
+    z_end = x
+
+    # Where the two access tapers leave the multimode section. Both are declared
+    # rather than derived from the section width, so the gap between them is a
+    # drawn dimension: `port_separation_um - port_width_um`, open by construction.
+    # The scale the pad face is drawn at. The probe pitch is the signal centre
+    # to a ground centre, which on this cross-section is `sig/2 + gap + gnd/2`,
+    # so the scale that reaches a declared pitch follows directly.
+    pitch_at_line = sig / 2.0 + gap + gnd / 2.0
+    pad_scale = (float(m.pad_probe_pitch_um) / pitch_at_line) if m.pads else 1.0
+    pad_slot_y = (sig / 2.0 + gap / 2.0) * pad_scale
+
+    y_mmi = m.port_separation_um / 2.0
+    port_w = m.port_width_um
+    port_gap = m.port_separation_um - port_w
+
+    # ---- WG and METAL, once per modulator --------------------------------
+    tip = lay.taper_tip_width_um
+    tl = lay.taper_length_um
+    _wg_one: list = []
+    _metal_one: list = []
+    out_wg, out_metal = out["WG"], out["METAL"]
+    out["WG"], out["METAL"] = _wg_one, _metal_one
+    # The facet taper, drawn on the profile the taper stage evaluates. Both call
+    # `picchain.taper_profile`, so the structure solved and the structure drawn
+    # are the same curve.
+    prof = _taper_profile_name(design)
+    out["WG"].append(taper_profile.outline(tip, wg, tl, prof, segments=lay.taper_segments))
+    out["WG"].append(_rect(tl, -wg / 2.0, x_mmi_in, wg / 2.0))
+    out["WG"].append(_rect(x_mmi_in, -m.mmi_width_um / 2.0,
+                           x_mmi_in + m.mmi_length_um, m.mmi_width_um / 2.0))
+    # The access ports. Each leaves the multimode section at half the declared
+    # port separation and at the declared port width, so the gap between them
+    # starts at `port_separation - port_width` and widens from there. Drawing
+    # them to meet at the end face would force that gap through zero and break
+    # the minimum-space rule over the whole access taper.
+    # The arm enters the pad structure at its slot centre and rides that slot
+    # down to the line, so metal never crosses a guide.
+    y_entry = pad_slot_y if m.pads else arm_y
+    pad_in_path: list = []
+    pad_out_path: list = []
+    if m.pads:
+        pad_in_metal, pad_in_path = _gsg_pad(x_padtap0, m.pad_taper_um, sig, gap, gnd,
+                                             pad_scale, 1.0, m.pad_taper_segments)
+        pad_out_metal, pad_out_path = _gsg_pad(x_elec1, m.pad_taper_um, sig, gap, gnd,
+                                               1.0, pad_scale, m.pad_taper_segments)
+        _pad_metal_all = pad_in_metal + pad_out_metal
+        # the constant-width landings the probes sit on
+        for xa, xb in ((x_pad0, x_padtap0), (x_padtap1, x_pad1)):
+            k = pad_scale
+            _pad_metal_all.append(_rect(xa, -(sig / 2.0) * k, xb, (sig / 2.0) * k))
+            for sgn in (-1.0, 1.0):
+                a, b = sgn * (sig / 2.0 + gap) * k, sgn * (sig / 2.0 + gap + gnd) * k
+                _pad_metal_all.append(_rect(xa, min(a, b), xb, max(a, b)))
+    else:
+        _pad_metal_all = []
+
+    # The centre line of each arm, from the splitter to the combiner. The slab
+    # strip is drawn on this same path, so it follows the guide exactly rather
+    # than being derived from the drawn ridge by sizing, which mitres every
+    # corner of a curved strip and leaves slivers below the minimum width.
+    arm_paths: dict[float, list[tuple[float, float]]] = {}
+    for sgn in (-1.0, 1.0):
+        yc = sgn * y_mmi
+        path: list[tuple[float, float]] = [(x_port_out, yc), (x_sb_out, yc)]
+        path += _cos_sbend_path(x_sb_out, yc, sgn * y_entry,
+                                m.sbend_length_um, m.sbend_segments)
+        if m.pads:
+            path += [(x_pad0, sgn * y_entry), (x_padtap0, sgn * y_entry)]
+            path += [(px, sgn * py) for px, py in pad_in_path]
+        path += [(x_elec0, sgn * arm_y), (x_elec1, sgn * arm_y)]
+        if m.pads:
+            path += [(px, sgn * py) for px, py in pad_out_path]
+            path += [(x_padtap1, sgn * y_entry), (x_pad1, sgn * y_entry)]
+        path += _cos_sbend_path(x_pad1, sgn * y_entry, yc,
+                                m.sbend_length_um, m.sbend_segments)
+        path += [(x_port_in, yc), (x_mmi_out, yc)]
+        # drop repeated stations so the strip carries no zero-length segment
+        arm_paths[sgn] = [pt for i, pt in enumerate(path)
+                          if i == 0 or abs(pt[0] - path[i - 1][0]) > 1e-9
+                          or abs(pt[1] - path[i - 1][1]) > 1e-9]
+
+    for sgn in (-1.0, 1.0):
+        yc = sgn * y_mmi
+        out["WG"].append([(x_port_out, yc - port_w / 2.0), (x_sb_out, yc - wg / 2.0),
+                          (x_sb_out, yc + wg / 2.0), (x_port_out, yc + port_w / 2.0)])
+        out["WG"] += _cos_sbend(x_sb_out, yc, sgn * y_entry,
+                                m.sbend_length_um, wg, m.sbend_segments)
+        if m.pads:
+            out["WG"].append(_rect(x_pad0, sgn * y_entry - wg / 2.0,
+                                   x_padtap0, sgn * y_entry + wg / 2.0))
+            out["WG"] += _strip_on_path(pad_in_path, wg, sgn)
+        out["WG"].append(_rect(x_elec0, sgn * arm_y - wg / 2.0,
+                               x_elec1, sgn * arm_y + wg / 2.0))
+        if m.pads:
+            out["WG"] += _strip_on_path(pad_out_path, wg, sgn)
+            out["WG"].append(_rect(x_padtap1, sgn * y_entry - wg / 2.0,
+                                   x_pad1, sgn * y_entry + wg / 2.0))
+        out["WG"] += _cos_sbend(x_pad1, sgn * y_entry, yc,
+                                m.sbend_length_um, wg, m.sbend_segments)
+        out["WG"].append([(x_port_in, yc - wg / 2.0), (x_mmi_out, yc - port_w / 2.0),
+                          (x_mmi_out, yc + port_w / 2.0), (x_port_in, yc + wg / 2.0)])
+    out["WG"].append(_rect(x_mmi_out, -m.mmi_width_um / 2.0,
+                           x_mmi_out + m.mmi_length_um, m.mmi_width_um / 2.0))
+    out["WG"].append(_rect(x_mmi_out + m.mmi_length_um, -wg / 2.0, x_taper_out, wg / 2.0))
+    # Reversed about its own start, so the full width meets the guide at
+    # `x_taper_out` and the tip reaches the polish line at `z_end`. Anchoring it
+    # at `z_end` instead put the whole taper beyond the end of the device, which
+    # left it outside the slab and made the drawn cell 250 um longer than
+    # `device_length_um` reported.
+    out["WG"].append(taper_profile.outline(tip, wg, tl, prof,
+                                          segments=lay.taper_segments,
+                                          x0=x_taper_out, reverse=True))
+
+    # ---- METAL: signal between two grounds, over the straight arms -------
+    out["METAL"] += _pad_metal_all
+    out["METAL"].append(_rect(x_elec0, -sig / 2.0, x_elec1, sig / 2.0))
+    for sgn in (-1.0, 1.0):
+        y_in = sgn * (sig / 2.0 + gap)
+        y_out = y_in + sgn * gnd
+        out["METAL"].append(_rect(x_elec0, min(y_in, y_out), x_elec1, max(y_in, y_out)))
+
+    # replicate the device at each y, and label it
+    out["WG"], out["METAL"] = out_wg, out_metal
+    for i, dy in enumerate(y_dev):
+        out["WG"] += [[(px, py + dy) for px, py in poly] for poly in _wg_one]
+        out["METAL"] += [[(px, py + dy) for px, py in poly] for poly in _metal_one]
+        name = m.labels[i] if i < len(m.labels) else f"MOD{i + 1}"
+        texts.append({"text": name, "x_um": x_elec0 + 200.0,
+                      "y_um": dy + sig / 2.0 + gap + gnd + 8.0})
+
+    # The shield between them, on the same metal, and tied to the ground planes
+    # on either side of it. A shield open at both ends is a resonator of length
+    # L, whose modes fall at multiples of c/(2 n_m L); the straps hold it at
+    # ground instead. Each strap runs in y through empty slab: the guides sit at
+    # the electrode gaps and the region between a ground plane and the shield
+    # carries nothing, so a strap crosses no waveguide.
+    n_straps = 0
+    strap_pitch = 0.0
+    if m.shield and n_dev > 1:
+        for a, b in zip(y_dev, y_dev[1:]):
+            yc = 0.5 * (a + b)
+            sh_lo, sh_hi = yc - m.shield_width_um / 2.0, yc + m.shield_width_um / 2.0
+            out["METAL"].append(_rect(x_elec0, sh_lo, x_elec1, sh_hi))
+            if not m.shield_straps:
+                continue
+            # the facing ground edges: the upper ground of the lower device and
+            # the lower ground of the upper device
+            g_lo = a + sig / 2.0 + gap + gnd
+            g_hi = b - (sig / 2.0 + gap + gnd)
+            span = x_elec1 - x_elec0
+            n = max(1, int(round(span / float(m.shield_strap_pitch_um))))
+            strap_pitch = span / n
+            n_straps += 2 * n
+            hw = m.shield_strap_width_um / 2.0
+            # Placed at the centre of each interval rather than at its ends. A
+            # strap landing on the junction between the electrode and the pad
+            # taper closes a wedge against the taper's outer edge, which is a
+            # notch below the minimum space and reads as a violation.
+            for i in range(n):
+                xc = x_elec0 + (i + 0.5) * strap_pitch
+                out["METAL"].append(_rect(xc - hw, g_lo, xc + hw, sh_lo))
+                out["METAL"].append(_rect(xc - hw, sh_hi, xc + hw, g_hi))
+
+    # ---- the slab and the floor plan -------------------------------------
+    span = (max(y_dev) - min(y_dev)) / 2.0
+    pad_y = span + sig / 2.0 + gap + gnd + 20.0
+    slab_offset = design.platform.slab_offset_um
+    if slab_offset is None:
+        out["SLAB"].append(_rect(-5.0, -pad_y, z_end + 5.0, pad_y))
+    else:
+        sw = wg + 2.0 * float(slab_offset)
+        # the two arms, on their own centre lines
+        arm_slab: list = []
+        for sgn, path in arm_paths.items():
+            arm_slab += _strip_on_path(path, sw)
+        # the axis at each end: the facet taper, the lead and the multimode
+        # section, which is wider than a guide and takes the slab with it
+        aw = max(m.mmi_width_um, wg) + 2.0 * float(slab_offset)
+        head = _rect(-float(slab_offset), -aw / 2.0, x_port_out, aw / 2.0)
+        tail = _rect(x_mmi_out, -aw / 2.0, z_end + float(slab_offset), aw / 2.0)
+        arm_slab += [head, tail]
+        # one device's slab, placed once per modulator like its guides
+        for dy in y_dev:
+            out["SLAB"] += [[(px, py + dy) for px, py in poly] for poly in arm_slab]
+    out["FLOORPLAN"].append(_rect(-5.0, -pad_y - 5.0, z_end + 5.0, pad_y + 5.0))
+
+    if lay.draw_facets:
+        ko = lay.facet_keepout_um
+        for xf in (0.0, z_end):
+            out["FACET"].append(_rect(xf - ko / 2.0, -pad_y, xf + ko / 2.0, pad_y))
+
+    base_half = wg / 2.0 + geom.etch_depth_um / math.tan(math.radians(design.platform.sidewall_deg)) \
+        if design.platform.sidewall_deg < 89.999 else wg / 2.0
+    out["LABEL"] = out.get("LABEL", [])
+    record = {
+        "device_length_um": z_end,
+        "modulators": n_dev,
+        "modulator_pitch_um": m.pitch_um,
+        "modulator_centres_um": y_dev,
+        "shield_width_um": m.shield_width_um if (m.shield and n_dev > 1) else 0.0,
+        "labels": list(m.labels[:n_dev]),
+        "arm_offset_um": arm_y,
+        "arm_separation_um": 2.0 * arm_y,
+        "electrode_from_um": x_elec0,
+        "electrode_to_um": x_elec1,
+        "electrode_length_drawn_um": x_elec1 - x_elec0,
+        "electrode_length_declared_um": L_elec,
+        "signal_width_um": sig,
+        "ground_width_um": gnd,
+        "gap_um": gap,
+        "metal_span_um": 2.0 * (sig / 2.0 + gap + gnd),
+        "mmi_width_um": m.mmi_width_um,
+        "mmi_length_um": m.mmi_length_um,
+        "mmi_output_offset_um": y_mmi,
+        "sbend_length_um": m.sbend_length_um,
+        # The S-bend carries the arm from the splitter to wherever it enters the
+        # line, and with pads drawn that is the pad slot at `y_entry`, not the
+        # electrode gap at `arm_y`. Reported against `arm_y` it described an
+        # excursion of 20.975 um and a peak radius of 467.6 where the mask drew
+        # 48.725 um and 201, a factor of 2.3 on the quantity the bend stage's
+        # floor is compared against.
+        "sbend_excursion_um": y_entry - y_mmi,
+        "sbend_peak_radius_um": _sbend_peak_radius(y_entry - y_mmi,
+                                                   m.sbend_length_um),
+        # The pad taper is a bend too, and it is the tightest on the die. The
+        # arm rides the slot centre from the pad face down to the line over
+        # `pad_taper_um`, on the same raised cosine, so its peak radius follows
+        # the same expression. Nothing reported it.
+        "pad_taper_excursion_um": (pad_slot_y - arm_y) if m.pads else 0.0,
+        "pad_taper_peak_radius_um": (
+            _sbend_peak_radius(pad_slot_y - arm_y, m.pad_taper_um)
+            if m.pads else 0.0),
+        "port_taper_um": m.port_taper_um,
+        "port_width_um": port_w,
+        # --- the electrical terminals ---------------------------------
+        "pads_drawn": bool(m.pads),
+        "pad_probe_pitch_um": float(m.pad_probe_pitch_um) if m.pads else 0.0,
+        "pad_scale": pad_scale,
+        "pad_face_signal_width_um": sig * pad_scale if m.pads else 0.0,
+        "pad_face_gap_um": gap * pad_scale if m.pads else 0.0,
+        "pad_face_ground_width_um": gnd * pad_scale if m.pads else 0.0,
+        "pad_landing_length_um": float(m.pad_straight_um) if m.pads else 0.0,
+        "pad_taper_length_um": float(m.pad_taper_um) if m.pads else 0.0,
+        "arm_offset_at_pad_um": pad_slot_y if m.pads else arm_y,
+        "shield_straps_drawn": int(n_straps),
+        "shield_strap_pitch_um": strap_pitch,
+        "port_separation_um": float(m.port_separation_um),
+        "port_gap_at_mmi_um": port_gap,
+        # The gap between the two access tapers is at its narrowest where they
+        # leave the multimode section and widens along them, so the whole
+        # junction holds the rule when `port_gap_at_mmi_um` does. The length
+        # below the minimum space is reported so that a closed junction, were
+        # one ever drawn, is a measured quantity rather than a surprise.
+        "port_gap_below_min_space_um": 0.0 if port_gap >= m.min_space_um else (
+            m.port_taper_um * (port_w - (2.0 * y_mmi - m.min_space_um)) / (port_w - wg)
+            if port_w > wg else 0.0),
+        "min_space_um": m.min_space_um,
+        "taper_length_um": tl,
+        "taper_tip_um": tip,
+        # the clearance the metal-to-ridge rule is measured against, from the
+        # drawn edges and the sidewall rather than from the nominal width
+        "ridge_base_half_width_um": base_half,
+        "metal_to_ridge_clearance_um": (sig / 2.0 + gap) - (arm_y + base_half),
+        "half_height_um": pad_y,
+    }
+    record["texts"] = texts
+    return out, record
+
+
 def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple[float, float]]]]:
     """Return {layer_name: [polygon, ...]} in um.
 
@@ -247,6 +741,7 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     # at the facet, equal to the figure the `facet` stage was given.
     tl = lay.taper_length_um
     tip = lay.taper_tip_width_um
+    prof = _taper_profile_name(design)
     angled = lay.draw_facets and lay.facet_route == "angled"
     lead_excursion = 0.0
     # The optical path from the facet to the grating, which is what the cavity
@@ -262,7 +757,7 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
         # feed begins, so nothing downstream of the lead-in moves.
         rad = lay.facet_bend_radius_um
         poly, dz_lead, dy_lead, _ = _angled_lead_in(
-            lay.input_facet_angle_deg, rad, tl, wg_width, tip
+            lay.input_facet_angle_deg, rad, tl, wg_width, tip, profile=prof
         )
         out["WG"].append([(pz, py - dy_lead) for pz, py in poly])
         lead_excursion = abs(dy_lead)
@@ -270,10 +765,21 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
         z = dz_lead
     else:
         shear_in = _facet_shear(lay.input_facet_angle_deg, tip) if lay.draw_facets else 0.0
-        out["WG"].append(
-            [(z + shear_in, -tip / 2), (z + tl, -wg_width / 2),
-             (z + tl, wg_width / 2), (z - shear_in, tip / 2)]
-        )
+        # Drawn on the profile the taper stage evaluates. It was a four-point
+        # trapezoid, which is a linear taper whatever `taper.profile` declared,
+        # so a design evaluating a quadratic taper reported a margin for a
+        # structure its mask did not carry.
+        poly = taper_profile.outline(tip, wg_width, tl, prof,
+                                     segments=lay.taper_segments, x0=z)
+        if shear_in:
+            # The facet end is SHEARED and not translated: the two rails meet
+            # the die edge at the declared angle, so the lower tip advances and
+            # the upper tip retreats. `outline` returns the lower rail followed
+            # by the upper rail reversed, so those are its first and last points.
+            poly = list(poly)
+            poly[0] = (poly[0][0] + shear_in, poly[0][1])
+            poly[-1] = (poly[-1][0] - shear_in, poly[-1][1])
+        out["WG"].append(poly)
         z += tl
     # --- feed waveguide ---
     # `cavity.feed_length_um` is the facet-to-grating distance the round-trip
@@ -326,6 +832,43 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
             f"tighten layout.facet_bend_radius_um"
         )
     out["WG"].append(_rect(z, -wg_width / 2, z + feed, wg_width / 2))
+
+    # --- the thermal phase trimmer -----------------------------------------
+    #
+    # A resistive wire on its own layer, over the feed guide. It sets the cavity
+    # phase once at commissioning, which is what lets a design be graded on the
+    # excursion it delivers rather than on the one it can guarantee without
+    # knowing where in the mode comb it started.
+    #
+    # It is drawn over the feed rather than over the phase section on purpose:
+    # the degraded mode it exists to support is the one with the Pockels section
+    # unpowered, and the feed carries no electrode to clear.
+    pt = getattr(cav, "phase_trimmer", None)
+    _trim_over_feed = pt is not None and getattr(pt, "over", "feed") == "feed"
+    if (pt is not None and pt.enabled and pt.length_um > 0
+            and "HEATER" in out and _trim_over_feed):
+        h_len = min(float(pt.length_um), feed)
+        h_start = z
+        hw = float(pt.width_um) / 2.0
+        out["HEATER"].append(_rect(h_start, -hw, h_start + h_len, hw))
+        # a landing at each end, wider than the wire so a probe or a bond has
+        # something to reach; they sit clear of the guide in y
+        pad = float(getattr(pt, "pad_um", 60.0))
+        for xc in (h_start, h_start + h_len):
+            out["HEATER"].append(_rect(xc - pad / 2, hw, xc + pad / 2, hw + pad))
+        heater_record = {
+            "drawn": True,
+            "length_um": h_len,
+            "declared_length_um": float(pt.length_um),
+            "width_um": float(pt.width_um),
+            "from_um": h_start,
+            "to_um": h_start + h_len,
+            "over": "feed",
+            "clipped": h_len < float(pt.length_um),
+        }
+    else:
+        heater_record = {"drawn": False}
+
     z += feed
 
     # --- the intracavity phase section -------------------------------------
@@ -341,6 +884,25 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     if ps and ps.enabled and ps.length_um > 0:
         p0 = z
         out["WG"].append(_rect(p0, -wg_width / 2, p0 + ps.length_um, wg_width / 2))
+        # the thermal trimmer, where it is declared to run over this section
+        if (pt is not None and pt.enabled and pt.length_um > 0
+                and "HEATER" in out and not _trim_over_feed):
+            h_len = min(float(pt.length_um), float(ps.length_um))
+            hw = float(pt.width_um) / 2.0
+            out["HEATER"].append(_rect(p0, -hw, p0 + h_len, hw))
+            pad = float(getattr(pt, "pad_um", 60.0))
+            for xc in (p0, p0 + h_len):
+                out["HEATER"].append(_rect(xc - pad / 2, hw, xc + pad / 2, hw + pad))
+            heater_record = {
+                "drawn": True, "over": "phase_section",
+                "length_um": h_len, "declared_length_um": float(pt.length_um),
+                "width_um": float(pt.width_um),
+                "from_um": p0, "to_um": p0 + h_len,
+                "clipped": h_len < float(pt.length_um),
+                # the wire sits above the guide; these are the clearances the
+                # runset measures it against
+                "clearance_to_electrode_um": ps.gap_um / 2 - hw,
+            }
         if e.enabled:
             for sgn in (-1, 1):
                 y_in = sgn * ps.gap_um / 2
@@ -366,11 +928,17 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     g0 = z
     out["WG"].append(_rect(g0, -wg_width / 2, g0 + drawn_length, wg_width / 2))
     inner = wg_width / 2 + geom.post_gap_um
+    # The posts are the guide's layer unless the design names another. They were
+    # appended to the guide layer unconditionally until 2026-09-03, so a process
+    # reserving a layer for small repeating features could not be met: by the
+    # time a layer map or a derived layer sees them they are the same polygons
+    # as the ridge.
+    post_layer = lay.grating_layer or "WG"
     for k in range(n_draw):
         zc = g0 + (k + 0.5) * period
         for sgn in (-1, 1):
             yc = sgn * (inner + geom.post_width_um / 2)
-            out["WG"].append(
+            out[post_layer].append(
                 _rect(zc - post_len / 2, yc - geom.post_width_um / 2,
                       zc + post_len / 2, yc + geom.post_width_um / 2)
             )
@@ -420,7 +988,32 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     if e.enabled:
         pad_y = max(pad_y, geom.electrode_gap_um / 2 + geom.electrode_width_um
                     + lay.bond_pad_um + 20.0)
-    out["SLAB"].append(_rect(-5.0, -pad_y, z_end + 5.0, pad_y))
+
+    # The slab is derived from the ridges where the platform states how far it
+    # reaches beside one, and drawn as a band across the device band where it
+    # does not. The band is the older behaviour and it is retained, since a
+    # design may intend it, and it is reported because it is rarely what is
+    # wanted: an unbroken sheet guides, its index floor standing well above the
+    # cladding, so it offers a path from facet to facet that bypasses the
+    # device. The modulator topology has derived its slab since the field was
+    # added; this brings the same treatment to the topology beside it.
+    slab_offset = design.platform.slab_offset_um
+    if slab_offset is None:
+        out["SLAB"].append(_rect(-5.0, -pad_y, z_end + 5.0, pad_y))
+        ctx.warn(
+            f"the slab is drawn as one band {2 * pad_y:.0f} um across the device "
+            "rather than derived from the ridges. An unbroken slab guides, so it "
+            "carries light between structures that the design separates. Declare "
+            "platform.slab_offset_um to derive it, the open PDK for this stack "
+            "using 6.0 um",
+            key="layout.slab_drawn_as_a_band")
+    else:
+        derived = slab_from_ridges(out, float(slab_offset))
+        if not derived:
+            raise RuntimeError(
+                "platform.slab_offset_um is declared and the ridges yielded no "
+                "slab; the guide layer carries no polygon at this point")
+        out["SLAB"] += derived
     out["FLOORPLAN"].append(_rect(-5.0, -pad_y - 5.0, z_end + 5.0, pad_y + 5.0))
 
     # --- the facet planes and the band the cleave or polish removes -------
@@ -492,10 +1085,27 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     # without re-deriving the floor plan
     ctx.put("layout.taper_length_um", tl)
     ctx.put("layout.grating_start_um", g0)
+    # what the trimmer actually got drawn as, so that a claim about the cavity
+    # phase being settable rests on a polygon rather than on a declaration
+    ctx.put("layout.phase_trimmer", heater_record)
+    # The cavity stage runs before this one, so it can check the trimmer's range
+    # but not whether a polygon carries it. That check belongs here, and a
+    # declared actuator the mask does not carry would otherwise let a design be
+    # graded on an excursion it cannot reach.
+    if pt is not None and pt.enabled and pt.length_um > 0 and not heater_record.get("drawn"):
+        ctx.warn(
+            "cavity.phase_trimmer is declared and no polygon carries it. "
+            + ("layout.layer_map declares no HEATER layer, so there is nowhere to "
+               "draw it" if "HEATER" not in out else
+               "the section it is declared over draws no guide")
+            + ". The cavity stage grades the degraded excursion on the placed "
+              "figure where the trimmer can place the comb, and a trimmer that "
+              "is not on the mask places nothing")
     return out
 
 
-def apply_derived_layers(polys: dict, layer_map: dict, derived) -> tuple[dict, list[dict]]:
+def apply_derived_layers(polys: dict, layer_map: dict, derived,
+                         grid_nm: float = 1.0) -> tuple[dict, list[dict]]:
     """Produce the layers a process asks for from the layers a designer draws.
 
     Mask polarity is the case that matters. A process wanting a trench, or a
@@ -508,11 +1118,25 @@ def apply_derived_layers(polys: dict, layer_map: dict, derived) -> tuple[dict, l
     """
     import klayout.db as db
 
+    # Snapped to the manufacturing grid before the boolean, and by the same
+    # step the writer uses.
+    #
+    # A derived layer is written to the mask alongside the layer it was derived
+    # from, and the writer snaps each independently. Where the operands are
+    # rectilinear the two snaps agree exactly. Where one carries a curve they
+    # need not: a quadratic facet taper sampled at 64 stations left 5e-05 um2
+    # of a dark-field layer overlapping the guide it is the inverse of. Snapping
+    # first makes the boolean and the written geometry the same geometry.
+    grid_step = max(1, int(round(float(grid_nm) * 1e-3 / DBU)))
+
     def region_of(name: str) -> "db.Region":
         r = db.Region()
         for p in polys.get(name, []):
             r.insert(db.DPolygon([db.DPoint(x, y) for x, y in p]).to_itype(DBU))
-        return r.merged()
+        r = r.merged()
+        if grid_step > 1:
+            r.snap(grid_step, grid_step)
+        return r
 
     out = dict(polys)
     described: list[dict] = []
@@ -657,6 +1281,17 @@ def check_geometry(gds_path, layer_map, *, min_angle_deg: float, max_vertices: i
     findings: dict[str, dict] = {}
     total_issues = 0
 
+    # Two names on one number are one layer, and a per-name report of them is
+    # the same geometry printed twice. A design mapping PAD and METAL both to
+    # M1 was reported as carrying seven pad shapes; they were the electrode
+    # strips, and every pad rule passed by reading the electrode back. The
+    # aliases are named here so that a reader knows which rows are shared.
+    by_number: dict[tuple[int, int], list[str]] = {}
+    for name, ld_pair in layer_map.items():
+        by_number.setdefault(tuple(ld_pair), []).append(name)
+    aliases = {"/".join(f"{n[0]}/{n[1]}" for n in [k]): sorted(v)
+               for k, v in by_number.items() if len(v) > 1}
+
     for name, (li, ld) in layer_map.items():
         idx = ly.find_layer(li, ld)
         if idx is None:
@@ -705,6 +1340,8 @@ def check_geometry(gds_path, layer_map, *, min_angle_deg: float, max_vertices: i
         "grid_nm": float(grid_nm),
         "total_issues": int(total_issues),
         "clean": total_issues == 0,
+        # names that share one number, and therefore one row of `by_layer`
+        "aliased_layers": aliases,
         "by_layer": findings,
     }
 
@@ -809,23 +1446,67 @@ def compare_backends(gds_a, gds_b, layer_map) -> dict[str, Any]:
     }
 
 
+def _payload(design, ctx, polys, snap, derived, gds, oasis, gds_gf, gf_ok,
+             xor, geometry, fidelity, complete, counts) -> dict[str, Any]:
+    """The layout payload, shared by both devices.
+
+    Held in one place so that a field added for one device cannot go missing
+    from the other, which is how two paths reporting the same thing diverge.
+    """
+    lay = design.layout
+    return {
+        "enabled": True,
+        "gds": str(gds),
+        "oasis": str(oasis) if oasis else None,
+        "gds_gdsfactory": str(gds_gf) if gf_ok else None,
+        "backend_gdsfactory_available": gf_ok,
+        "backend_xor": xor,
+        "fidelity": fidelity,
+        "mask_is_complete": complete,
+        "grid": snap,
+        "derived_layers": derived,
+        "geometry": geometry,
+        "geometry_issues": geometry.get("total_issues"),
+        "orientation": (ctx.get("layout") or {}).get("orientation"),
+        "process": process.summary(design),
+        "polygon_counts": counts,
+        "layer_map": lay.layer_map,
+        **{k: v for k, v in (ctx.get("layout") or {}).items() if not isinstance(v, dict)},
+    }
+
 def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]:
     lay = design.layout
     if not lay.enabled:
         ctx.put("layout", {"enabled": False})
         return {"enabled": False}
 
-    polys = build_polygons(design, ctx)
+    # Which device is drawn. Everything after this line is common to both: the
+    # derived layers, the grid snap, both backends, the geometry check and the
+    # layer table. Only the polygons differ.
+    mzm_record: dict[str, Any] = {}
+    if lay.device == "mach_zehnder":
+        polys, mzm_record = build_mzm_polygons(design, ctx)
+        # the label text is placed by the builder, and the writer reads it from
+        # the context in the same way for either device
+        ctx.put("layout", {**(ctx.get("layout") or {}),
+                           "texts": mzm_record.get("texts") or []})
+    else:
+        polys = build_polygons(design, ctx)
     derived: list[dict] = []
     if lay.derived_layers:
-        polys, derived = apply_derived_layers(polys, lay.layer_map, lay.derived_layers)
+        polys, derived = apply_derived_layers(polys, lay.layer_map,
+                                              lay.derived_layers,
+                                              grid_nm=design.process.grid_nm)
     polys, snap = snap_polygons(polys, design.process.grid_nm)
     info0 = ctx.get("layout") or {}
-    snap.update(period_dither(
-        float((ctx.get("grating") or {}).get("period_um") or design.grating.period_um or 1.0),
-        int(info0.get("periods_drawn") or 1),
-        design.process.grid_nm,
-    ))
+    if lay.device != "mach_zehnder":
+        # a grating's period need not be an integer number of grid steps, and the
+        # residue is a weak chirp. An interferometer carries no period
+        snap.update(period_dither(
+            float((ctx.get("grating") or {}).get("period_um") or design.grating.period_um or 1.0),
+            int(info0.get("periods_drawn") or 1),
+            design.process.grid_nm,
+        ))
     ctx.ensure()
     gds = ctx.run_dir / f"{design.meta.name}.gds"
     _write_klayout(polys, lay.layer_map, gds, lay.cell_name, design.process.grid_nm,
@@ -853,6 +1534,11 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                                       grid_nm=design.process.grid_nm)
         except Exception as exc:  # pragma: no cover - backend specific
             geometry = {"performed": False, "reason": f"check raised: {exc}"}
+    for number, names in (geometry.get("aliased_layers") or {}).items():
+        ctx.warn(f"layer {number} carries more than one name in layout.layer_map "
+                 f"({', '.join(names)}). One number is one layer: the geometry "
+                 f"reported against each of these names is the same geometry, "
+                 f"and a rule written against one of them reads all of them")
 
     gf_ok = False
     gds_gf = ctx.run_dir / f"{design.meta.name}.gdsfactory.gds"
@@ -870,6 +1556,35 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 
     # --- is the emitted mask the device that was simulated ---------------
     info = ctx.get("layout") or {}
+    if lay.device == "mach_zehnder":
+        # There is no period count to draw a fraction of. What can differ is the
+        # electrode: the length drawn against the length the electro-optic stage
+        # solved. The mask is complete when those agree.
+        drawn_l = float(mzm_record.get("electrode_length_drawn_um") or 0.0)
+        declared_l = float(mzm_record.get("electrode_length_declared_um") or 0.0)
+        complete = bool(declared_l) and abs(drawn_l - declared_l) <= 1e-6
+        fidelity = {
+            "electrode_length_drawn_um": drawn_l,
+            "electrode_length_simulated_um": declared_l,
+            "mask_is_complete": complete,
+        }
+        if not complete:
+            ctx.warn(
+                f"the drawn electrode is {drawn_l:.1f} um against the {declared_l:.1f} um "
+                "the electro-optic stage solved, so every figure that scales with "
+                "length describes a device other than the one emitted",
+                key="layout.electrode_length_disagrees",
+            )
+        counts = {k: len(v) for k, v in polys.items() if v}
+        payload = _payload(design, ctx, polys, snap, derived, gds, oasis, gds_gf,
+                           gf_ok, xor, geometry, fidelity, complete, counts)
+        payload["mzm"] = mzm_record
+        payload["device"] = "mach_zehnder"
+        payload["device_length_um"] = mzm_record.get("device_length_um")
+        ctx.put("layout", payload)
+        ctx.write_stage("layout", payload)
+        return payload
+
     drawn, total_p = int(info.get("periods_drawn", 0)), int(info.get("periods_total", 0))
     complete = bool(total_p and drawn >= total_p)
     fidelity = {
@@ -882,25 +1597,10 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     }
 
     counts = {k: len(v) for k, v in polys.items() if v}
-    payload = {
-        "enabled": True,
-        "gds": str(gds),
-        "oasis": str(oasis) if oasis else None,
-        "gds_gdsfactory": str(gds_gf) if gf_ok else None,
-        "backend_gdsfactory_available": gf_ok,
-        "backend_xor": xor,
-        "fidelity": fidelity,
-        "mask_is_complete": complete,
-        "grid": snap,
-        "derived_layers": derived,
-        "geometry": geometry,
-        "geometry_issues": geometry.get("total_issues"),
-        "orientation": (ctx.get("layout") or {}).get("orientation"),
-        "process": process.summary(design),
-        "polygon_counts": counts,
-        "layer_map": lay.layer_map,
-        **{k: v for k, v in (ctx.get("layout") or {}).items() if not isinstance(v, dict)},
-    }
+    counts = {k: len(v) for k, v in polys.items() if v}
+    payload = _payload(design, ctx, polys, snap, derived, gds, oasis, gds_gf,
+                       gf_ok, xor, geometry, fidelity, complete, counts)
+    payload["device"] = "edbr"
     ctx.put("layout", {**(ctx.get("layout") or {}), **payload})
     ctx.write_stage("layout", payload)
 

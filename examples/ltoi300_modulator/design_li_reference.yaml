@@ -1,0 +1,150 @@
+# The measured anchor: the thin-film lithium tantalate modulator of Li et al.
+#
+# Z. Li, A. Kotz, A. Schwarzenberger, C. Koos and T. J. Kippenberg, "Low voltage
+# and high-bandwidth thin-film lithium tantalate modulator on a silicon dioxide
+# substrate", arXiv:2604.14836, held at `references/` and summarised in
+# `references/README.md`.
+#
+# It is posed to the chain because it is the only published device on this
+# platform that states a geometry and a measured half-wave voltage together,
+# and the half-wave voltage of the ltoi300 cells is what this study is
+# adjudicating. What is tested here is the product of the electro-optic overlap
+# the chain computes and the r33 the material library carries, against a
+# measurement. That product is the whole of the disagreement examined in
+# `design_oband.yaml`, so a run that reproduces the measurement establishes
+# that the disagreement is a property of the ltoi300 geometry rather than of
+# the model.
+#
+# The paper's device differs from the ltoi300 cells in three ways that matter
+# and each is carried here: the film is 600 nm rather than 300, the etch is
+# 440 nm rather than 180, and the film sits on fused silica rather than on a
+# silicon handle over a buried oxide.
+#
+# The electrode is a T-shaped segmented slow-wave line, which a
+# two-dimensional cross-section does not represent. The radio-frequency
+# figures this run returns are therefore those of the unloaded coplanar line of
+# the same gap, and the limitation is recorded in the study README. The
+# half-wave voltage is unaffected, being an electrostatic quantity at the
+# operating gap.
+
+meta:
+  name: ltoi300_mzm_li_reference
+  title: "Li et al. TFLT modulator on fused silica, the measured anchor"
+  status: scaffold
+
+platform:
+  cut: x
+  film_material: LiTaO3         # the generic library: bulk congruent
+                                # dispersion, r33 30.5 pm/V, clamped
+                                # permittivity 40.9 and 42.5
+  film_thickness_um: 0.600      # paper: 600 nm film
+  etch_depth_um: 0.440          # paper: 440 nm etch, leaving a 160 nm slab
+  slab_offset_um: 6.0           # ASSUMPTION: the paper states no slab extent;
+                                # the figure is that of the ltoi300 cells and
+                                # is carried so that the two runs differ in the
+                                # quantities under examination and not in this
+  sidewall_deg: 75.0            # ASSUMPTION: the paper states no sidewall angle
+  box_thickness_um: 7.0         # the film is transferred onto fused silica, so
+                                # the lower cladding is silica all the way down
+  clad_thickness_um: 1.5        # paper: 1.5 um oxide cladding
+  substrate_material: SiO2      # paper: 100 mm fused-silica substrate
+
+waveguide:
+  top_width_um: 2.000           # ASSUMPTION: the paper states no guide width.
+                                # 2.0 um is the width of the guides of Wang et
+                                # al. on the same platform
+  wavelength_um: 1.55
+
+mesh:
+  d_fine_um: 0.010
+  d_coarse_um: 0.060
+  num_modes: 4
+  polarisation: TE
+
+grating:
+  enabled: false
+
+electrodes:
+  enabled: true
+  topology: gsg
+  gap_um: 5.0                   # paper: 5 um electrode gap
+  width_um: 20.0                # ASSUMPTION: the paper states no conductor
+                                # width; the ltoi300 O-band figure is carried
+  ground_width_um: 50.0         # ASSUMPTION, as above
+  length_um: 18000.0            # paper: 18 mm arms
+  thickness_um: 0.9             # ASSUMPTION: the paper states no metal thickness
+  material: Au
+  eo_coefficient: r33
+  test_voltage_V: 1.0
+  drive_impedance_ohm: 50.0
+  travelling_wave: true
+  convergence_check: true
+  refinement: 0.5
+  rf_mesh_fine_um: 0.025        # the cell the O-band ladder settled on, so
+                                # that this run and the ltoi300 runs carry the
+                                # same mesh error and their ratio is meaningful
+
+modulator:
+  enabled: true
+  configuration: mach_zehnder
+  drive: push_pull              # a half-wave voltage for a Mach-Zehnder is
+                                # conventionally quoted push-pull, and the
+                                # paper's own figure is read on that convention
+                                # in references/README.md
+  rf_band_GHz: [1.0, 64.0]      # paper: 3 dB electro-optic bandwidth of 64 GHz
+
+cavity:
+  enabled: false
+
+warnings:
+  acknowledged:
+    - key: mode.cross_section_supports_3
+      reason: >-
+        A 2.0 um ridge etched 440 nm into a 600 nm film carries several guided
+        modes and the device drives its fundamental TE mode. The finding names
+        a requirement of the extended-DBR laser this chain was first written
+        for and states nothing about a modulator arm, whose width is chosen for
+        the electro-optic overlap and for the propagation loss.
+    - key: mode.index_override_declared_and_unread
+      reason: >-
+        The generic library carries thin-film indices measured at 1550 nm by
+        Wang et al. and held for reference. The Sellmeier fit is evaluated here
+        instead, so that the dispersion and with it the group index are
+        continuous across the band. The group index enters the velocity
+        mismatch and the half-wave voltage depends on the extraordinary index,
+        and the two routes differ by 0.004 at this wavelength.
+    - key: eo.electrostatic_solve_converged_halving
+      reason: >-
+        Accepted on the same terms as the ltoi300 runs beside it and for the
+        same reason, being the sloped ridge sidewall across which the
+        permittivity steps by a factor of eleven. The ladder and the
+        extrapolation are in the study README. This run is posed at the same
+        cell as those runs so that the mesh error is common to both and the
+        ratio between them is the quantity read.
+    - key: eo.lumped_rc_estimate_gives
+      reason: >-
+        Over 18 mm the electrode is a transmission line and the lumped estimate
+        is not the bandwidth, which is what the finding says. The
+        travelling-wave figure is the one read here and the lumped one is
+        reported beside it so that the two can be seen to differ.
+    - key: modulator.3_db_bandwidth_21
+      reason: >-
+        The finding is the result this run exists to produce, and it is
+        reported rather than accepted as ordinary. The paper measures 64 GHz
+        over 18 mm on a T-shaped segmented slow-wave electrode, and this run
+        poses the unloaded coplanar line of the same gap, which reaches 21.7
+        GHz over that length. The difference is the electrode design and the
+        conductor metallurgy, neither of which a two-dimensional cross-section
+        of the unloaded line carries. The study README states what would be
+        required to close it.
+
+targets:
+  - metric: modulator.VpiL_device_V_cm
+    value: 2.754
+    rel_tol: 0.15
+    severity: should
+    source: >-
+      the paper measures a half-wave voltage of 1.53 V at 1550 nm over 18 mm
+      arms, which is 2.754 V cm read on the push-pull convention
+
+stages: [mode, eo, modulator, verify]

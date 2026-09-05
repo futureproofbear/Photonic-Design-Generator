@@ -33,12 +33,14 @@ class ElectrostaticResult:
     x: np.ndarray
     y: np.ndarray
 
+    def energy_density(self, eps_x: np.ndarray, eps_y: np.ndarray) -> np.ndarray:
+        """Stored energy per cell, in eps0 * V^2 units."""
+        dA = np.outer(np.gradient(self.x), np.gradient(self.y))
+        return 0.5 * (eps_x * self.Ex**2 + eps_y * self.Ey**2) * dA
+
     def energy(self, eps_x: np.ndarray, eps_y: np.ndarray) -> float:
         """Stored electrostatic energy per unit length, in eps0 * V^2 units."""
-        dx = np.gradient(self.x)
-        dy = np.gradient(self.y)
-        dA = np.outer(dx, dy)
-        return 0.5 * float(np.sum((eps_x * self.Ex**2 + eps_y * self.Ey**2) * dA))
+        return float(np.sum(self.energy_density(eps_x, eps_y)))
 
 
 def solve_potential(

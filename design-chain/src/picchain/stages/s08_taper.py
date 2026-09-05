@@ -32,6 +32,8 @@ from typing import Any
 
 import numpy as np
 
+from picchain import taper_profile
+
 from .. import eme
 from .. import process
 from ..artifacts import RunContext
@@ -68,19 +70,11 @@ def _cross_section(design: Design, width_um: float, name: str):
 
 
 def _widths(tip: float, full: float, n: int, profile: str) -> np.ndarray:
-    """Section-centre widths for the requested profile."""
-    u = (np.arange(n) + 0.5) / n
-    if profile == "linear":
-        s = u
-    elif profile == "raised_sine":
-        # width varies as a raised sine, so the rate of change vanishes at both
-        # ends; this is the usual remedy when a linear taper is too abrupt
-        s = u - np.sin(2 * np.pi * u) / (2 * np.pi)
-    elif profile == "quadratic":
-        s = u**2
-    else:
-        raise ValueError(f"unknown taper profile {profile!r}")
-    return tip + (full - tip) * s
+    """Section-centre widths for the requested profile.
+
+    The profile is shared with the layout stage, which draws the same curve.
+    """
+    return taper_profile.slice_widths(tip, full, n, profile)
 
 
 def _solve_slices(design, lib, widths, grid, window, lam, n_modes, n_guess, n_floor):

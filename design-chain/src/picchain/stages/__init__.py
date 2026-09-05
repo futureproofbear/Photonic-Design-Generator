@@ -8,7 +8,7 @@ the run directory: it reads earlier stages' metrics from ``ctx`` (and their
 from . import (
     s01_mode, s02_grating, s03_eo, s04_cavity, s05_layout, s06_drc, s07_verify,
     s08_taper, s09_fdtd, s10_bend, s11_facet, s12_mask, s13_fem, s14_reticle, s15_release, s16_circuit,
-    s17_dynamics,
+    s17_dynamics, s18_modulator,
 )
 
 STAGES = {
@@ -20,6 +20,7 @@ STAGES = {
     "facet": s11_facet.run,
     "grating": s02_grating.run,
     "eo": s03_eo.run,
+    "modulator": s18_modulator.run,
     "cavity": s04_cavity.run,
     "dynamics": s17_dynamics.run,
     "circuit": s16_circuit.run,
@@ -44,6 +45,9 @@ DEPENDENCIES = {
     "facet": ["mode"],
     "grating": ["mode"],
     "eo": ["mode", "grating"],
+    # the device figures are the arm figures the electro-optic stage returns,
+    # converted for the interferometer the arms sit in
+    "modulator": ["eo"],
     "cavity": ["grating", "eo"],
     "dynamics": ["cavity"],
     # the assembly reads the transfer-matrix spectrum the grating stage wrote

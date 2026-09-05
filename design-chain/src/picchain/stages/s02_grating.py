@@ -42,6 +42,18 @@ def _dn_for_geometry(design: Design, lib, post_w: float, post_gap: float, n_bare
 
 def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]:
     g = design.grating
+    # A device that carries no Bragg mirror declares it here. The field existed
+    # in the schema and was read by nothing, so every device acquired a grating
+    # whether or not it contained one, and the stages downstream took the
+    # period, the Bragg wavelength and the electrode length from it. Where the
+    # grating is switched off, the payload says so and those stages fall back to
+    # figures declared in their own right.
+    if not g.enabled:
+        payload = {"enabled": False,
+                   "reason": "grating.enabled is false; the device carries no Bragg mirror"}
+        ctx.put("grating", payload)
+        return payload
+
     mode = ctx.get("mode")
     if mode is None:
         raise RuntimeError("stage 'grating' requires stage 'mode' to have run")
@@ -97,6 +109,15 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         n_sections=g.n_sections,
     )
 
+    # THE UNIFORM-GRATING CLOSED FORM, tanh(kappa L)/(2 kappa), AND IT TAKES NO
+    # APODISATION ARGUMENT. Where a profile is applied the spectrum above
+    # carries it and this figure does not, so the two describe different
+    # gratings and a reader comparing them concludes that one is wrong.
+    #
+    # Nothing downstream is affected: the cavity stage takes the mirror delay
+    # from the group delay of the spectrum, which does follow the profile, so
+    # the Pockels lever is right whatever this says. The defect is in the
+    # reporting, and it is flagged rather than silently carried.
     L_pen = tmm.penetration_depth(kappa, g.length_um)
     tau_dbr = 2 * n_g * L_pen * 1e-6 / C0  # round-trip group delay through the mirror
 
@@ -131,6 +152,9 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "group_delay_peak_ps": spec.group_delay_at_peak_s() * 1e12,
         "penetration_depth_um": L_pen,
         "penetration_depth_mm": L_pen / 1e3,
+        # Whether the figure above describes the grating that was solved.
+        "penetration_depth_is_uniform_closed_form": True,
+        "penetration_depth_describes_this_profile": g.apodisation == "uniform",
         "mirror_round_trip_delay_ps": tau_dbr * 1e12,
         "apodisation": g.apodisation,
     }
@@ -273,6 +297,14 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     if kL < 0.5:
         ctx.warn(f"kappa*L = {kL:.2f} is low; peak reflectivity {spec.peak_R:.1%} may be "
                  "insufficient to reach threshold with a typical RSOA")
+    if g.apodisation != "uniform":
+        ctx.warn(
+            f"penetration_depth is the uniform-grating closed form tanh(kappa L)/(2 kappa) "
+            f"and this grating is apodised {g.apodisation!r}, so the figure does not "
+            f"describe it. The cavity stage takes the mirror delay from the group delay of "
+            f"the spectrum, which does follow the profile, so the Pockels lever is "
+            f"unaffected; the penetration depth is not to be quoted for this grating"
+        )
     if g.apodisation == "uniform":
         ctx.warn("uniform (unapodised) grating: expect the sidelobes reported here to show "
                  "up as mode-hop risk and as chirp nonlinearity in the laser")

@@ -81,6 +81,35 @@ as such.
 
 ## Platform literature, thin-film lithium tantalate
 
+**C. Wang, Z. Li, J. Riemensberger, et al., "Lithium tantalate photonic
+integrated circuits for volume manufacturing"**
+*Nature* **629**, 784 (23 May 2024) &middot;
+<https://doi.org/10.1038/s41586-024-07369-1>
+
+The source of the thin-film constants held for lithium tantalate in
+[`design-chain/pdk/materials.yaml`](../design-chain/pdk/materials.yaml). The
+figures taken from it are the ordinary and extraordinary indices of 2.119 and
+2.123, a birefringence of 0.004, and a modulation efficiency of 1.9 V cm at
+1550 nm and 1.6 V cm at 1310 nm. Three propagation losses are reported and they
+differ by a factor of three: 5.6 dB/m on unreduced material, 7.3 dB/m on the
+wafer used for optical applications, and 17.1 dB/m on a mass-manufactured LTOI
+substrate. The last is the figure a volume process is most likely to present,
+and all three appear on the loss axis of
+[`examples/ltoi300_ring/`](../examples/ltoi300_ring/README.md).
+
+**Z. Li, A. Kotz, A. Schwarzenberger, C. Koos and T. J. Kippenberg, "Low
+voltage and high-bandwidth thin-film lithium tantalate modulator on a silicon
+dioxide substrate"**
+arXiv:2604.14836 &middot; 16 April 2026
+
+A travelling-wave modulator on a 100 mm fused-silica substrate, velocity
+matched by a T-shaped segmented slow-wave electrode. The measured figures are a
+3 dB electro-optic bandwidth of 64 GHz at a half-wave voltage of 1.53 V, an
+electrical bandwidth of 100 GHz, a microwave loss of 4.6 dB/cm at 120 GHz, a
+switching voltage constant down to 10 mHz, and a net single-lane rate of
+440.6 Gbit/s under PAM8. It bears on electrode design on this platform and on
+the bias stability that distinguishes lithium tantalate from lithium niobate.
+
 **Mohanraj, Shi, Yang, Zhou, Zhu — integrated photon-pair sources on
 periodically poled thin-film lithium tantalate.** arXiv:2605.24988v1.
 
@@ -165,6 +194,149 @@ time is 18 weeks.
 buried-oxide thickness and no process tolerances.** The Vpi*L figure is quoted
 for the O band without the electrode gap or the overlap factor, so it cannot be
 inverted for r33.
+
+**Luxtelligence LT-PRO design manual**
+Obtained from the foundry under their terms and not redistributed &middot;
+read 2026-09-03
+
+The document that states what the vendor page omits. **Its content is not
+reproduced here.** The working notes taken from it are held untracked at
+`design-chain/pdk/LXT_LT_PRO/MANUAL_NOTES.md`, under the same exclusion as the
+materials file and the rule decks, and a reader holding the manual can follow
+every citation below from them.
+
+What the manual governs, so that a reader knows what they are missing:
+
+* the optical dispersion of the thin film and its radio-frequency permittivity,
+  which are held in the untracked `materials_lt_pro.yaml` and reached through
+  `platform.materials_file`;
+* the layer numbers, the etch depths and the minimum widths, gaps, separations
+  and enclosures, which reach a design through `layout.layer_map` and the
+  `drc.rules` each design declares;
+* the die footprints the process offers, which reach a design through
+  `reticle.die_width_um`, `reticle.die_height_um` and
+  `reticle.chip_frame.allowed_edges_um`;
+* the wafer orientation, and the drawing guidance for edge couplers and for bend
+  discretisation.
+
+**Two corrections it made to the vendor-page entry above are recorded because
+they are corrections to this repository rather than content of the manual.** The
+5 by 5 mm multi-project die recorded from the vendor page is not a footprint the
+process offers. And the 800 nm figure taken from that page is a minimum metal
+width and not an electrode gap.
+
+Individual figures drawn from the manual appear in the design files that use
+them, each carrying its provenance, which is engineering use rather than
+redistribution. Whether that line is drawn in the right place is a question for
+the licensor and is flagged rather than assumed.
+
+**ubcpdk, the same UBC process for gdsfactory**
+<https://github.com/gdsfactory/ubc> &middot; <https://gdsfactory.github.io/ubc/>
+&middot; MIT &middot; repository at 3.3.5, read 2026-09-03; release 3.3.4 installed
+2026-09-05
+
+The gdsfactory-native form of the SiEPIC EBeam kit below, and the one this
+chain could drive directly, gdsfactory being the layout engine here. Its layer
+map agrees with the KLayout kit in every position checked: the guide is 1/0,
+the 150 nm slab 2/0, the heater metal 11/0, the router 12/0, the pad opening
+13/0, `DevRec` 68/0 and the ports 1/10 and 1/11. It adds `WG2` at 31/0.
+
+Its declared stack is 220 nm of silicon at a 10 degree sidewall, a 3.0 um
+buried oxide, a 750 nm titanium-nitride heater, a 700 nm aluminium router and a
+10 um substrate. Strip guides carry a 5 um minimum radius and the heater is
+4 um wide.
+
+**Two artifacts bear this kit's name and they are not the same.** The
+repository at `main` is version 3.3.5 and requires `gdsfactory~=9.45.0`. The
+latest release on the package index is 3.3.4 and requires `gdsfactory~=9.34.0`.
+Everything above was read from the repository and describes 3.3.5. Anything
+below attributed to the installation describes 3.3.4, which is what `pip` gives.
+
+The heater figure alone was wrong when this entry was written, being 700 nm
+here against the 750 nm both the repository and the release declare, and it is
+corrected above. The version and the dependency constraint recorded here were
+right, and were briefly and wrongly overwritten with the release's figures on
+2026-09-05 before the repository was re-read.
+
+The layer stack extrudes seven levels over four device layers and the layer map
+declares sixteen names, and
+[`examples/ubc_soi220_stack/`](../examples/ubc_soi220_stack/README.md) sets both
+against the layers the cells draw.
+
+**The two UBC kits disagree about the stack, and how much it matters was
+settled on 2026-09-05.** The cross-section script of the KLayout kit grows a
+2.0 um buried oxide against the 3.0 um declared here, and it makes the heater
+metal 200 nm against 750 nm. A heater's resistance and its thermal time constant
+both follow its thickness, so a design taking the figure from one kit and the
+geometry from the other is wrong by a factor of 3.75 in the quantity that sets
+the drive.
+
+The oxide disagreement is worth nothing for the transverse-electric mode and a
+factor of twelve thousand in substrate tunnelling for the transverse-magnetic
+one, which is measured in
+[`examples/ubc_soi220_stack/`](../examples/ubc_soi220_stack/README.md). The kit
+ships four TM cells and they are the ones for which the two stacks are not
+interchangeable.
+
+**It cannot share an environment with the kits already installed, and it now
+has its own.** The repository requires gdsfactory `~=9.45.0` and the release
+requires `~=9.34.0`; this installation runs 9.48.0 for the Luxtelligence kit and
+the layout stage, so neither admits it. `design-chain/.venv-ubcpdk/` holds the
+release, being ubcpdk 3.3.4 on gdsfactory 9.34.2, and is excluded from version
+control with every other environment. The kit is therefore run rather than read,
+**and what is run is one version behind what is described above**.
+
+**SiEPIC EBeam PDK, silicon on insulator by electron-beam lithography**
+<https://github.com/SiEPIC/SiEPIC_EBeam_PDK> &middot; MIT &middot; read 2026-09-03
+
+A third platform, and it is silicon rather than a Pockels material. It is held
+here because it is open, because its rule deck and layer table are published in
+full, and because its fabrication runs publish measurements, which is the one
+thing the lithium tantalate work has no access to.
+
+**Every figure below was reconfirmed on 2026-09-05** by cloning the repository
+and reading `klayout/EBeam/xsect/EBeam_ANT.xs` and `klayout/EBeam/EBeam.lyp`
+directly. The cross-section script grows the oxide at 2.0, the silicon at 0.22
+with a 3 degree taper, the nitride at 0.4 with a 5 degree taper, the cladding at
+2.2, the heater metal at 0.2 and the router at 0.7, and etches the pad opening
+at 0.3. It binds `si` to 1/0 and `sin` to 4/0. The layer properties file names
+2/0 "Si - 90 nm rib". The entry as first written was right on all of it.
+
+*Stack*, from the cross-section script `EBeam_ANT.xs`: 220 nm silicon on a
+2.0 um buried oxide at a 3 degree etch taper, an optional 400 nm silicon
+nitride at 5 degrees, a 2.2 um cladding oxide, a 200 nm upper metal for
+heaters, a 700 nm lower metal for routing, and a 300 nm etch to open a pad.
+
+*Layers*, from `EBeam.lyp`: silicon 1/0, the 90 nm rib 2/0, nitride 4/0, oxide
+open 6/0, text 10/0, the heater metal 11/0, the router metal 12/0, the pad
+opening 13/0, the via 40/0, doping 20/0 and 24/0, floor plan 99/0, deep trench
+201/0, keep-out 202/0, dicing 210/0, and the chip design area 290/0. The
+verification layers are `DevRec` 68/0, `PinRec` 1/10 and `FbrTgt` 81/0.
+
+*Rules*, from `drc/SiEPIC_EBeam.drc`: silicon at 70 nm minimum width and space,
+nitride at 120 nm, the first metal at 3.0 um for both, the second at 5.0 um
+width against 8.0 um space with a 3.0 um overlap onto the first, a pad opening
+at 10.0 um, and 20.0 um from a deep trench to metal. Two checks are not
+geometric: devices may not overlap on `DevRec`, and every device must sit
+inside the floor plan.
+
+*Cells*: directional couplers, a ring resonator, a taper and a Bragg grating as
+parametric cells, with `Silicon.lbr` and `SiN.lbr` as fixed libraries.
+
+*Fabrication*: Applied Nanotools NanoSOI by 100 keV direct-write electron-beam
+lithography on 8-inch wafers, and the openEBL service, whose runs return
+measured data. Applied Nanotools states that propagation loss is tracked on
+every run by cut-back on 500 nm strip waveguides under 2.2 um of cladding.
+
+**This platform is not to be confused with the two lithium platforms beside
+it.** Silicon carries no Pockels effect, so a modulator on it is carrier-based
+and none of the electro-optic figures of the LNOI400 or LT-PRO entries
+transfers. The layer numbers differ in every position: silicon is 1/0 here,
+2/0 on LN-CORE and 2/10 on LT-PRO.
+
+The licence permits redistribution, and the kit is nonetheless installed rather
+than vendored, on the same terms as every other PDK in
+`design-chain/pdk/`.
 
 **LN-CORE lnoi400 and LT-PRO ltoi300 KLayout rule decks**
 

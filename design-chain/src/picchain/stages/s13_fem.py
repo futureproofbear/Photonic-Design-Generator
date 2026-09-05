@@ -167,7 +167,18 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     }
 
     # ---- the index difference the posts produce -------------------------
-    if cfg.with_posts:
+    #
+    # Skipped where the device declares no Bragg mirror. The finite-difference
+    # stage returns null for `dn_eff_posts` in that case rather than a number
+    # describing posts the device does not carry, and this comparison read that
+    # null as a float and raised. The cross-check on `n_eff` above stands either
+    # way and is the one that bears on every device.
+    if cfg.with_posts and not design.grating.enabled:
+        payload["dn_eff_posts_skipped"] = (
+            "grating.enabled is false, so the finite-difference stage solved no "
+            "posted cross-section and there is no perturbation to compare"
+        )
+    elif cfg.with_posts:
         xs_posts = _build(design, with_posts=True, electrodes=False, name="fem_posts")
         _, posts = _solve(design, xs_posts, lib, lam, component,
                           resolution=cfg.resolution_max_um, n_guess=bare.n_eff)

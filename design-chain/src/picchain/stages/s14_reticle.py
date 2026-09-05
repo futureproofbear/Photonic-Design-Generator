@@ -164,6 +164,94 @@ def _build_monitors(design: Design, ctx: RunContext) -> tuple[dict[str, list], l
     return out, described
 
 
+def _variant_ctx(ctx: RunContext, overrides) -> RunContext:
+    """A context with the primary run's solved value hidden for each override.
+
+    A stage that solves a quantity writes it into the metric tree, and the
+    layout stage prefers the tree over the design file. That precedence is right
+    for the primary device, whose drawing is to follow its own solve. It is
+    wrong for a variant: the tree holds the PRIMARY device's answer, so a variant
+    that overrides a solved quantity is drawn with the primary's value and the
+    override reaches nothing.
+
+    Measured on the first companion drawn: a reference laser whose grating period
+    was overridden from 1424.74000 to 1424.85320 nm to place it 15 GHz away came
+    out of the mask at 1424.74002 nm, byte-identical to the device it was meant
+    to beat against, and no stage reported it. Two lasers at one frequency
+    produce no beat, so the die would have carried no microwave carrier at all.
+
+    Hiding the overridden leaves makes the drawing fall back to the design file,
+    which is where the override was written.
+    """
+    import copy as _copy
+
+    v = _copy.copy(ctx)
+    v.metrics = _copy.deepcopy(ctx.metrics)
+    for dotted in (overrides or {}):
+        parts = str(dotted).split(".")
+        node = v.metrics
+        for part in parts[:-1]:
+            node = node.get(part) if isinstance(node, dict) else None
+            if node is None:
+                break
+        if isinstance(node, dict):
+            node.pop(parts[-1], None)
+    return v
+
+
+def _companion_cells(design: Design, ctx: RunContext, layout, lmap) -> tuple[list, list[dict]]:
+    """One device cell per declared companion.
+
+    The companion is re-drawn from the same builder as the primary device with
+    its overrides applied, so it is this design file's own physics evaluated at
+    different values. It is never a second drawing maintained by hand, which
+    would drift from the first the moment either changed.
+    """
+    from . import s05_layout
+
+    cells, described = [], []
+    for spec in design.reticle.companions.devices:
+        variant = design.model_copy(deep=True)
+        for dotted, value in (spec.overrides or {}).items():
+            set_dotted(variant, dotted, value)
+        vctx = _variant_ctx(ctx, spec.overrides)
+        if variant.layout.device == "mach_zehnder":
+            polys, _ = s05_layout.build_mzm_polygons(variant, vctx)
+        else:
+            polys = s05_layout.build_polygons(variant, vctx)
+        polys, _ = s05_layout.snap_polygons(polys, design.process.grid_nm)
+
+        # A COMPANION IS DRAWN AND IS NOT SOLVED, and the difference is stated
+        # rather than left for a reader to discover. The chain evaluates one
+        # design per run, so every metric in this run describes the primary
+        # device. The companion's own linewidth, output power and Bragg
+        # wavelength are computed by nothing here.
+        ctx.warn(
+            f"companion device {spec.name!r} is drawn on the die and its physics "
+            "is not solved: every metric this run reports describes the primary "
+            "device. Its own acceptance rows are established by running the "
+            "chain on a design file carrying its overrides",
+            key=f"reticle.companion_not_solved_{(spec.name or 'x').lower()}",
+        )
+
+        for k in range(max(int(spec.copies), 1)):
+            slug = (spec.name or "companion").replace(" ", "_")[:16]
+            name = f"{design.layout.cell_name}_C_{slug}_{k:02d}"
+            cell = layout.create_cell(name)
+            for layer, plist in polys.items():
+                _insert(cell, layout, lmap, layer, plist)
+            cells.append(cell)
+            described.append({
+                "name": spec.name,
+                "cell": name,
+                "copy": k,
+                "purpose": spec.purpose,
+                "overrides": {kk: vv for kk, vv in (spec.overrides or {}).items()},
+                "extent_um": [cell.dbbox().width(), cell.dbbox().height()],
+            })
+    return cells, described
+
+
 def _split_cells(design: Design, ctx: RunContext, layout, lmap) -> tuple[list, list[dict]]:
     """One device cell per value of the split parameter.
 
@@ -187,15 +275,31 @@ def _split_cells(design: Design, ctx: RunContext, layout, lmap) -> tuple[list, l
         # reach. The electrode gap is widened by the amount the rule requires and
         # the adjustment is reported, since it changes the overlap on that copy
         # and the copy is no longer the design with one parameter moved.
+        # The widening below is a property of a grating flanked by electrodes:
+        # opening the post gap walks the posts outward into the metal. A device
+        # that draws no posts has nothing to walk, and applying it there
+        # computes a clearance from a grating that does not exist. On a
+        # Mach-Zehnder with `grating.enabled` false it derives 6.36 um from the
+        # schema defaults and silently replaces every rung of a gap ladder below
+        # that, which is the ladder's own parameter and the experiment it was
+        # drawn for.
+        has_posts = (variant.layout.device != "mach_zehnder"
+                     and variant.grating.enabled)
         widened = None
-        if sep > 0:
+        if sep > 0 and has_posts:
             g = process.geometry(variant, "drawn")
             need = 2.0 * (g.wg_top_width_um / 2 + g.post_gap_um + g.post_width_um + sep)
             if need > g.electrode_gap_um:
                 widened = round(need, 4)
                 variant.electrodes.gap_um = widened
 
-        polys = s05_layout.build_polygons(variant, ctx)
+        # and the rung is the device the design declares. This called the
+        # E-DBR builder unconditionally until 2026-09-05, so a ladder beside a
+        # Mach-Zehnder would have drawn E-DBRs.
+        if variant.layout.device == "mach_zehnder":
+            polys, _ = s05_layout.build_mzm_polygons(variant, ctx)
+        else:
+            polys = s05_layout.build_polygons(variant, ctx)
         polys, _ = s05_layout.snap_polygons(polys, design.process.grid_nm)
 
         name = f"{design.layout.cell_name}_S{i:02d}"
@@ -243,6 +347,11 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 
     die = layout.create_cell(f"{design.layout.cell_name}_DIE")
 
+    # --- companion devices, placed below the primary one ------------------
+    comp_cells, comp_desc = ([], [])
+    if getattr(cfg, "companions", None) and cfg.companions.enabled:
+        comp_cells, comp_desc = _companion_cells(design, ctx, layout, lmap)
+
     # --- the split ladder, placed below the primary device ----------------
     split_cells, split_desc = ([], [])
     if cfg.split.enabled and cfg.split.values:
@@ -250,6 +359,10 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     split_pitch = cfg.split.pitch_um or (dev_box.height() + 60.0)
     split_h = len(split_cells) * split_pitch if split_cells else 0.0
     split_w = max((c.dbbox().width() for c in split_cells), default=0.0)
+    comp_pitch = ((getattr(cfg, "companions", None) and cfg.companions.pitch_um)
+                  or (dev_box.height() + 60.0))
+    comp_h = len(comp_cells) * comp_pitch if comp_cells else 0.0
+    comp_w = max((c.dbbox().width() for c in comp_cells), default=0.0)
 
     # --- monitors, placed below the device ------------------------------
     mon_polys, mon_desc = ({}, [])
@@ -267,9 +380,9 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 
     # --- floor plan ------------------------------------------------------
     m = cfg.margin_um
-    content_w = max(dev_box.width(), mon_width, split_w)
+    content_w = max(dev_box.width(), mon_width, split_w, comp_w)
     monitor_gap = 150.0 if mon_desc else 0.0
-    content_h = dev_box.height() + split_h + monitor_gap + mon_height
+    content_h = dev_box.height() + comp_h + split_h + monitor_gap + mon_height
 
     # Every band between the content and the sawn edge is deducted here, or the
     # die comes out larger than it was declared. The seal-ring clearance was
@@ -278,7 +391,15 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # 20200 x 5050 um was written as 20320 x 5170. Nothing reported it, no
     # boundary being drawn against which a footprint could be checked. On a
     # process offering a fixed set of die sizes that is a refusal at submission.
-    bands = m + cfg.seal_ring.clearance_um + cfg.seal_ring.width_um + cfg.dicing_lane_um
+    # A band that is not drawn is not deducted. The ring width was subtracted
+    # whatever `seal_ring.enabled` said, while the die edge was placed from the
+    # width only where the ring is drawn, so a design that switches the ring off
+    # emitted a die two ring-widths smaller than it declared. On a process
+    # offering a fixed set of die sizes that is a refusal at submission, and the
+    # footprint check below passed it because that check tested only for a die
+    # too large.
+    seal_width = cfg.seal_ring.width_um if cfg.seal_ring.enabled else 0.0
+    bands = m + cfg.seal_ring.clearance_um + seal_width + cfg.dicing_lane_um
     inner_w = cfg.die_width_um - 2 * bands if cfg.die_width_um else content_w
     inner_h = cfg.die_height_um - 2 * bands if cfg.die_height_um else content_h
     if inner_w < content_w or inner_h < content_h:
@@ -294,7 +415,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     ring_in_x1 = ring_in_x0 + inner_w + 2 * (m + seal_clear)
     ring_in_y0 = ring_in_y1 - inner_h - 2 * (m + seal_clear)
 
-    sw = cfg.seal_ring.width_um if cfg.seal_ring.enabled else 0.0
+    sw = seal_width
     die_x0, die_y0 = ring_in_x0 - sw, ring_in_y0 - sw
     die_x1, die_y1 = ring_in_x1 + sw, ring_in_y1 + sw
 
@@ -337,7 +458,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # alone pushes everything below it off the die: a four-device reticle
         # overhung the usable area by 805 um on the waveguide layer and 911 um
         # on the metal, and the foundry deck reported 39 violations.
-        below = split_h + monitor_gap + mon_height
+        below = comp_h + split_h + monitor_gap + mon_height
         mid = (ring_in_y0 + ring_in_y1) / 2.0
         dev_dy = mid + (below - dev_box.top - dev_box.bottom) / 2.0
     else:
@@ -350,9 +471,36 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     ports: list[tuple[float, float]] = [
         (dev_dy + dev_box.bottom - 10.0, dev_dy + dev_box.top + 10.0)]
 
-    # the ladder below it, one copy per value, each labelled with the value it
-    # carries so that a returned die can be identified under a microscope
-    split_top = dev_dy + dev_box.bottom
+    # THE COMPANIONS SIT IMMEDIATELY BELOW THE PRIMARY DEVICE, above the ladder.
+    #
+    # The order matters and it is thermal. A companion exists because two
+    # devices have to share a temperature; on this design the microwave carrier
+    # is the beat of two lasers, each moving about 3.9 GHz per kelvin, and only
+    # the difference between their temperatures reaches the carrier. Placing the
+    # companion adjacent to the device it beats against keeps that difference
+    # small. The ladder brackets a process parameter and has no such
+    # requirement, so it goes below.
+    comp_top = dev_dy + dev_box.bottom
+    for k, (cell, desc) in enumerate(zip(comp_cells, comp_desc)):
+        box = cell.dbbox()
+        dy = comp_top - k * comp_pitch - 40.0 - box.top
+        dx = (facet_x - box.left) if cfg.align_facet_to_edge else -box.left
+        die.insert(db.DCellInstArray(
+            cell.cell_index(), db.DTrans(db.DVector(dx, dy))))
+        ports.append((dy + box.bottom - 10.0, dy + box.top + 10.0))
+        desc["placed_y_um"] = dy
+        if cfg.companions.label_each and desc.get("name"):
+            reg = _text_polygons(str(desc["name"])[:24],
+                                 cfg.companions.label_height_um)
+            tb = reg.bbox()
+            polys = [[(pt.x * DBU, pt.y * DBU) for pt in poly.each_point_hull()]
+                     for poly in reg.each_merged()]
+            add("LABEL", polys, -box.left - tb.left * DBU + 8.0,
+                dy + box.top - tb.bottom * DBU + 8.0)
+
+    # the ladder below the companions, one copy per value, each labelled with
+    # the value it carries so that a returned die can be identified
+    split_top = comp_top - comp_h
     for k, (cell, desc) in enumerate(zip(split_cells, split_desc)):
         box = cell.dbbox()
         dy = split_top - k * split_pitch - 40.0 - box.top
@@ -373,7 +521,21 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             tb = reg.bbox()
             polys = [[(pt.x * DBU, pt.y * DBU) for pt in poly.each_point_hull()]
                      for poly in reg.each_merged()]
-            add("LABEL", polys, -box.left - tb.left * DBU - 260.0,
+            # PLACED INSIDE THE COPY'S OWN FOOTPRINT, not 260 um to the left
+            # of it. Corrected 2026-08-28.
+            #
+            # A label to the left of the copy is outside the die whenever
+            # `align_facet_to_edge` is set, because that puts the copy's left
+            # edge on the inner chip boundary and there is nothing to the left
+            # of it but the exclusion ring and the saw. On a five-copy ladder it
+            # put 25 text polygons up to 105 um beyond the die edge, and the
+            # foundry deck reports them: the label layer is a drawn level of the
+            # process, so text outside the usable area is an etched feature in
+            # the kerf rather than an annotation.
+            #
+            # The label now starts just inside the copy's left edge and still
+            # sits in the gap above it, so it reads the same and is on the die.
+            add("LABEL", polys, -box.left - tb.left * DBU + 8.0,
                 dy + box.top - tb.bottom * DBU + 8.0)
 
     # monitors below the ladder
@@ -381,6 +543,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     mon_dx = -dev_box.left
     for layer, plist in mon_polys.items():
         add(layer, plist, mon_dx, mon_dy)
+
+    monitor_field_box = None   # measured from the written die, below
 
     # --- optical ports for the monitors, added 2026-08-16 -----------------
     #
@@ -532,6 +696,20 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                 f"than the {emitted_w:.1f} x {emitted_h:.1f} um the frame and its "
                 "contents occupy. The chip boundary cannot be drawn inside them"
             )
+        # and the other direction, which went unreported until 2026-09-03. A die
+        # emitted smaller than it was declared is the same refusal at submission
+        # as one emitted larger, and it presents as a footprint that reads
+        # plausibly on its own.
+        short_w, short_h = outer_w - emitted_w, outer_h - emitted_h
+        if short_w > 1e-6 or short_h > 1e-6:
+            ctx.warn(
+                f"the emitted die of {emitted_w:.1f} x {emitted_h:.1f} um is smaller "
+                f"than the declared {outer_w:.1f} x {outer_h:.1f} um, by "
+                f"{short_w:.1f} x {short_h:.1f} um. A process offering a fixed set of "
+                "die sizes takes the drawn boundary, so the shortfall is a departure "
+                "from the declared footprint and not a margin",
+                key="reticle.die_smaller_than_declared",
+            )
 
         # The boundary is required to sit on the origin, so the die is moved to
         # it rather than the boundary moved to wherever the content landed.
@@ -576,9 +754,105 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             ),
         }
 
+    # --- every ridge on the die carries slab under it ---------------------
+    #
+    # The device draws its own, on the centre lines of its guides. The process
+    # monitors draw none: a die released from this chain put sixty of its
+    # sixty-two ridge regions outside the slab, the loss cutback and the
+    # electrode ladder among them. Those structures exist to measure the
+    # process the device runs in, and a ridge on bare oxide is a different
+    # waveguide from the one the device carries, so all four monitor
+    # quantities described something the die does not contain.
+    #
+    # What is added here is the slab for whatever ridge is not yet on one, so
+    # a structure added to the die in future carries its slab without anyone
+    # having to remember. The monitors are straight and rectangular, so sizing
+    # their ridges is exact.
+    # The device's own convention where it declares one, and the monitors' own
+    # otherwise. It was gated on the device declaring a local slab, so a design
+    # drawing a blanket slab across its device band got no monitor slab at all
+    # and left 18.3 per cent of its ridge area on bare oxide.
+    slab_offset_um = (design.platform.slab_offset_um
+                      if design.platform.slab_offset_um is not None
+                      else getattr(cfg.monitors, "slab_offset_um", None))
+    monitor_slab_um2 = 0.0
+    if slab_offset_um is not None:
+        li_wg, li_slab = lmap.get("WG"), lmap.get("SLAB")
+        if li_wg is not None and li_slab is not None:
+            iw = layout.layer(*li_wg)
+            isl = layout.layer(*li_slab)
+            ridges = db.Region(die.begin_shapes_rec(iw)).merged()
+            slab = db.Region(die.begin_shapes_rec(isl)).merged()
+            uncovered = (ridges - slab).merged()
+            if not uncovered.is_empty():
+                extra = uncovered.sized(
+                    int(round(float(slab_offset_um) / DBU))).merged()
+                # Clipped to the usable area. Sizing a structure that begins on
+                # the CHIP_INNER edge carries its slab past that edge: the loss
+                # cutback did exactly that and put 387 um2 of film outside the
+                # usable area, on the one layer the rule-deck driver's
+                # outside-CHIP_INNER check did not read.
+                li_inner = lmap.get("CHIP_INNER")
+                if li_inner is not None:
+                    inner = db.Region(
+                        die.begin_shapes_rec(layout.layer(*li_inner)))
+                    if not inner.is_empty():
+                        extra = (extra & inner).merged()
+                monitor_slab_um2 = float(extra.area()) * DBU * DBU
+                die.shapes(isl).insert(extra)
+                counts["SLAB"] = counts.get("SLAB", 0) + int(extra.count())
+
     gds = ctx.run_dir / f"{design.meta.name}.die.gds"
     ctx.ensure()
     layout.write(str(gds))
+
+    # Where the deliberate sub-minimum shapes of the critical-dimension vernier
+    # landed, MEASURED FROM THE WRITTEN DIE.
+    #
+    # The placement offsets were computed here and recorded nowhere, so a
+    # rule-deck driver that has to set those shapes aside carried one die's
+    # geometry written in by hand: on a die of another size the vernier fell
+    # outside the box and its shapes were counted against the design. Deriving
+    # the box from the offsets was tried and disagreed with the mask, so it is
+    # measured from the polygons instead, which is the only frame that cannot
+    # drift from what was drawn.
+    monitor_field_box = None
+    try:
+        _wl = lmap.get(design.mask.label_layer if False else "WG")
+        if _wl:
+            _idx = layout.layer(_wl[0], _wl[1])
+            _reg = db.Region(die.begin_shapes_rec(_idx))
+            _floor = _min_space(design)
+            _sub = _reg.width_check(int(round(design.drc_min_width_um / layout.dbu))
+                                    if hasattr(design, "drc_min_width_um") else
+                                    int(round(0.25 / layout.dbu)),
+                                    False, db.Metrics.Projection, 3, None, None)
+            if _sub.count():
+                _b = _sub.polygons().bbox()
+                # Padded by the vernier's own recorded height, not by a token
+                # margin. Only its sub-minimum ROWS are found by a width check,
+                # and the rows at and above the floor sit below them: the 0.30 um
+                # row's spaces are at the limit and fail on tolerance, and a box
+                # drawn round the sub-minimum rows alone leaves that row outside
+                # and counts a monitor against the design.
+                _vh = 0.0
+                for _st_ in mon_desc:
+                    if _st_.get("structure") == "cd_vernier":
+                        _vh = float(_st_.get("height_um") or 0.0)
+                # Asymmetric on purpose. The vernier's rows step DOWNWARD from
+                # its origin, so the rows a width check does not find lie below
+                # the ones it does. Padding symmetrically reached to within 9 um
+                # of a device, and a box that touches a device would declare a
+                # real violation as a monitor, which is the one thing this must
+                # never do.
+                monitor_field_box = [_b.left * layout.dbu - 40.0,
+                                     _b.bottom * layout.dbu - (_vh + 40.0),
+                                     _b.right * layout.dbu + 40.0,
+                                     _b.top * layout.dbu + 40.0]
+    except Exception as _exc:      # pragma: no cover - backend specific
+        ctx.warn("the monitor field could not be measured from the die "
+                 f"({_exc}); a rule-deck driver cannot set the vernier aside",
+                 key="reticle.monitor_field_not_measured")
 
     payload = {
         "enabled": True,
@@ -602,8 +876,18 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             "copies": len(split_desc),
             "rows": split_desc,
         },
-        "devices_on_die": 1 + len(split_desc),
+        "companions": {
+            "enabled": bool(comp_cells),
+            "count": len(comp_desc),
+            "devices": comp_desc,
+        },
+        "devices_on_die": 1 + len(comp_desc) + len(split_desc),
         "monitors": mon_desc,
+        # the field's bounding box in die coordinates, so a rule-deck driver
+        # can locate the deliberate sub-minimum shapes rather than carrying
+        # one die's geometry written in by hand
+        "monitor_field_box_um": monitor_field_box,
+        "monitor_offset_um": [mon_dx, mon_dy],
         "monitor_structures": len(mon_desc),
         "fill_placed": False,
     }

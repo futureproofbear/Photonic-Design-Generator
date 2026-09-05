@@ -1,0 +1,67 @@
+# The cross-section of the ltoi300 single-mode O-band ring, posed to the chain.
+#
+# The geometry is that of `ring_resonator_single_mode_point_coupler_oband` in
+# the Luxtelligence PDK: a 0.7 um ridge, 180 nm etched into a 300 nm lithium
+# tantalate film, on a 120 nm slab, at 1310 nm. The purpose of the run is to
+# replace the group index of 2.2 that the PDK carries with a TODO beside it,
+# to bound the mode solver against an independent one, and to establish what
+# the 200 um bend does to the mode.
+
+meta:
+  name: wang2024_racetrack_xs
+  title: "Control: the waveguide of Wang et al. 2024, for the loss transfer"
+  status: scaffold
+
+platform:
+  cut: x
+  materials_file: ../../design-chain/pdk/LXT_LT_PRO/materials_lt_pro.yaml
+  film_material: LiTaO3
+  film_thickness_um: 0.600
+  etch_depth_um: 0.500
+  sidewall_deg: 70.0            # the PDK layer stack declares 20 deg from vertical
+  box_thickness_um: 7.0
+  clad_thickness_um: 2.0
+
+waveguide:
+  top_width_um: 2.000
+  wavelength_um: 1.55
+
+mesh:
+  d_fine_um: 0.008
+  d_coarse_um: 0.050
+  num_modes: 3
+  polarisation: TE
+
+grating:
+  enabled: false
+
+electrodes:
+  enabled: false
+
+cavity:
+  enabled: false
+
+fem:
+  enabled: true
+  with_posts: false             # there is no grating in this device
+
+bend:
+  enabled: true
+  radii_um: [400.0, 200.0, 100.0, 60.0]
+
+warnings:
+  acknowledged:
+    - key: mode.cross_section_supports_4
+      reason: >-
+        The reference guide is 2 um wide on a 500 nm etch and is multimode by
+        construction. Only its fundamental mode is used, and it is used to
+        compute the sidewall interaction of the geometry that Wang et al.
+        measured, not to propose a design.
+
+targets:
+  - metric: mode.n_guided_modes
+    min: 1.0
+    severity: must
+    source: "the control geometry is multimode by construction; this only asserts that it guides"
+
+stages: [mode, fem, bend, verify]

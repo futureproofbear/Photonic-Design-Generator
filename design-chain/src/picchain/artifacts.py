@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import platform
+import pathlib
 import subprocess
 import sys
 import time
@@ -49,6 +50,33 @@ def load_json(path: Path) -> Any:
         return json.load(fh)
 
 
+def _repo_state(where: "pathlib.Path") -> dict[str, Any]:
+    """The revision of the git tree containing `where`, and whether it is clean.
+
+    Returns the reason rather than a bare null where git cannot answer, so that
+    an absent revision is distinguishable from a failed lookup.
+    """
+    def _git(*args: str) -> "str | None":
+        try:
+            r = subprocess.run(["git", "-C", str(where), *args],
+                               capture_output=True, text=True, timeout=5)
+            return r.stdout.strip() if r.returncode == 0 else None
+        except Exception:
+            return None
+
+    root = _git("rev-parse", "--show-toplevel")
+    if root is None:
+        return {"revision": None, "reason": "not a git tree, or git is unavailable"}
+    status = _git("status", "--porcelain")
+    return {
+        "root": root,
+        "revision": _git("rev-parse", "--short", "HEAD"),
+        # a run from a modified tree is not reproducible from its revision
+        "dirty": bool(status),
+        "modified_files": len([l for l in status.splitlines() if l.strip()]) if status else 0,
+    }
+
+
 def environment_fingerprint() -> dict[str, Any]:
     def _v(mod: str) -> str | None:
         try:
@@ -57,18 +85,25 @@ def environment_fingerprint() -> dict[str, Any]:
         except Exception:
             return None
 
-    try:
-        rev = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True, text=True, timeout=5,
-        ).stdout.strip() or None
-    except Exception:
-        rev = None
-
     return {
         "python": sys.version.split()[0],
         "platform": platform.platform(),
-        "git_rev": rev,
+        # The revision of the CODE THAT RAN, taken from the package's own
+        # location, plus whether that tree was modified.
+        #
+        # This previously invoked `git rev-parse` with no working directory, so
+        # it stamped whichever repository the command was invoked from. Run from
+        # a design directory inside an application repository, every run recorded
+        # the application's revision and never the solver's, and two runs
+        # produced by different chain code were indistinguishable. It carried no
+        # dirty flag either, so a run made from a modified working tree was
+        # stamped as though it came from a clean commit.
+        #
+        # A provenance field that cannot identify the code that produced the
+        # result is worse than an absent one, being read as an audit trail.
+        "chain": _repo_state(pathlib.Path(__file__).resolve().parent),
+        # kept, and now labelled for what it is
+        "invocation_repo": _repo_state(pathlib.Path.cwd()),
         "packages": {m: _v(m) for m in
                      ["numpy", "scipy", "klayout", "gdsfactory", "femwell", "gmsh", "sax",
                       "matplotlib"]},
@@ -100,6 +135,11 @@ class RunContext:
     warning_records: list[dict] = field(default_factory=list)
     #: set by the runner before each stage, so a warning knows its origin
     current_stage: str = ""
+    #: every stage the runner has entered, in order. Read by the verify stage to
+    #: tell an acknowledgement whose finding was fixed from one whose stage was
+    #: simply left out of the run; the metric tree cannot answer that, a stage
+    #: being free to run and write nothing.
+    stages_run: list[str] = field(default_factory=list)
     t0: float = field(default_factory=time.time)
 
     @property

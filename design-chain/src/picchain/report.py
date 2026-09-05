@@ -51,8 +51,15 @@ def make_figures(run_dir: Path) -> list[Path]:
     p = run_dir / "mode.npz"
     if p.exists():
         d = np.load(p)
-        fig, ax = plt.subplots(1, 2, figsize=(10, 3.6), constrained_layout=True)
-        for a, key, title in zip(ax, ["field_bare", "field_posts"], ["bare ridge", "with Bragg posts"]):
+        # a device with no grating writes no posted field, and one panel is drawn
+        # rather than two. Drawing a posted panel for such a device would show a
+        # structure it does not contain
+        panels = [("field_bare", "bare ridge")]
+        if "field_posts" in d:
+            panels.append(("field_posts", "with Bragg posts"))
+        fig, ax = plt.subplots(1, len(panels), figsize=(5 * len(panels), 3.6),
+                               constrained_layout=True, squeeze=False)
+        for a, (key, title) in zip(ax[0], panels):
             f = d[key]
             im = a.pcolormesh(d["x_um"], d["y_um"], (np.abs(f) ** 2 / np.abs(f).max() ** 2).T,
                               shading="auto", cmap="magma")
@@ -210,9 +217,27 @@ def make_figures(run_dir: Path) -> list[Path]:
         "_fig_grating_cell": "layout",
     }
 
+    # Which figures describe a structure only one device carries. A renderer that
+    # declines because the device has no such feature is not a failed drawing,
+    # and reporting it as one buries the failures that matter.
+    device_specific = {
+        "_fig_facet_route": {"edbr"},
+        "_fig_grating_cell": {"edbr"},
+    }
+    _device = None
+    _lp = run_dir / "layout.json"
+    if _lp.exists():
+        try:
+            _device = json.loads(_lp.read_text(encoding="utf-8")).get("device")
+        except Exception:
+            _device = None
+
     def _record(fn, out, failed):
         name = fn.__name__
         stage = needs.get(name)
+        applies = device_specific.get(name)
+        if applies is not None and _device is not None and _device not in applies:
+            return                      # the device carries no such structure
         if out is None and stage and (run_dir / f"{stage}.json").exists():
             failed.append(f"{name}: returned no figure although {stage}.json is present")
         return out
@@ -311,6 +336,19 @@ def _fig_facet_route(run_dir: Path, fig_dir: Path):
     with the facet rather than stay square. Both were defects before they were
     drawings.
     """
+    # Skipped where the device does not carry the structure this draws. A
+    # renderer that returns nothing is reported as a failed drawing, and a
+    # failed drawing on a device that has no such feature is noise that
+    # hides a real failure.
+    import json as _json
+    _lp = run_dir / "layout.json"
+    if _lp.exists():
+        try:
+            if _json.loads(_lp.read_text(encoding="utf-8")).get("device") == "mach_zehnder":
+                return None
+        except Exception:
+            pass
+
     import matplotlib.pyplot as plt
     from matplotlib.patches import Polygon
 
@@ -547,6 +585,19 @@ def _fig_grating_cell(run_dir: Path, fig_dir: Path, metrics: dict):
     a process window at all. It is drawn from the mask so that the gap the model
     used and the gap the mask carries can be compared by eye.
     """
+    # Skipped where the device does not carry the structure this draws. A
+    # renderer that returns nothing is reported as a failed drawing, and a
+    # failed drawing on a device that has no such feature is noise that
+    # hides a real failure.
+    import json as _json
+    _lp = run_dir / "layout.json"
+    if _lp.exists():
+        try:
+            if _json.loads(_lp.read_text(encoding="utf-8")).get("device") == "mach_zehnder":
+                return None
+        except Exception:
+            pass
+
     import matplotlib.pyplot as plt
     from matplotlib.patches import Polygon
 
@@ -1011,6 +1062,11 @@ PROVENANCE: list[tuple[str, str, Any, list[tuple[str, str]]]] = [
     ("eo", "how far does the wavelength move per volt",
      "finite-difference electrostatic solve of the electrode field, overlapped with the optical mode",
      [("eo_overlap_gamma", "overlap"), ("tuning_MHz_per_V", "mirror tuning"), ("VpiL_V_cm", "Vpi.L")]),
+    ("modulator", "what drive does the interferometer demand, and across what band",
+     "the single-arm electro-optic solve converted for the two arms it sits in, "
+     "and the travelling-wave response evaluated at the edges of the declared band",
+     [("Vpi_V", "Vpi"), ("VpiL_device_V_cm", "Vpi.L device"),
+      ("worst_in_band_dB", "worst in band")]),
     ("cavity", "what does the laser do",
      "closed-form composite-cavity analysis, with the lasing mode followed numerically against applied voltage",
      [("pockels_lever", "Pockels lever"), ("mode_hop_free_range_GHz", "mode-hop-free range"),

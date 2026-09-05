@@ -28,6 +28,8 @@ from pathlib import Path
 RUNNER = Path(__file__).with_name("meep_taper.py")
 GRATING_RUNNER = Path(__file__).with_name("meep_grating.py")
 BAND_RUNNER = Path(__file__).with_name("mpb_grating.py")
+COUPLER_RUNNER = Path(__file__).with_name("meep_coupler.py")
+MMI_RUNNER = Path(__file__).with_name("meep_mmi.py")
 
 
 @dataclass
@@ -80,51 +82,243 @@ def _decode(raw) -> str:
     return raw.replace("\x00", "") if isinstance(raw, str) else ""
 
 
-def probe(backend: Backend | None = None) -> dict:
-    """Report whether the solver can be reached, and its version.
+#: machine-local overrides. The distribution and the environment are properties
+#: of the machine and not of the design, so they are read from here as well as
+#: from the design file. A design carrying one machine's distribution name is
+#: not portable, and it was the design file or nothing until 2026-09-03.
+ENV_DISTRO = "PICCHAIN_FDTD_DISTRO"
+ENV_ENVIRONMENT = "PICCHAIN_FDTD_ENV"
 
-    The report names the environment that was PROBED as well as the outcome.
-    Without it a wrong distribution name returns WSL_E_DISTRO_NOT_FOUND, which
-    reads as WSL being absent from the machine and sends the reader to install
-    what is already installed.
-    """
-    backend = backend or default_backend()
-    where = {"kind": backend.kind, "environment": backend.env,
-             "launcher": backend.micromamba}
-    if backend.kind == "wsl":
-        where["distro"] = backend.distro
-    if backend.kind == "wsl" and shutil.which("wsl.exe") is None:
-        return {"available": False, "probed": where,
-                "reason": "wsl.exe is not on PATH"}
+#: environments tried after the declared one, where the declared one does not
+#: carry meep. These are the names in ordinary use for a meep install; the list
+#: is a convenience and the discovery below does not depend on it
+COMMON_ENVS = ("mpp", "mp", "meep", "pmp")
 
-    # the version is printed with a marker, meep itself writing an elapsed-time
-    # line to stdout on exit that would otherwise be mistaken for the answer
-    snippet = "import meep; print('MEEP_VERSION=' + meep.__version__)"
+_RESOLVED: dict[tuple, tuple] = {}
+
+
+def _run_probe(backend: "Backend") -> dict:
+    """One launch, reporting the meep version and whether mpirun is present."""
+    snippet = ("import meep, shutil; "
+               "print('MEEP_VERSION=' + meep.__version__); "
+               "print('MPIRUN=' + str(shutil.which('mpirun')))")
     quoted = f'"{snippet}"' if backend.kind == "wsl" else snippet
     cmd = backend.command("-c", quoted, parallel=False)
     try:
         out = subprocess.run(cmd, capture_output=True, timeout=300)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return {"available": False, "probed": where, "reason": str(exc)}
+        return {"available": False, "reason": str(exc)}
     stdout, stderr = _decode(out.stdout), _decode(out.stderr)
+    version = mpirun = None
     for line in stdout.splitlines():
         if line.startswith("MEEP_VERSION="):
-            return {"available": True, "probed": where,
-                    "version": line.split("=", 1)[1].strip()}
-    reason = (stderr or stdout).strip()[-400:]
-    hint = None
-    if "WSL_E_DISTRO_NOT_FOUND" in reason or "no distribution" in reason.lower():
-        hint = (f"WSL is reachable but carries no distribution named "
-                f"{backend.distro!r}. Run `wsl.exe -l -v` for the names actually "
-                f"present and set `fdtd.wsl_distro` to one of them. This is a "
-                f"name mismatch and not a missing installation.")
-    elif "micromamba" in reason and "No such file" in reason:
-        hint = (f"The distribution is reachable and the launcher is absent at "
+            version = line.split("=", 1)[1].strip()
+        elif line.startswith("MPIRUN="):
+            val = line.split("=", 1)[1].strip()
+            mpirun = None if val in ("None", "") else val
+    if version:
+        return {"available": True, "version": version, "mpirun": mpirun}
+    return {"available": False, "reason": (stderr or stdout).strip()[-400:]}
+
+
+def _wsl_distros() -> list[str]:
+    """The distribution names wsl.exe reports, in its own order."""
+    try:
+        out = subprocess.run(["wsl.exe", "-l", "-q"], capture_output=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    return [ln.strip() for ln in _decode(out.stdout).splitlines() if ln.strip()]
+
+
+def _env_names(backend: "Backend") -> list[str]:
+    """Environment names the launcher reports inside one distribution.
+
+    The name column of ``micromamba env list`` carries a relative path where an
+    environment lives outside the root prefix, so the basename of the path
+    column is taken instead.
+    """
+    cmd = backend.command("--version", parallel=False)
+    cmd[-2:] = ["env", "list"] if backend.kind == "native" else cmd[-2:]
+    inner = f"{backend.micromamba} env list"
+    cmd = ([os.path.expanduser(backend.micromamba), "env", "list"]
+           if backend.kind == "native"
+           else ["wsl.exe", "-d", backend.distro, "--", "bash", "-lc", inner])
+    try:
+        out = subprocess.run(cmd, capture_output=True, timeout=120)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    names: list[str] = []
+    for ln in _decode(out.stdout).splitlines():
+        parts = ln.split()
+        if not parts or parts[0].startswith(("Name", "-", "─")):
+            continue
+        base = parts[-1].rstrip("/").rsplit("/", 1)[-1]
+        if base.replace("_", "").replace("-", "").isalnum() and base not in names:
+            names.append(base)
+    return names[:8]
+
+
+def resolve(backend: "Backend" | None = None) -> tuple["Backend", dict]:
+    """The backend that actually reaches meep on this machine, and how.
+
+    The declared pair is tried first, then the machine-local overrides, then
+    every distribution the wrapper reports against every environment its
+    launcher reports. A wrong name in a design file is therefore a slower start
+    rather than a stage that cannot run, and what was found is reported so that
+    the design or the environment can be corrected knowingly.
+
+    A parallel job needs mpirun as well as meep, and an environment can carry
+    one without the other. Where the resolved environment has meep and no
+    mpirun, the job is run serially and the report says so, which is a slow
+    solve rather than a failed one.
+    """
+    b = backend or default_backend()
+    b = Backend(kind=b.kind,
+                distro=os.environ.get(ENV_DISTRO, b.distro),
+                micromamba=b.micromamba,
+                env=os.environ.get(ENV_ENVIRONMENT, b.env),
+                ca_bundle=b.ca_bundle,
+                processes=b.processes)
+    key = (b.kind, b.distro, b.env, b.processes)
+    if key in _RESOLVED:
+        return _RESOLVED[key]
+
+    tried: list[dict] = []
+
+    def attempt(cand: "Backend", how: str):
+        res = _run_probe(cand)
+        tried.append({"distro": cand.distro if cand.kind == "wsl" else None,
+                      "environment": cand.env, "how": how,
+                      "available": res["available"],
+                      "reason": res.get("reason")})
+        return res
+
+    candidates: list[tuple[Backend, str]] = [(b, "declared")]
+    if b.kind == "wsl":
+        distros = _wsl_distros()
+        for d in distros:
+            if d != b.distro:
+                candidates.append((Backend(kind=b.kind, distro=d,
+                                           micromamba=b.micromamba, env=b.env,
+                                           ca_bundle=b.ca_bundle,
+                                           processes=b.processes), "discovered distro"))
+    #: the first candidate carrying meep, kept in case none carries mpirun too
+    fallback: tuple | None = None
+
+    def accept(cand: "Backend", res: dict, how: str) -> tuple | None:
+        """Take a candidate, or hold it while a parallel one is looked for."""
+        nonlocal fallback
+        if not res["available"]:
+            return None
+        if b.processes > 1 and not res.get("mpirun"):
+            if fallback is None:
+                fallback = (cand, {**res, "how": how, "tried": tried})
+            return None
+        return (cand, {**res, "how": how, "tried": tried})
+
+    for cand, how in list(candidates):
+        got = accept(cand, attempt(cand, how), how)
+        if got:
+            _RESOLVED[key] = got
+            return got
+
+    # the distributions exist and the environment name does not: search it
+    base = candidates[0][0] if not candidates[1:] else candidates[1][0]
+    for cand_distro in ({c.distro for c, _ in candidates} if b.kind == "wsl" else {None}):
+        probe_b = Backend(kind=b.kind, distro=cand_distro or b.distro,
+                          micromamba=b.micromamba, env=b.env,
+                          ca_bundle=b.ca_bundle, processes=b.processes)
+        names = list(COMMON_ENVS) + _env_names(probe_b)
+        seen: set[str] = set()
+        for name in names:
+            if name in seen or name == b.env:
+                continue
+            seen.add(name)
+            cand = Backend(kind=b.kind, distro=probe_b.distro,
+                           micromamba=b.micromamba, env=name,
+                           ca_bundle=b.ca_bundle, processes=b.processes)
+            got = accept(cand, attempt(cand, "discovered environment"),
+                         "discovered environment")
+            if got:
+                _RESOLVED[key] = got
+                return got
+
+    if fallback is not None:
+        # meep without mpirun: a serial solve rather than none, and the caller
+        # is told which it got
+        _RESOLVED[key] = fallback
+        return fallback
+
+    found = (b, {"available": False, "how": "declared",
+                 "reason": tried[0]["reason"] if tried else "no candidate was tried",
+                 "tried": tried})
+    _RESOLVED[key] = found
+    return found
+
+
+def probe(backend: Backend | None = None) -> dict:
+    """Report whether the solver can be reached, and where it was found.
+
+    The backend passed in is UPDATED to the distribution and environment that
+    actually carry meep, so a caller holding it runs where the probe succeeded.
+    The declared pair is tried first and what was tried is reported either way.
+
+    The report names the environment that was probed as well as the outcome.
+    Without it a wrong distribution name returns WSL_E_DISTRO_NOT_FOUND, which
+    reads as WSL being absent from the machine and sends the reader to install
+    what is already installed.
+    """
+    backend = backend or default_backend()
+    declared = {"kind": backend.kind, "environment": backend.env,
+                "launcher": backend.micromamba}
+    if backend.kind == "wsl":
+        declared["distro"] = backend.distro
+    if backend.kind == "wsl" and shutil.which("wsl.exe") is None:
+        return {"available": False, "probed": declared,
+                "reason": "wsl.exe is not on PATH"}
+
+    found, status = resolve(backend)
+    res: dict = {"available": status["available"], "declared": declared,
+                 "probed": {"kind": found.kind, "environment": found.env,
+                            "launcher": found.micromamba,
+                            **({"distro": found.distro} if found.kind == "wsl" else {})},
+                 "found_by": status.get("how"),
+                 "candidates_tried": len(status.get("tried", []))}
+
+    if not status["available"]:
+        reason = status.get("reason") or ""
+        res["reason"] = reason
+        res["tried"] = status.get("tried", [])
+        if "WSL_E_DISTRO_NOT_FOUND" in reason or "no distribution" in reason.lower():
+            res["hint"] = (
+                f"WSL is reachable and carries no distribution named "
+                f"{backend.distro!r}, and no distribution it does carry holds meep "
+                f"in an environment this probe found. Run `wsl.exe -l -v` for the "
+                f"names present, then set `fdtd.wsl_distro` and `fdtd.environment`, "
+                f"or set {ENV_DISTRO} and {ENV_ENVIRONMENT} in the environment so "
+                f"the machine is described where the design is not.")
+        elif "micromamba" in reason and "No such file" in reason:
+            res["hint"] = (
+                f"The distribution is reachable and the launcher is absent at "
                 f"{backend.micromamba}. Install micromamba there, or point "
                 f"MAMBA_ROOT_PREFIX at an existing environment root.")
-    res = {"available": False, "probed": where, "reason": reason}
-    if hint:
-        res["hint"] = hint
+        return res
+
+    # the caller runs where meep was found, not where the design guessed
+    backend.distro, backend.env = found.distro, found.env
+    res["version"] = status.get("version", "unknown")
+
+    # a parallel job needs mpirun as well, and an environment can carry one
+    # without the other. Degrading to one process is a slow solve; failing here
+    # would be no solve at all
+    if backend.processes > 1 and not status.get("mpirun"):
+        res["parallel"] = False
+        res["reason_serial"] = (
+            f"environment {found.env!r} carries meep and no mpirun, so the solve "
+            f"runs on one process rather than {backend.processes}")
+        backend.processes = 1
+    else:
+        res["parallel"] = backend.processes > 1
     return res
 
 
@@ -138,6 +332,18 @@ def run_grating(job: dict, work_dir: Path, backend: Backend | None = None,
                 timeout_s: int = 7200) -> dict:
     """The same, for the finite-grating reflection check."""
     return _run(GRATING_RUNNER, "grating", job, work_dir, backend, timeout_s)
+
+
+def run_coupler(job: dict, work_dir: Path, backend: Backend | None = None,
+                timeout_s: int = 7200) -> dict:
+    """The same, for the power coupling of a ring-to-bus point coupler."""
+    return _run(COUPLER_RUNNER, "coupler", job, work_dir, backend, timeout_s)
+
+
+def run_mmi(job: dict, work_dir: Path, backend: Backend | None = None,
+            timeout_s: int = 7200) -> dict:
+    """The same, for the transmission and the balance of an MMI splitter."""
+    return _run(MMI_RUNNER, "mmi", job, work_dir, backend, timeout_s)
 
 
 def run_bandstructure(job: dict, work_dir: Path, backend: Backend | None = None,

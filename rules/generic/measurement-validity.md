@@ -111,6 +111,30 @@ carries a flag permitting a condition to be bypassed, the readiness row for that
 condition states the flag alongside the verdict. A reader cannot otherwise
 distinguish a condition that was satisfied from one that could not have failed.
 
+## And a failing check is evidence in proportion to its ability to pass
+
+A verdict of non-compliance is inherently plausible, most of all where the
+subject is somebody else's product, and it is examined least at the moment it is
+believed most. One checker keyed a scattering entry on a port number where the
+identity of a channel is a port and a mode together, so the entries of every
+multimode model collapsed and the last read won. It reported that every mode
+converter in a supplied library passed under two per cent of its power.
+Corrected, they are physical. What caught it was that the number was absurd
+rather than merely bad, which is a defence available only for gross errors.
+
+**Before a violation is reported, establish that the instrument returns a pass on
+an input known to be sound.** The construction is symmetric with falsification: a
+synthesised artifact that must pass, beside one that must fail.
+
+**A checker's key and its accepting grammar are to be as wide as the thing it
+reads.** Take one existing artifact, extend it in a way the producing code
+already permits, and confirm the checker still reads it.
+
+**A checker with no input reports a pass.** `check_ip_boundary.py` exits zero
+where no term list is declared, and a report of a clean boundary drawn from it is
+silence from a rule with nothing to compare. State the denominator: what was
+compared, and against what.
+
 ## Evidence
 
 `.claude/LESSONS.md` T021, T022, T023, T042, T044, T052, T053, T055 (a material

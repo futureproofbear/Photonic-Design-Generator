@@ -91,7 +91,8 @@ def test_the_coverage_count_is_reported_beside_the_verdict(tmp_path):
         "mode": {}, "verify": {"verdict": "PASS", "n_targets": 1, "n_pass": 1,
                                "n_fail": 0, "n_missing": 0, "rows": []}})
     html = render_html(collect(d))
-    assert "2 of 17 stages produced a result" in html
+    from picchain.stages import STAGES
+    assert f"2 of {len(STAGES)} stages produced a result" in html
 
 
 # --------------------------------------------------------------------------
@@ -149,7 +150,8 @@ def test_it_renders_for_a_run_that_produced_almost_nothing(tmp_path):
     a design where it is most wanted."""
     d = _run(tmp_path, metrics={})
     html = render_html(collect(d))
-    assert "0 of 17 stages produced a result" in html
+    from picchain.stages import STAGES
+    assert f"0 of {len(STAGES)} stages produced a result" in html
     assert "No target was evaluated" in html
 
 
