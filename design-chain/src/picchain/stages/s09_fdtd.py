@@ -212,6 +212,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "ridge_height_um": p.etch_depth_um,
     }
 
+    _refuse_a_grid_this_host_cannot_be_trusted_with(cfg, job)
     result = bridge.run_taper(job, ctx.run_dir, backend, timeout_s=cfg.timeout_s)
 
     payload: dict[str, Any] = {
@@ -306,6 +307,48 @@ def _warn_if_power_exceeds_unity(ctx, quantities: dict[str, float]) -> None:
                 "Compare the excess against normalisation_check, and where the excess "
                 "is the larger the reference is not the cause"
             )
+
+
+def _refuse_a_grid_this_host_cannot_be_trusted_with(cfg, job: dict) -> None:
+    """Raise before a solve whose grid exceeds the declared ceiling.
+
+    The cell count is the product of the cell extents and the resolution once
+    per axis, so it rises as the fourth power of resolution in three dimensions
+    once the run time is included. A study raised the resolution of a
+    three-dimensional taper from 20 to 30 on 2026-09-05, which took the grid
+    from 9.6 to 32.4 million cells, and the host bugchecked while that grid was
+    allocating.
+
+    The arithmetic is one multiplication and it was never done. It is done here,
+    before the solver environment is probed, and the message carries the numbers
+    so that raising the ceiling is a decision rather than a retry.
+    """
+    res = float(job.get("resolution") or cfg.resolution)
+    sx = (float(job.get("in_length_um", 0.0)) + float(job.get("length_um", 0.0))
+          + float(job.get("out_length_um", 0.0)) + 2.0 * float(job.get("pml_um", 0.0)))
+    sy = float(job.get("width_um", 0.0))
+    if sx <= 0.0 or sy <= 0.0:
+        return
+    cells = sx * sy * res ** 2
+    if int(job.get("dimensions", 2)) == 3:
+        sz = float(job.get("height_um", 0.0))
+        if sz <= 0.0:
+            return
+        cells = sx * sy * sz * res ** 3
+    millions = cells / 1.0e6
+    ceiling = float(cfg.max_cells_millions)
+    if millions <= ceiling:
+        return
+    raise ValueError(
+        f"the solve would allocate {millions:.1f} million cells, being "
+        f"{sx:.1f} by {sy:.1f}"
+        + (f" by {float(job.get('height_um', 0.0)):.1f}" if int(job.get("dimensions", 2)) == 3 else "")
+        + f" um at resolution {res:.0f}, against a ceiling of {ceiling:.1f} million "
+        "set by fdtd.max_cells_millions. This host bugchecked while a grid of "
+        "32.4 million cells was allocating and has completed 9.6 million. Reduce "
+        "fdtd.resolution or the cell extents, or raise fdtd.max_cells_millions "
+        "deliberately and record why beside the new value"
+    )
 
 
 def _report_the_convergence_guard(ctx, result: dict) -> None:
@@ -707,7 +750,10 @@ def _run_grating(design, ctx, cfg, backend, status, n_core, n_clad):
             "the balance is the power radiated or absorbed, and a large value means the "
             "solve is not converged rather than that the grating is lossy"
         )
-    if ratio == ratio and not (0.9 <= ratio <= 1.1):
+    _grade_the_grating_disagreement_against_its_own_mesh(ctx, result, ratio)
+    guard = result.get("guard") or {}
+    resolved = abs(float(guard.get("shift_fraction", 0.0))) < abs(1.0 - float(ratio))
+    if ratio == ratio and not (0.9 <= ratio <= 1.1) and resolved:
         ctx.warn(
             f"the time-domain kappa is {ratio:.2f} times the coupled-mode value on the "
             "same two-dimensional structure. Coupled-mode theory assumes a weak "
@@ -715,6 +761,46 @@ def _run_grating(design, ctx, cfg, backend, status, n_core, n_clad):
             "ceases to hold"
         )
     return payload
+
+
+def _grade_the_grating_disagreement_against_its_own_mesh(ctx, result: dict, ratio: float) -> None:
+    """Report the mesh shift before the disagreement, and never the reverse.
+
+    The first execution of this runner, on 2026-09-05, returned a time-domain
+    coupling constant 0.74 times the coupled-mode value and the stage attributed
+    the departure to the weak-perturbation assumption of coupled-mode theory,
+    which is a statement about physics. The same payload carried a convergence
+    guard showing that number moving by 86 per cent between resolution 10 and
+    20. A disagreement smaller than the mesh error of one of its terms is
+    evidence about the mesh.
+    """
+    guard = result.get("guard")
+    disagreement = abs(1.0 - float(ratio)) if ratio == ratio else float("nan")
+    if not guard:
+        ctx.warn(
+            "the time-domain grating solve carries no convergence guard, so its "
+            "coupling constant has no mesh error and cannot be compared with the "
+            "coupled-mode value. Set fdtd.convergence_resolution to a coarser mesh"
+        )
+        return
+    shift = abs(float(guard.get("shift_fraction", float("nan"))))
+    if shift != shift:
+        return
+    if disagreement == disagreement and shift >= disagreement:
+        ctx.warn(
+            f"the time-domain kappa moves by {shift:.0%} between resolution "
+            f"{guard['resolution']} and {result['resolution']}, which equals or "
+            f"exceeds its {disagreement:.0%} departure from the coupled-mode value. "
+            "The comparison is uninformative at this mesh and the departure is not "
+            "to be read as physics. Raise fdtd.resolution until the shift is small "
+            "beside the disagreement, or use the band-structure route"
+        )
+        return
+    ctx.warn(
+        f"the time-domain kappa moves by {shift:.0%} between resolution "
+        f"{guard['resolution']} and {result['resolution']}, against a "
+        f"{disagreement:.0%} departure from the coupled-mode value"
+    )
 
 
 def _run_bands(design, ctx, cfg, backend, status, n_core, n_clad):

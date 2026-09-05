@@ -378,7 +378,7 @@ def runner_digest(runner: Path) -> str:
         return "unreadable"
 
 
-def job_key(job: dict, sig: int = 10, runner: Path | None = None) -> str:
+def job_key(job: dict, sig: int = 10) -> str:
     """A content key for an external solver job, insensitive to last-bit noise.
 
     Two runs computing the same geometry through the same code produce job files
@@ -390,8 +390,11 @@ def job_key(job: dict, sig: int = 10, runner: Path | None = None) -> str:
     Floats are rounded to `sig` significant figures before hashing. Ten is far
     beyond any physical significance here and far short of the noise.
 
-    Where `runner` is given, its content digest enters the key, so that editing
-    the solver invalidates every result it produced.
+    The runner is an input to the result as much as the job is, and it does not
+    enter this key. It cannot: a lookup recomputes the stored job's key with the
+    runner it holds now, so a digest folded in here appears on both sides of the
+    comparison and cancels. The digest is written into the result instead and
+    compared against the current runner by `_find_prior`.
     """
     import hashlib
 
@@ -408,19 +411,25 @@ def job_key(job: dict, sig: int = 10, runner: Path | None = None) -> str:
             return [canon(x) for x in v]
         return v
 
-    payload = {"job": canon(job)}
-    if runner is not None:
-        payload["runner"] = runner_digest(runner)
-    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    blob = json.dumps(canon(job), sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
-def _find_prior(name: str, key: str, work_dir: Path) -> tuple[dict, str] | None:
+def _find_prior(name: str, key: str, work_dir: Path,
+                runner: Path | None = None) -> tuple[dict, str] | None:
     """A completed result for this identical job under a sibling run, if any.
 
     Searched newest first and returned with the run it came from, so that a reuse
     is attributable rather than anonymous. Nothing is reused unless both the job
     and its result are present and the job key matches exactly.
+
+    `runner` must be the same runner `_run` keyed on. The two sides computed the
+    key differently for the length of one evening on 2026-09-05, this side
+    omitting the runner digest that the other had just started including, and no
+    solve was reused again until it was noticed: a grating job whose two runs
+    carried byte-identical job files and equal keys re-solved for ten minutes.
+    A cache whose lookup key is built by different code from its store key is a
+    cache that silently stops working.
     """
     runs = work_dir.parent
     if not runs.is_dir():
@@ -434,7 +443,11 @@ def _find_prior(name: str, key: str, work_dir: Path) -> tuple[dict, str] | None:
         try:
             if job_key(json.loads(jp.read_text(encoding="utf-8"))) != key:
                 continue
-            return json.loads(rp.read_text(encoding="utf-8")), d.name
+            prior = json.loads(rp.read_text(encoding="utf-8"))
+            if runner is not None:
+                if prior.get("runner_digest") != runner_digest(runner):
+                    continue
+            return prior, d.name
         except (OSError, ValueError):
             continue
     return None
@@ -458,9 +471,9 @@ def _run(runner: Path, name: str, job: dict, work_dir: Path,
     # Set the environment variable PICCHAIN_NO_REUSE to force a fresh solve.
     import os
 
-    key = job_key(job, runner=runner)
+    key = job_key(job)
     if not os.environ.get("PICCHAIN_NO_REUSE"):
-        prior = _find_prior(name, key, work_dir)
+        prior = _find_prior(name, key, work_dir, runner=runner)
         if prior is not None:
             result, source = prior
             result = dict(result)
@@ -519,4 +532,10 @@ def _run(runner: Path, name: str, job: dict, work_dir: Path,
     if not out_path.exists():
         raise RuntimeError(f"meep produced no result; see {log.name}\n"
                            + "\n".join(tail))
-    return json.loads(out_path.read_text(encoding="utf-8"))
+    result = json.loads(out_path.read_text(encoding="utf-8"))
+    # the runner that produced this result, so a later lookup can tell a solve
+    # made by the present solver from one made by an earlier version of it
+    result["runner_digest"] = runner_digest(runner)
+    result["job_key"] = key
+    out_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    return result

@@ -173,24 +173,26 @@ def test_the_taper_payload_records_its_structure():
     assert '"structure": cfg.structure,' in SOURCE
 
 
-def test_the_reuse_key_changes_when_the_runner_changes(tmp_path):
-    """The runner is an input to the result. A third simulation and four output
-    fields were added to the taper runner, and the next run returned a cached
-    result carrying none of them, the job being unchanged."""
+def test_a_result_records_which_runner_produced_it(tmp_path):
+    """The runner is an input to the result as much as the job is.
+
+    Folding its digest into the job key does not work: a lookup recomputes the
+    stored job's key with the runner it holds now, so the digest appears on both
+    sides and cancels. It is written into the result and compared there. An
+    earlier attempt put it in the key on one side only, which made every key
+    mismatch and stopped reuse altogether for an evening.
+    """
     from picchain.fdtd import bridge
 
     job = {"a": 1.0, "b": [2.0, 3.0]}
+    assert bridge.job_key(job) == bridge.job_key(job)
+    assert bridge.job_key(job) != bridge.job_key({"a": 2.0})
+
     one, two = tmp_path / "one.py", tmp_path / "two.py"
     one.write_text("print('a')", encoding="utf-8")
     two.write_text("print('b')", encoding="utf-8")
-
-    assert bridge.job_key(job, runner=one) != bridge.job_key(job, runner=two)
-    assert bridge.job_key(job, runner=one) == bridge.job_key(job, runner=one)
-    # the job still dominates the key
-    assert bridge.job_key(job, runner=one) != bridge.job_key({"a": 2.0}, runner=one)
-    # and a runnerless key is still available and stable
-    assert bridge.job_key(job) == bridge.job_key(job)
-    assert bridge.job_key(job) != bridge.job_key(job, runner=one)
+    assert bridge.runner_digest(one) != bridge.runner_digest(two)
+    assert bridge.runner_digest(one) == bridge.runner_digest(one)
 
 
 def test_an_unreadable_runner_disables_reuse_rather_than_matching(tmp_path):
@@ -297,3 +299,151 @@ def test_the_taper_runner_carries_a_convergence_guard():
     assert 'guard = int(job.get("convergence_resolution") or 0)' in text
     assert '"loss_shift_fraction"' in text
     assert '"convergence_resolution"' in _job_dict_of("run")
+
+
+class _Cfg2:
+    def __init__(self, resolution=20, ceiling=16.0):
+        self.resolution, self.max_cells_millions = resolution, ceiling
+
+
+def _taper_job(resolution, dimensions=3):
+    return {
+        "resolution": resolution, "dimensions": dimensions,
+        "in_length_um": 6.0, "length_um": 5.0, "out_length_um": 6.0,
+        "pml_um": 1.5, "width_um": 10.0, "height_um": 6.0,
+    }
+
+
+def test_a_grid_beyond_the_ceiling_is_refused():
+    """This host bugchecked while a 32.4 million cell grid was allocating, at
+    resolution 30. The arithmetic is one multiplication and it was never done."""
+    with pytest.raises(ValueError, match="32.4 million cells"):
+        s09_fdtd._refuse_a_grid_this_host_cannot_be_trusted_with(
+            _Cfg2(30), _taper_job(30))
+
+
+def test_the_grid_this_host_has_completed_is_allowed():
+    s09_fdtd._refuse_a_grid_this_host_cannot_be_trusted_with(
+        _Cfg2(20), _taper_job(20))
+
+
+def test_the_plane_is_not_constrained_by_a_three_dimensional_ceiling():
+    """The plane reduction at resolution 80 is 1.28 million cells."""
+    s09_fdtd._refuse_a_grid_this_host_cannot_be_trusted_with(
+        _Cfg2(80), _taper_job(80, dimensions=2))
+
+
+def test_the_ceiling_can_be_raised_deliberately():
+    s09_fdtd._refuse_a_grid_this_host_cannot_be_trusted_with(
+        _Cfg2(30, ceiling=40.0), _taper_job(30))
+
+
+def test_the_message_names_the_field_and_the_arithmetic():
+    with pytest.raises(ValueError) as e:
+        s09_fdtd._refuse_a_grid_this_host_cannot_be_trusted_with(
+            _Cfg2(30), _taper_job(30))
+    text = str(e.value)
+    assert "fdtd.max_cells_millions" in text
+    assert "fdtd.resolution" in text
+    assert "9.6 million" in text
+
+
+def test_a_grating_disagreement_smaller_than_its_mesh_shift_is_refused():
+    """The runner's first execution returned a kappa 0.74 times the coupled-mode
+    value and the stage attributed the departure to the weak-perturbation
+    assumption, which is a statement about physics. The same payload showed that
+    number moving 86 per cent between resolution 10 and 20."""
+    ctx = _Ctx()
+    s09_fdtd._grade_the_grating_disagreement_against_its_own_mesh(
+        ctx, {"guard": {"resolution": 10, "shift_fraction": 0.8619}, "resolution": 20},
+        0.7386)
+    assert len(ctx.warnings) == 1
+    assert "uninformative at this mesh" in ctx.warnings[0]
+    assert "not to be read as physics" in ctx.warnings[0]
+
+
+def test_a_grating_disagreement_larger_than_its_mesh_shift_is_reported_plainly():
+    ctx = _Ctx()
+    s09_fdtd._grade_the_grating_disagreement_against_its_own_mesh(
+        ctx, {"guard": {"resolution": 20, "shift_fraction": 0.02}, "resolution": 40},
+        0.70)
+    assert len(ctx.warnings) == 1
+    assert "uninformative" not in ctx.warnings[0]
+    assert "against a 30% departure" in ctx.warnings[0]
+
+
+def test_a_grating_solve_without_a_guard_says_so():
+    ctx = _Ctx()
+    s09_fdtd._grade_the_grating_disagreement_against_its_own_mesh(
+        ctx, {"resolution": 20}, 0.74)
+    assert "no convergence guard" in ctx.warnings[0]
+
+
+def test_the_cache_lookup_and_store_keys_are_built_alike(tmp_path):
+    """`_run` keyed on the job and the runner while `_find_prior` keyed on the
+    job alone, so the two could never match and every solve re-ran. One grating
+    job with byte-identical job files and equal keys re-solved for ten minutes.
+    """
+    import json as _json
+    from picchain.fdtd import bridge
+
+    runner = tmp_path / "runner.py"
+    runner.write_text("print('x')", encoding="utf-8")
+    runs = tmp_path / "runs"
+    prior, current = runs / "a", runs / "b"
+    for d in (prior, current):
+        d.mkdir(parents=True)
+    job = {"a": 1.0}
+    (prior / "meep_taper_job.json").write_text(_json.dumps(job), encoding="utf-8")
+    (prior / "meep_taper_result.json").write_text(
+        _json.dumps({"ok": True, "runner_digest": bridge.runner_digest(runner)}),
+        encoding="utf-8")
+
+    key = bridge.job_key(job)
+    found = bridge._find_prior("taper", key, current, runner=runner)
+    assert found is not None, "an identical job under a sibling run must be reused"
+    assert found[1] == "a"
+
+
+def test_a_result_from_a_different_runner_is_not_reused(tmp_path):
+    """A solve made by an earlier version of the solver is not the solve the
+    present one would make. Six output fields and a third simulation were added
+    to one runner, and the next run returned a cached result carrying none."""
+    import json as _json
+    from picchain.fdtd import bridge
+
+    runner, other = tmp_path / "runner.py", tmp_path / "other.py"
+    runner.write_text("print('x')", encoding="utf-8")
+    other.write_text("print('y')", encoding="utf-8")
+    runs = tmp_path / "runs"
+    prior, current = runs / "a", runs / "b"
+    for d in (prior, current):
+        d.mkdir(parents=True)
+    job = {"a": 1.0}
+    (prior / "meep_taper_job.json").write_text(_json.dumps(job), encoding="utf-8")
+    (prior / "meep_taper_result.json").write_text(
+        _json.dumps({"ok": True, "runner_digest": bridge.runner_digest(runner)}),
+        encoding="utf-8")
+
+    key = bridge.job_key(job)
+    assert bridge._find_prior("taper", key, current, runner=runner) is not None
+    assert bridge._find_prior("taper", key, current, runner=other) is None
+
+
+def test_a_result_predating_the_digest_is_not_reused(tmp_path):
+    """Results written before 2026-09-06 carry no `runner_digest`, and the
+    runner that made them is unknown. Reuse fails safe."""
+    import json as _json
+    from picchain.fdtd import bridge
+
+    runner = tmp_path / "runner.py"
+    runner.write_text("print('x')", encoding="utf-8")
+    runs = tmp_path / "runs"
+    prior, current = runs / "a", runs / "b"
+    for d in (prior, current):
+        d.mkdir(parents=True)
+    job = {"a": 1.0}
+    (prior / "meep_taper_job.json").write_text(_json.dumps(job), encoding="utf-8")
+    (prior / "meep_taper_result.json").write_text('{"ok": true}', encoding="utf-8")
+    assert bridge._find_prior("taper", bridge.job_key(job), current,
+                              runner=runner) is None

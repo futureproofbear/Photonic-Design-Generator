@@ -2869,3 +2869,71 @@ The remaining question is whether a difference between two solves converges
 faster than either solve, which is often true and is never to be assumed. It is
 tested by taking both members to a second resolution, and the cost of that in
 three dimensions is the fourth power of the ratio.
+
+### T083 — The cost of a solve was estimated in time and never in memory, and the host went down
+
+Raising a three-dimensional resolution from 20 to 30 was reasoned about as a
+factor of five in run time, the fourth power of the ratio, and the two hours
+were budgeted. The grid went from 9.6 to 32.4 million cells at the same moment
+and nobody multiplied. The host bugchecked while that grid was allocating,
+before a single time step, which is the signature of the memory and not of the
+duration.
+
+**A resolution change is a memory change first.** Cells rise as the cube in
+three dimensions and the time only afterwards, so the allocation fails before
+any of the budgeted hours are spent, and the failure is not a slow run.
+
+The virtual machine was capped at 16 GB with 8 GB of swap precisely so an
+overrun would be killed by Linux rather than reach the host, and the host went
+down anyway. That cap is therefore not the protection it was taken for, and the
+protection has to sit in front of the solve. A ceiling on the grid,
+`fdtd.max_cells_millions`, now refuses a solve larger than this host has
+completed, before the solver environment is probed, and names the arithmetic in
+the refusal so that raising it is a decision.
+
+**Record what the machine has completed, not what it should manage.** The
+defensible ceiling is the largest solve that has actually finished here, which
+is 9.6 million cells, and the number that took it down, which is 32.4. Anything
+between is a guess.
+
+### T084 — A cache whose lookup key is built by different code from its store key
+
+A runner digest was added to the reuse key to stop an edited solver returning
+its own stale results. It was added on the storing side and not on the looking
+side, so the two keys could never agree and **no solve was reused again**. The
+symptom is the opposite of the one the change was made for and is silent: a
+chain that re-solves everything looks like a chain with nothing cached. It cost
+ten minutes on a grating whose two runs carried byte-identical job files.
+
+The repair was itself unsound, and the test written to demonstrate it disproved
+it. A lookup recomputes the stored job's key using the runner it holds *now*, so
+a digest folded into the key appears on both sides of the comparison and
+cancels. **A property of the artifact cannot be carried in a key that is
+recomputed from the current context.** The digest is written into the result and
+compared there, and a result predating the field is refused rather than assumed
+compatible.
+
+**One key, one function, one call site.** Where a cache computes its key in two
+places, the two will diverge, and the failure is a performance change rather
+than a wrong answer, which is why nothing catches it.
+
+### T085 — A stage explained a disagreement by physics while holding evidence about its own mesh
+
+The first execution of the finite-grating runner returned a coupling constant
+0.74 times the coupled-mode value, and the stage reported that coupled-mode
+theory assumes a weak perturbation and that a departure of this size bounds
+where the assumption fails. That is a statement about the device. The same
+payload carried a convergence guard showing the same number moving 86 per cent
+between resolution 10 and 20.
+
+**A disagreement smaller than the mesh error of either term is evidence about
+the mesh.** The stage now reports the shift first and withholds the physical
+reading where the shift is the larger. This is L041 in a second form: there the
+comparison was against a process window, here against a discretisation, and in
+both the denominator was available and unread.
+
+The run vindicated a choice the design of record had already made on judgement.
+Its comment says the band-structure route "carries no radiation channel and is
+the sounder of the two routes"; the measurement supplies the quantitative
+reason, which is that an index step of 3.7e-4 across posts six cells wide is not
+resolved at any mesh this host can afford.
