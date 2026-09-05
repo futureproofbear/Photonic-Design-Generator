@@ -165,38 +165,8 @@ def _build_monitors(design: Design, ctx: RunContext) -> tuple[dict[str, list], l
 
 
 def _variant_ctx(ctx: RunContext, overrides) -> RunContext:
-    """A context with the primary run's solved value hidden for each override.
-
-    A stage that solves a quantity writes it into the metric tree, and the
-    layout stage prefers the tree over the design file. That precedence is right
-    for the primary device, whose drawing is to follow its own solve. It is
-    wrong for a variant: the tree holds the PRIMARY device's answer, so a variant
-    that overrides a solved quantity is drawn with the primary's value and the
-    override reaches nothing.
-
-    Measured on the first companion drawn: a reference laser whose grating period
-    was overridden from 1424.74000 to 1424.85320 nm to place it 15 GHz away came
-    out of the mask at 1424.74002 nm, byte-identical to the device it was meant
-    to beat against, and no stage reported it. Two lasers at one frequency
-    produce no beat, so the die would have carried no microwave carrier at all.
-
-    Hiding the overridden leaves makes the drawing fall back to the design file,
-    which is where the override was written.
-    """
-    import copy as _copy
-
-    v = _copy.copy(ctx)
-    v.metrics = _copy.deepcopy(ctx.metrics)
-    for dotted in (overrides or {}):
-        parts = str(dotted).split(".")
-        node = v.metrics
-        for part in parts[:-1]:
-            node = node.get(part) if isinstance(node, dict) else None
-            if node is None:
-                break
-        if isinstance(node, dict):
-            node.pop(parts[-1], None)
-    return v
+    """See RunContext.masked_for, where the reasoning is recorded."""
+    return ctx.masked_for(overrides)
 
 
 def _companion_cells(design: Design, ctx: RunContext, layout, lmap) -> tuple[list, list[dict]]:

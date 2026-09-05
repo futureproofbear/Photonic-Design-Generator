@@ -170,6 +170,29 @@ class RunContext:
             node = node[p]
         return node
 
+    def masked_for(self, overrides) -> "RunContext":
+        """A copy of this context with the solved value hidden for each override.
+
+        A stage that solves a quantity writes it into the metric tree, and later
+        stages prefer the tree over the design file. That is right for the
+        primary device and wrong for a variant, whose tree would hold the
+        primary's answer. Hiding the overridden leaves makes every reader fall
+        back to the design file, where the override was written.
+        """
+        import copy as _copy
+        v = _copy.copy(self)
+        v.metrics = _copy.deepcopy(self.metrics)
+        for dotted in (overrides or {}):
+            parts = str(dotted).split(".")
+            node = v.metrics
+            for part in parts[:-1]:
+                node = node.get(part) if isinstance(node, dict) else None
+                if node is None:
+                    break
+            if isinstance(node, dict):
+                node.pop(parts[-1], None)
+        return v
+
     def warn(self, msg: str, key: str | None = None) -> None:
         """Record a finding.
 

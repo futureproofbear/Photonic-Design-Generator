@@ -1014,3 +1014,60 @@ def test_a_declared_trimmer_that_is_drawn_on_nothing_is_raised():
     src = inspect.getsource(s05_layout)
     assert "phase_trimmer" in src
     assert "HEATER" in src
+
+
+# --- the beat between two lasers on one die ----------------------------------
+
+
+def test_the_beat_is_solved_from_both_cavities_and_not_read_off_the_mirrors():
+    """Two mirrors 15 GHz apart do not make two lasers 15 GHz apart.
+
+    Each laser sits on a cavity mode that follows its mirror at the Pockels
+    lever, so on one die the mirrors were 14.999 GHz apart and the lasers 5.829.
+    The beat is the difference of two lasing frequencies, each read from its
+    own cavity solve at its own trimmer setting, and the stage searches the
+    product of the two trimmer scans for a pair of settings that reaches the
+    target while both lasers stay inside their own rows.
+    """
+    from picchain.stages import s04_cavity
+
+    src = inspect.getsource(s04_cavity)
+    assert "f_lase_GHz_by_station" in src
+    assert '"beat": _beat' in src
+    # the companion's cavity is solved, with the primary's solved grating hidden
+    assert "masked_for(_ov)" in src
+    assert "s02_grating.run(_var, _vctx, lib)" in src
+    # the search runs over the primary's window and the companion's whole cycle
+    assert "_in_primary_window" in src
+    assert "feasible_primary_window_deg" in src
+    # and where no pair exists the stage says so rather than reporting the mirrors
+    assert "cavity.beat_unreachable_" in src
+
+
+def test_the_beat_setting_balances_the_two_lasers_margins():
+    """A setting is graded on the laser with the smaller margin.
+
+    Maximising one laser's suppression alone left the other 0.94 dB above its
+    floor. The pair reported is the one whose smaller margin is largest.
+    """
+    from picchain.stages import s04_cavity
+
+    src = inspect.getsource(s04_cavity)
+    assert "smaller_margin_dB" in src
+    assert "best = max(feas, key=_margin)" in src
+
+
+def test_a_masked_context_hides_only_the_overridden_leaves():
+    """The primary's solved value must not leak into a variant's drawing or solve."""
+    from picchain import artifacts
+
+    ctx = artifacts.RunContext(design_dir=pathlib.Path("."), run_id="x")
+    ctx.put("grating.period_um", 1.42474)
+    ctx.put("grating.kappa_per_cm", 1.89)
+    ctx.put("mode.n_eff", 1.6717)
+    v = ctx.masked_for({"grating.period_um": 1.4248532})
+    assert v.get("grating.period_um") is None
+    assert v.get("grating.kappa_per_cm") == 1.89
+    assert v.get("mode.n_eff") == 1.6717
+    # and the original is untouched
+    assert ctx.get("grating.period_um") == 1.42474

@@ -823,6 +823,13 @@ class CompanionCfg(BaseModel):
     copies: int = 1
     #: what the companion is for, carried into the reticle payload
     purpose: str = ""
+    #: the beat this companion is to produce against the primary device, in GHz,
+    #: where the two are lasers heterodyned on one photodiode. Left unset, the
+    #: beat is reported and not graded.
+    beat_target_GHz: float | None = None
+    #: the bound the companion's own side-mode suppression must clear at the
+    #: setting chosen for the beat. The primary's rows are read from its window.
+    beat_smsr_floor_dB: float = 40.0
 
 
 class CompanionsCfg(BaseModel):

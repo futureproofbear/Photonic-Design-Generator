@@ -569,9 +569,12 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                     )
                     if denom > 0 and P0 > 0:
                         smsr = 10 * math.log10(max(P0 * deficit / denom, 1e-30))
+        # the lasing frequency at this phase, which is what a beat is made of
+        f_lase = float(max(in_band or all_m, key=lambda t: t[2])[1]) if all_m else float("nan")
         return {"smsr_dB": smsr, "side_mode_gain_margin_per_cm": dg,
                 "n_cavity_modes_in_band": len(in_band),
-                "side_mode_within_mirror_band": in_b}
+                "side_mode_within_mirror_band": in_b,
+                "f_lase_Hz": f_lase}
 
     def _side_mode_over_the_drive(extra_phase: float, points: int = 9):
         """Side-mode suppression at its worst over the whole drive.
@@ -594,6 +597,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         return {
             "smsr_dB": worst["smsr_dB"],
             "smsr_dB_at_zero_bias": out[0]["smsr_dB"],
+            "f_lase_Hz_at_zero_bias": out[0]["f_lase_Hz"],
             "smsr_dB_at_full_drive": out[-1]["smsr_dB"],
             "drive_points": len(Vs),
             "n_cavity_modes_in_band": max(d["n_cavity_modes_in_band"] for d in out),
@@ -632,6 +636,10 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "n_cavity_modes_in_band_best": min(d["n_cavity_modes_in_band"] for d in _scan),
         # the whole trace, so a reader can check the maximum rather than take it
         "smsr_dB_by_station": [d["smsr_dB"] for d in _scan],
+        "smsr_dB_at_zero_bias_by_station": [d["smsr_dB_at_zero_bias"] for d in _scan],
+        # the lasing frequency at zero bias at every station: the beat between
+        # two lasers on one die is the difference of two of these
+        "f_lase_GHz_by_station": [d["f_lase_Hz_at_zero_bias"] / 1e9 for d in _scan],
     }
 
     # THE WIDTH OF THE WINDOW, which is what a commissioning setting needs.
@@ -915,6 +923,133 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                 f"{_trimmer['delta_T_for_a_full_fsr_K']:.1f} K over "
                 f"{_pt.length_um:.0f} um, or a longer heater")
 
+    # ---- THE BEAT AGAINST EACH COMPANION LASER ---------------------------------
+    #
+    # A die carrying two lasers is built to produce their beat, and the chain
+    # reported one laser. The beat was taken to be the mirror separation, and it
+    # is not: each laser sits on a cavity mode that follows its mirror at the
+    # Pockels lever, so two mirrors 15 GHz apart gave two lasers 5.8 GHz apart,
+    # and no metric said so.
+    #
+    # Each laser's frequency is a function of its own trimmer setting, and both
+    # settings are also committed to that laser's own rows. The beat is
+    # therefore found on the product of the two phase scans: for every primary
+    # setting inside its joint window, the companion setting that brings the
+    # difference to the target is found by interpolation around the cycle, and
+    # kept where the companion's own suppression holds there. What is reported
+    # is whether such a pair exists, how wide the primary's feasible range is,
+    # and the pair with the most margin.
+    _beat: dict[str, Any] = {}
+    _comp_cfg = getattr(getattr(design, "reticle", None), "companions", None)
+    if (_comp_cfg is not None and _comp_cfg.enabled and _comp_cfg.devices
+            and not getattr(ctx, "_solving_a_companion", False)):
+        from . import s02_grating
+        from ..config import set_dotted as _sd
+        for _spec in _comp_cfg.devices:
+            _ov = dict(_spec.overrides or {})
+            _name = (_spec.name or "companion")
+            if not any(k.startswith("grating.") or k.startswith("cavity.") for k in _ov):
+                continue
+            _var = design.model_copy(deep=True)
+            for _k, _v in _ov.items():
+                _sd(_var, _k, _v)
+            _vctx = ctx.masked_for(_ov)
+            _vctx._solving_a_companion = True
+            _vctx.warnings = []
+            _vctx.warning_records = []
+            try:
+                if any(k.startswith("grating.") for k in _ov):
+                    s02_grating.run(_var, _vctx, lib)
+                _cv = run(_var, _vctx, lib)
+            except Exception as _exc:
+                _beat[_name] = {"error": f"{type(_exc).__name__}: {_exc}"}
+                continue
+            fp = np.asarray(_phase_scan["f_lase_GHz_by_station"], dtype=float)
+            fc = np.asarray(_cv["phase_scan"]["f_lase_GHz_by_station"], dtype=float)
+            sc0 = np.asarray(_cv["phase_scan"]["smsr_dB_at_zero_bias_by_station"], dtype=float)
+            Np, Nc = len(fp), len(fc)
+            _gp = (ctx.get("grating") or {}); _gc = (_vctx.get("grating") or {})
+            _c = 299792458.0
+            def _bragg_GHz(g):
+                lam = g.get("bragg_wavelength_nm")
+                return _c / (float(lam) * 1e-9) / 1e9 if lam else float("nan")
+            _entry: dict[str, Any] = {
+                "companion": _name,
+                "overrides": _ov,
+                "mirror_separation_GHz": _bragg_GHz(_gp) - _bragg_GHz(_gc),
+                "beat_at_zero_phase_GHz": float(fp[0] - fc[0]),
+                "beat_range_GHz": [float(np.nanmin(fp) - np.nanmax(fc)),
+                                   float(np.nanmax(fp) - np.nanmin(fc))],
+                "target_GHz": _spec.beat_target_GHz,
+                "companion_linewidth_kHz": _cv.get("schawlow_townes_henry_linewidth_kHz"),
+            }
+            tgt = _spec.beat_target_GHz
+            if tgt is not None and np.isfinite(fp).all() and np.isfinite(fc).all():
+                floor = float(_spec.beat_smsr_floor_dB)
+                _jw = _phase_scan.get("joint_with_the_hop_free_span", {})
+                _start = _jw.get("window_starts_at_deg")
+                _width = _jw.get("widest_contiguous_window_deg", 0.0)
+                def _in_primary_window(deg):
+                    if _start is None or not _width:
+                        return False
+                    return ((deg - _start) % 360.0) <= _width
+                feas = []
+                for i in range(Np):
+                    dp = 360.0 * i / Np
+                    if not _in_primary_window(dp):
+                        continue
+                    want = fp[i] - float(tgt)
+                    for j in range(Nc):
+                        a, b = fc[j], fc[(j + 1) % Nc]
+                        if (a - want) * (b - want) <= 0 and a != b:
+                            t = (want - a) / (b - a)
+                            if 0.0 <= t <= 1.0:
+                                dc = 360.0 * ((j + t) % Nc) / Nc
+                                sa, sb = sc0[j], sc0[(j + 1) % Nc]
+                                s_here = sa + t * (sb - sa)
+                                if s_here >= floor:
+                                    feas.append((dp, dc, float(s_here)))
+                _entry["feasible"] = bool(feas)
+                _entry["n_primary_stations_feasible"] = len({round(f[0], 3) for f in feas})
+                _entry["feasible_primary_window_deg"] = 360.0 * _entry["n_primary_stations_feasible"] / Np
+                if feas:
+                    # THE SETTING WITH THE MOST MARGIN ON BOTH LASERS, which is the
+                    # one whose smaller margin is largest. Taking the companion's
+                    # best alone left the primary 0.94 dB above its floor on the
+                    # first run of this code.
+                    _sp = _phase_scan["smsr_dB_by_station"]
+                    def _margin(f):
+                        ip_ = int(round(f[0] / 360.0 * Np)) % Np
+                        return min(float(_sp[ip_]) - floor, f[2] - floor)
+                    best = max(feas, key=_margin)
+                    ip = int(round(best[0] / 360.0 * Np)) % Np
+                    _entry["setting"] = {
+                        "primary_phase_deg": best[0],
+                        "companion_phase_deg": best[1],
+                        "beat_GHz": float(tgt),
+                        "primary_f_lase_GHz": float(fp[ip]),
+                        "primary_smsr_dB_over_drive": float(_sp[ip]),
+                        "companion_smsr_dB_at_zero_bias": best[2],
+                        "smaller_margin_dB": _margin(best),
+                    }
+                    _entry["beat_GHz_at_setting"] = float(tgt)
+                    _entry["smsr_margin_at_setting_dB"] = _margin(best)
+                else:
+                    cands = [(abs(fp[i] - fc[j] - tgt), fp[i] - fc[j])
+                             for i in range(Np) if _in_primary_window(360.0 * i / Np)
+                             for j in range(Nc) if sc0[j] >= floor]
+                    if cands:
+                        _entry["beat_GHz_at_setting"] = float(min(cands)[1])
+                    ctx.warn(
+                        f"no pair of trimmer settings gives a {tgt:g} GHz beat against "
+                        f"companion {_name!r} while the primary sits in its joint window "
+                        f"and the companion clears {floor:g} dB: the beat reaches "
+                        f"{_entry['beat_range_GHz'][0]:.2f} to {_entry['beat_range_GHz'][1]:.2f} GHz "
+                        "over the two cycles",
+                        key=f"cavity.beat_unreachable_{_name.lower()}",
+                    )
+            _beat[_name] = _entry
+
     payload: dict[str, Any] = {
         "enabled": True,
         "tau_soa_ps": tau_soa * 1e12,
@@ -987,6 +1122,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # across a whole cycle of cavity phase, and the figure a design with a
         # verified trimmer is entitled to
         "phase_scan": _phase_scan,
+        "beat": _beat,
         # THE TWO QUANTITIES AT ONE SETTING OF THE PHASE, which is what a
         # commissioned device delivers. Both are absent where no single setting
         # meets both bounds, so a target written against either fails as missing
