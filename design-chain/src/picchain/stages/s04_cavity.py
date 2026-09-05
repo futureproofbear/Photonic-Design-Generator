@@ -1001,6 +1001,14 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                     want = fp[i] - float(tgt)
                     for j in range(Nc):
                         a, b = fc[j], fc[(j + 1) % Nc]
+                        # A MODE HOP IS NOT A CROSSING. As the companion's trimmer
+                        # walks a cycle its laser hops one tooth somewhere, and
+                        # between those two stations the frequency jumps by an
+                        # FSR. A sign change across that jump is not a setting
+                        # at which the beat equals the target; it is the absence
+                        # of one. Segments longer than half an FSR are skipped.
+                        if abs(b - a) > 0.5 * fsr_Hz / 1e9:
+                            continue
                         if (a - want) * (b - want) <= 0 and a != b:
                             t = (want - a) / (b - a)
                             if 0.0 <= t <= 1.0:

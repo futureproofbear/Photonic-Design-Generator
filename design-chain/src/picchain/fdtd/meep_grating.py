@@ -56,7 +56,7 @@ def geometry(job, with_posts: bool):
     return items
 
 
-def simulate(job, with_posts: bool):
+def simulate(job, with_posts: bool, resolution=None):
     lam = job["wavelength_um"]
     fcen = 1.0 / lam
     df = job["fractional_bandwidth"] * fcen
@@ -73,7 +73,7 @@ def simulate(job, with_posts: bool):
     mon = mp.Vector3(0, sy - 2 * dpml, 0)
     sim = mp.Simulation(
         cell_size=mp.Vector3(sx, sy, 0),
-        resolution=job["resolution"],
+        resolution=int(resolution or job["resolution"]),
         boundary_layers=[mp.PML(dpml)],
         geometry=geometry(job, with_posts),
         default_material=mp.Medium(index=job["n_clad"]),
@@ -123,8 +123,31 @@ def main() -> int:
     # predicts from coupled-mode theory
     kappa = float(np.arctanh(min(np.sqrt(R_peak), 1 - 1e-12)) / L)
 
+    # The structure is solved a second time on a coarser mesh and the shift
+    # between the two bounds the discretisation error. This runner carried no
+    # guard until 2026-09-05, as the taper runner did not, while the splitter
+    # and coupler runners did. On the taper the omission hid a loss that moved
+    # by 68 per cent between resolution 10 and 20.
+    guard_block = None
+    guard = int(job.get("convergence_resolution") or 0)
+    if guard and guard != int(job["resolution"]):
+        straight_c = simulate(job, with_posts=False, resolution=guard)
+        grating_c = simulate(job, with_posts=True, resolution=guard)
+        inc_c = np.asarray(straight_c["forward"])
+        refl_c = np.asarray(grating_c["backward"]) - np.asarray(straight_c["backward"])
+        R_c = np.clip(refl_c / np.maximum(inc_c, 1e-30), 0.0, 1.0)
+        R_peak_c = float(np.max(R_c))
+        kappa_c = float(np.arctanh(min(np.sqrt(R_peak_c), 1 - 1e-12)) / L)
+        guard_block = {
+            "resolution": guard,
+            "peak_reflectivity": R_peak_c,
+            "kappa_per_um": kappa_c,
+            "shift_fraction": (kappa - kappa_c) / kappa if kappa else float("nan"),
+        }
+
     result = {
         "ok": True,
+        "guard": guard_block,
         "n_periods": job["n_periods"],
         "grating_length_um": L,
         "resolution": job["resolution"],

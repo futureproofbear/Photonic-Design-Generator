@@ -267,3 +267,33 @@ def test_every_runner_carries_its_guide_through_the_absorber():
     # the coupler was already correct: its bus is two absorber widths longer
     # than the cell and its ring stations run past both ends
     assert "2 * X + 2 * dpml + 2.0" in coupler
+
+
+def test_the_two_escape_channels_are_measured_separately():
+    """The residual that failed to reach the output plane contains the lateral
+    channel, the vertical channel, the reflection and the reference guide's own
+    loss. A study attributed a difference between two dimensionalities to the
+    vertical channel on the strength of that residual alone. Four flux planes
+    just inside the absorber separate the two axes for the cost of four discrete
+    Fourier transforms and no further simulation."""
+    src = Path(s09_fdtd.__file__).parent.parent / "fdtd" / "meep_taper.py"
+    text = src.read_text(encoding="utf-8")
+    for field in ("escaped_lateral", "escaped_vertical", "escaped_total",
+                  "escape_accounts_for"):
+        assert field in text, field
+    # the minus face is subtracted, a plane's flux being signed along its normal
+    assert 'mp.get_fluxes(sides["lateral_minus"])[0])' in text
+    # the vertical pair exists only where there is a third axis
+    assert 'if dims == 3 else 0.0' in text
+
+
+def test_the_taper_runner_carries_a_convergence_guard():
+    """The splitter and coupler runners solved a second time on a coarser mesh
+    and reported the shift; the taper and grating runners did not, and the study
+    went to the pair that did not. The plane loss moves 68 per cent between
+    resolution 10 and 20."""
+    src = Path(s09_fdtd.__file__).parent.parent / "fdtd" / "meep_taper.py"
+    text = src.read_text(encoding="utf-8")
+    assert 'guard = int(job.get("convergence_resolution") or 0)' in text
+    assert '"loss_shift_fraction"' in text
+    assert '"convergence_resolution"' in _job_dict_of("run")

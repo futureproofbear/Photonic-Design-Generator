@@ -113,7 +113,7 @@ def build_geometry(job, straight_only: bool, straight_width=None):
     return [slab, ridge]
 
 
-def simulate(job, straight_only: bool, straight_width=None):
+def simulate(job, straight_only: bool, straight_width=None, resolution=None):
     fcen = 1.0 / job["wavelength_um"]
     df = 0.1 * fcen
     dpml = job["pml_um"]
@@ -133,7 +133,7 @@ def simulate(job, straight_only: bool, straight_width=None):
 
     sim = mp.Simulation(
         cell_size=cell,
-        resolution=job["resolution"],
+        resolution=int(resolution or job["resolution"]),
         boundary_layers=[mp.PML(dpml)],
         geometry=build_geometry(job, straight_only, straight_width),
         # `n_clad` is the effective index of the unetched film beside the ridge,
@@ -160,6 +160,38 @@ def simulate(job, straight_only: bool, straight_width=None):
     refl = sim.add_mode_monitor(fcen, 0, 1, mp.FluxRegion(center=mp.Vector3(x_ref, 0, 0), size=mon_size))
     tran = sim.add_mode_monitor(fcen, 0, 1, mp.FluxRegion(center=mp.Vector3(x_out, 0, 0), size=mon_size))
 
+    # Power leaving the cell sideways and upwards, measured separately.
+    #
+    # The transmitted quantities above say how much power failed to reach the
+    # output plane and cannot say which way it went. A study of one taper
+    # attributed a difference between two dimensionalities to the vertical
+    # radiation channel on the strength of that residual alone, and the residual
+    # contains the lateral channel, the reflection and the reference guide's own
+    # loss besides. These four planes sit just inside the absorber and separate
+    # the two axes directly, at the cost of four discrete Fourier transforms and
+    # no further simulation.
+    span_x = sx - 2 * dpml
+    span_y = sy - 2 * dpml
+    y_face = sy / 2.0 - dpml
+    sides = {
+        "lateral_plus": sim.add_flux(fcen, 0, 1, mp.FluxRegion(
+            center=mp.Vector3(0, y_face, 0),
+            size=mp.Vector3(span_x, 0, 0 if dims == 2 else sz - 2 * dpml),
+            direction=mp.Y)),
+        "lateral_minus": sim.add_flux(fcen, 0, 1, mp.FluxRegion(
+            center=mp.Vector3(0, -y_face, 0),
+            size=mp.Vector3(span_x, 0, 0 if dims == 2 else sz - 2 * dpml),
+            direction=mp.Y)),
+    }
+    if dims == 3:
+        z_face = sz / 2.0 - dpml
+        sides["vertical_plus"] = sim.add_flux(fcen, 0, 1, mp.FluxRegion(
+            center=mp.Vector3(0, 0, z_face),
+            size=mp.Vector3(span_x, span_y, 0), direction=mp.Z))
+        sides["vertical_minus"] = sim.add_flux(fcen, 0, 1, mp.FluxRegion(
+            center=mp.Vector3(0, 0, -z_face),
+            size=mp.Vector3(span_x, span_y, 0), direction=mp.Z))
+
     # The run must not be stopped before the pulse has crossed the cell. A decay
     # criterion alone will do exactly that on a long cell, the field at the
     # output being still zero when the first check falls due, so a minimum run
@@ -175,6 +207,14 @@ def simulate(job, straight_only: bool, straight_width=None):
         "backward_amplitude": complex(r_coeff.alpha[0, 0, 1]),
         "transmitted_flux": float(mp.get_fluxes(tran)[0]),
         "reference_flux": float(mp.get_fluxes(refl)[0]),
+        # a plane's flux is signed along its own normal, so power leaving through
+        # the minus face is negative and is subtracted to give an escape
+        "escaped_lateral": float(
+            mp.get_fluxes(sides["lateral_plus"])[0]
+            - mp.get_fluxes(sides["lateral_minus"])[0]),
+        "escaped_vertical": float(
+            mp.get_fluxes(sides["vertical_plus"])[0]
+            - mp.get_fluxes(sides["vertical_minus"])[0]) if dims == 3 else 0.0,
     }
 
 
@@ -215,10 +255,39 @@ def main() -> int:
         denom = run["reference_flux"]
         return run["transmitted_flux"] / denom if abs(denom) > 1e-30 else float("nan")
 
+    # The structure is solved a second time on a coarser mesh and the shift
+    # between the two bounds the discretisation error. Until 2026-09-05 this
+    # runner carried no such guard, while the splitter and coupler runners did,
+    # so a study comparing two dimensionalities on a difference of 0.17 per cent
+    # could not say whether that difference was resolved. The splitter shows a
+    # shift of 0.93 per cent between resolution 10 and 20 on the same platform.
+    # Only the two simulations the primary figure needs are repeated, so the
+    # guard costs two solves at the coarse mesh and not three.
+    guard = int(job.get("convergence_resolution") or 0)
+    guard_block = None
+    if guard and guard != int(job["resolution"]):
+        norm_c = simulate(job, straight_only=True, resolution=guard)
+        tap_c = simulate(job, straight_only=False, resolution=guard)
+        p_in_c = abs(norm_c["forward_amplitude"]) ** 2
+        if p_in_c > 0.0:
+            t_mode_c = abs(tap_c["forward_amplitude"]) ** 2 / p_in_c
+            guard_block = {
+                "resolution": guard,
+                "transmission_fundamental": t_mode_c,
+                "shift_fraction": (t_mode - t_mode_c) / t_mode if t_mode else float("nan"),
+                # the shift in the loss, which is the quantity actually compared
+                "loss_shift_fraction": (
+                    ((1.0 - t_mode) - (1.0 - t_mode_c)) / (1.0 - t_mode)
+                    if abs(1.0 - t_mode) > 1e-12 else float("nan")
+                ),
+                "self_normalised_taper": self_normalised(tap_c),
+            }
+
     result = {
         "ok": True,
         "dimensions": job["dimensions"],
         "resolution": job["resolution"],
+        "guard": guard_block,
         # the three self-normalised budgets, in the order the simulations ran
         "self_normalised_taper": self_normalised(tap),
         "self_normalised_narrow_guide": self_normalised(norm),
@@ -235,6 +304,16 @@ def main() -> int:
             }
             for name, run in (("taper", tap), ("narrow_guide", norm), ("wide_guide", wide))
         },
+        # the two escape channels, each as a fraction of the taper run's own net
+        # input flux, so neither involves the reference simulation. Their sum
+        # against the taper's own loss is the check that they account for it.
+        "escaped_lateral": tap["escaped_lateral"] / tap["reference_flux"],
+        "escaped_vertical": tap["escaped_vertical"] / tap["reference_flux"],
+        "escaped_total": (
+            tap["escaped_lateral"] + tap["escaped_vertical"]) / tap["reference_flux"],
+        "escape_accounts_for": (
+            (tap["escaped_lateral"] + tap["escaped_vertical"]) / tap["reference_flux"]
+        ) / max(1.0 - self_normalised(tap), 1e-12),
         "narrow_guide_loss": 1.0 - self_normalised(norm),
         "wide_guide_loss": 1.0 - self_normalised(wide),
         # the quantity the reference asymmetry can contribute, being the excess

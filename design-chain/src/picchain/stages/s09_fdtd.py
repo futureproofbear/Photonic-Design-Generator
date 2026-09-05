@@ -200,6 +200,11 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "taper_stations": cfg.taper_stations,
         "dimensions": cfg.dimensions,
         "resolution": cfg.resolution,
+        "convergence_resolution": (
+            cfg.convergence_resolution
+            if cfg.convergence_resolution is not None
+            else max(8, cfg.resolution // 2)
+        ),
         "pml_um": cfg.pml_um,
         "width_um": cfg.cell_width_um,
         "height_um": cfg.cell_height_um,
@@ -243,6 +248,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "self_normalised_wide_guide": result.get("self_normalised_wide_guide"),
     })
     _report_what_the_reference_asymmetry_can_explain(ctx, result)
+    _report_the_convergence_guard(ctx, result)
     _warn_if_the_reference_is_not_finer_than_the_measurand(
         ctx, norm, result.get("transmission_fundamental", 1.0)
     )
@@ -300,6 +306,36 @@ def _warn_if_power_exceeds_unity(ctx, quantities: dict[str, float]) -> None:
                 "Compare the excess against normalisation_check, and where the excess "
                 "is the larger the reference is not the cause"
             )
+
+
+def _report_the_convergence_guard(ctx, result: dict) -> None:
+    """State whether the discretisation resolves the quantity being reported.
+
+    The taper runner carried no guard until 2026-09-05, while the splitter and
+    coupler runners did. A study comparing two dimensionalities on a difference
+    of 0.17 per cent could not then say whether that difference was resolved,
+    the same solver showing a shift of 0.93 per cent between resolution 10 and
+    20 on the splitter.
+    """
+    guard = result.get("guard")
+    if not guard:
+        ctx.warn(
+            "the FDTD taper solve carries no convergence guard, so its "
+            "discretisation error is unmeasured and no difference it reports is "
+            "known to be resolved. Set fdtd.convergence_resolution to a coarser mesh"
+        )
+        return
+    loss_shift = guard.get("loss_shift_fraction")
+    if loss_shift is None or loss_shift != loss_shift:
+        return
+    if abs(float(loss_shift)) > 0.25:
+        ctx.warn(
+            f"the loss this solve reports moves by {abs(float(loss_shift)):.1%} "
+            f"between resolution {guard['resolution']} and {result['resolution']}. "
+            "A difference smaller than that is not resolved by this mesh, and any "
+            "comparison against another solve is to be read against it. Raise "
+            "fdtd.resolution until the shift is small beside the quantity compared"
+        )
 
 
 def _report_what_the_reference_asymmetry_can_explain(ctx, result: dict) -> None:
@@ -633,6 +669,11 @@ def _run_grating(design, ctx, cfg, backend, status, n_core, n_clad):
         "n_frequencies": cfg.n_frequencies,
         "fractional_bandwidth": cfg.fractional_bandwidth,
         "dimensions": cfg.dimensions,
+        "convergence_resolution": (
+            cfg.convergence_resolution
+            if cfg.convergence_resolution is not None
+            else max(8, cfg.resolution // 2)
+        ),
     }
     result = bridge.run_grating(job, ctx.run_dir, backend, timeout_s=cfg.timeout_s)
     chain = _kappa_in_two_dimensions(design, n_core, n_clad, period)

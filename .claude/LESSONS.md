@@ -2837,3 +2837,35 @@ on the reference run's fundamental-mode power and the third on its total flux, a
 mismatch of 6e-5 that is comparable to one of the rows being reported. A total
 that is an identity conceals inconsistent denominators, because it comes out
 right regardless.
+
+### T082 — Two runners carried a convergence guard and two did not, and the study went to the pair that did not
+
+The splitter and coupler runners solve a second time on a coarser mesh and
+report the shift. The taper and grating runners did not. A study comparing two
+dimensionalities on one taper therefore reported a difference of 0.17 per cent
+in power with no discretisation evidence of any kind, while the same solver on
+the same platform was showing 0.93 per cent between resolution 10 and 20 on the
+splitter, in a payload sitting in the same directory.
+
+Adding the guard settled it in one plane run. The loss moves by 68 per cent
+between resolution 10 and 20. The ladder that follows shows resolution 20
+understating the converged plane loss by about a sixth:
+
+    resolution   10      20      30      40      60      80
+    loss %       0.166   0.525   0.582   0.609   0.617   0.626
+
+**The error at the resolution used, 0.10 percentage points, is sixty per cent of
+the difference the study was reporting, 0.17.** The comparison is not resolved at
+the resolution it was made at, and the report and its ledger entry were corrected
+accordingly.
+
+**A capability present on some runners and absent on others is worse than absent
+everywhere**, because its absence is invisible from the outside: every payload
+looks alike, and a guard block that is missing reads as a guard that passed.
+Enumerate which runners implement a check before quoting a figure from any of
+them.
+
+The remaining question is whether a difference between two solves converges
+faster than either solve, which is often true and is never to be assumed. It is
+tested by taking both members to a second resolution, and the cost of that in
+three dimensions is the fourth power of the ratio.

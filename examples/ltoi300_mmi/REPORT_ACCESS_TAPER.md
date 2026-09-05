@@ -13,11 +13,18 @@ sound solve the repository has taken through it. Five earlier attempts are
 withdrawn.
 
 **The plane reduction gives a smaller loss for this taper than three dimensions
-do, by a third.** Three dimensions give 0.0304 dB against the plane's 0.0228 dB.
-That difference is measured. **What it consists of is not measured**, and the
-report says so at some length below: the vertical radiation channel is one
-contributor, the inaccuracy of the effective-index reduction is another, and the
-two were not separated.
+do, by a third, and that comparison is not resolved at the resolution it was
+made at.** Three dimensions give 0.0304 dB against the plane's 0.0228 dB. A
+convergence guard added to this runner on 2026-09-05, after the comparison was
+first published, shows the plane loss moving by 68 per cent between resolution
+10 and 20 and understating its converged value by about a sixth at resolution
+20. That error is 0.10 percentage points against a reported difference of 0.17,
+so the discretisation is the larger term. See "Whether the difference is
+resolved" below.
+
+What the difference consists of is also not measured. The vertical radiation
+channel is one contributor and the inaccuracy of the effective-index reduction
+is another, and the two were not separated.
 
 **The taper measured is 5.0 um long. The `mmi1x2_cband` cell draws 25 um.** No
 length was swept, so nothing here transfers to the shipped cell.
@@ -65,11 +72,16 @@ negative by 3.2e-6. The stage raised both of the first two, at a tolerance of
 
 The figures are quoted here, and the reason is stated rather than assumed. The
 quantity the run exists to measure is a loss of 5.25e-3, forty times the
-residual, so the measurement is resolved despite it. **The cause of the residual
-is not established.** Truncation of the discrete Fourier accumulation by the
-decay criterion is the candidate and it was not tested. The residual is a floor
-under every plane figure in this report, and the two findings are acknowledged
-in the design with that reasoning.
+residual, so the measurement is resolved despite it.
+
+**The residual is a discretisation artifact.** The resolution ladder below reads
++129, −313, −483, −580 and −626 parts per million at resolutions 20, 30, 40, 60
+and 80. It crosses unity between resolution 20 and 30 and falls monotonically
+thereafter, so the bound is violated only on the coarsest mesh of the ladder and
+the violation is removed by refining. An earlier version of this section
+recorded the cause as unestablished and named discrete Fourier truncation as an
+untested candidate; the ladder settles it without a further solve. The two
+findings are acknowledged in the design on those terms.
 
 The three-dimensional member violates no bound.
 
@@ -129,6 +141,38 @@ controlled.** The plane member replaces the ridge and the slab by indices of
 any inaccuracy in that reduction appears in this difference alongside the
 physics. Separating the two requires a cell-height sweep, a monitor-aperture
 sweep, or an extraction of the higher-order coefficients. None was run.
+
+### Whether the difference is resolved
+
+The taper runner carried no convergence guard until 2026-09-05, while the
+splitter and coupler runners did. The comparison above was published without
+discretisation evidence of any kind.
+
+The guard, and a ladder run in the plane where it is cheap, give this.
+
+| resolution | plane loss | change on the previous rung |
+|---|---|---|
+| 10 | 0.166 % | - |
+| 20 | 0.525 % | +216 % |
+| 30 | 0.582 % | +10.8 % |
+| 40 | 0.609 % | +4.6 % |
+| 60 | 0.617 % | +1.5 % |
+| 80 | 0.626 % | +1.4 % |
+
+The plane member is solved at resolution 20 and its converged loss is at least
+0.626 per cent, so resolution 20 understates it by about 0.10 percentage points.
+The difference between the two dimensionalities is 0.17 percentage points. **The
+discretisation error on one member is sixty per cent of the quantity the two
+members are being compared on.**
+
+The self-normalised transmission converges better over the same ladder, reading
+1.000129, 0.999687, 0.999517, 0.999420 and 0.999374 at resolutions 20 to 80, so
+the residual above unity discussed earlier is itself a discretisation artifact
+and falls away with mesh.
+
+A difference between two solves often converges faster than either solve, and
+that is never to be assumed. Testing it requires both members at a second
+resolution, and in three dimensions the cost is the fourth power of the ratio.
 
 ### The self-normalised transmission, which needs no second run
 
@@ -277,13 +321,9 @@ contribute and none was separated.
 The composition of row 2. Only band 1 was extracted, so conversion into the two
 higher guided modes was never distinguished from forward radiation.
 
-Whether a difference of this size is resolved at all. The effect is 0.17 per cent
-in power, and the same solver on the same platform at the same resolution shows a
-0.93 per cent shift between resolution 10 and 20 on the splitter. No resolution
-study of either taper member was run.
-
-The cause of the plane member's 1.3e-4 residual above unity, which floors every
-plane figure quoted.
+Whether the difference is resolved. It is not, at resolution 20; the ladder
+above gives the evidence. Whether it survives at a higher resolution is being
+tested and is not answered here.
 
 The cause of the three-dimensional launch guide's 2.07e-4 loss over its own
 length, which floors every three-dimensional figure quoted.
