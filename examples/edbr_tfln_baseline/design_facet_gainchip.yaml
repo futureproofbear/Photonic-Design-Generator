@@ -1,0 +1,69 @@
+meta:
+  name: edbr_facet_gainchip
+  title: The E-DBR facet against its gain chip, as a regression check
+  status: scaffold
+platform:
+  cut: x
+  film_material: LiNbO3
+  film_thickness_um: 0.4
+  etch_depth_um: 0.21
+  sidewall_deg: 77.0
+  box_material: SiO2
+  box_thickness_um: 4.7
+  clad_material: SiO2
+  clad_thickness_um: 2.0
+  substrate_material: Si
+  propagation_loss_dB_per_cm: 0.2
+waveguide:
+  top_width_um: 0.9
+  wavelength_um: 1.5459
+mesh:
+  d_fine_um: 0.01
+  d_coarse_um: 0.06
+  fine_margin_um: 0.6
+  subsample: 3
+  num_modes: 3
+  polarisation: TE
+grating:
+  enabled: false
+electrodes:
+  enabled: false
+fem:
+  enabled: false
+bend:
+  enabled: false
+fdtd:
+  enabled: false
+cavity:
+  enabled: true
+  feed_length_um: 200.0
+  rsoa:
+    length_um: 1000.0
+    group_index: 3.6
+    back_facet_R: 0.9
+    front_facet_R: 0.0001
+    confinement_factor: 0.035
+    internal_loss_per_cm: 10.0
+    coupling_loss_dB_per_facet: 3.13
+    linewidth_enhancement_alpha: 3.0
+    spontaneous_emission_factor_nsp: 2.0
+    output_power_mW: 24.93
+    gain:
+      differential_gain_cm2: 2.5e-16
+      transparency_density_per_cm3: 1.0e18
+      carrier_lifetime_ns: 1.0
+      gain_compression_cm3: 1.5e-17
+      spontaneous_coupling_beta: 0.0001
+      injection_efficiency: 0.8
+      active_width_um: 2.0
+      active_thickness_um: 0.024
+facet:
+  enabled: true
+  partner_mfd_x_um: 3.0
+  partner_mfd_y_um: 3.0
+  partner_index: 3.2
+  tolerance_dB: 1.0
+stages:
+- mode
+- facet
+- verify

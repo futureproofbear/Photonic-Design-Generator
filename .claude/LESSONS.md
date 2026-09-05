@@ -2937,3 +2937,30 @@ Its comment says the band-structure route "carries no radiation channel and is
 the sounder of the two routes"; the measurement supplies the quantitative
 reason, which is that an index step of 3.7e-4 across posts six cells wide is not
 resolved at any mesh this host can afford.
+
+### T086 — A stage graded a computed figure against a field belonging to a device the design does not have
+
+The facet stage compares its computed coupling loss against
+`cavity.rsoa.coupling_loss_dB_per_facet`, which is the figure a laser's gain
+chip carries. Every design that had reached the stage was a laser. The first one
+that was not, a modulator test chip coupling to a lensed fibre, had its computed
+1.93 dB compared against the schema default of 1.50 and passed, the difference
+of 0.43 dB falling inside the stage's 0.5 dB deadband. **Two numbers were
+published side by side and their comparison meant nothing.**
+
+The near miss is the instructive part. Had the geometry been slightly worse the
+stage would have reported a design assumption that no design file contains, and
+the reader would have gone looking for it.
+
+**Where a reference value belongs to a block the design has disabled, there is
+no assumption to compare against, and the stage says so** rather than reaching
+for the default. The remedy is one branch on whether that block is enabled, and
+the field is cleared from the payload as well, because recording a default
+beside a computed figure invites exactly the comparison the branch exists to
+prevent.
+
+The same run showed a second instance of the class and did not suffer from it:
+the facet width falls back to `layout.taper_tip_width_um`, and the focused
+design carried no layout block, so the fallback took a schema default that
+happened to equal the test chip's own 0.4 um. **A device dimension that is
+correct by coincidence is declared explicitly.**

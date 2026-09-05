@@ -151,8 +151,27 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             "walk-off in facet.offset_x_um"
         )
 
+    # `coupling_loss_dB_per_facet` belongs to the reflective gain chip of a laser
+    # cavity. On a design that declares no cavity it is a schema default, and
+    # comparing a computed coupling against it grades the geometry on a figure
+    # nobody wrote for it. The first design to reach this stage without a cavity
+    # was a modulator test chip coupling to a lensed fibre, on 2026-09-06, whose
+    # computed 1.93 dB was silently compared against the default 1.50.
     assumed = design.cavity.rsoa.coupling_loss_dB_per_facet
-    if payload["total_loss_dB"] > assumed + 0.5:
+    if not design.cavity.enabled:
+        payload["assumed_loss_dB_in_design"] = None
+        payload["assumption_source"] = (
+            "none: the design declares no cavity, so no coupling loss is assumed "
+            "anywhere in it and the computed figure is graded against nothing"
+        )
+        ctx.warn(
+            f"the facet is computed to lose {payload['total_loss_dB']:.2f} dB and the "
+            "design states no coupling loss to compare it with, the assumed figure "
+            "belonging to a laser cavity this design does not declare. Where the "
+            "coupling budget matters, write it into an acceptance target rather than "
+            "leaving it for a reader to infer from this stage"
+        )
+    elif payload["total_loss_dB"] > assumed + 0.5:
         ctx.warn(
             f"the facet is computed to lose {payload['total_loss_dB']:.2f} dB against the "
             f"{assumed:.2f} dB assumed in the design. The dominant term is "
