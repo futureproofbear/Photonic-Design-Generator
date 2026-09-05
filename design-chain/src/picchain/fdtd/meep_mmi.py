@@ -78,16 +78,25 @@ def build_geometry(job, straight_only: bool):
     shapes = [mp.Block(size=mp.Vector3(Lm, Wm, mp.inf),
                        center=mp.Vector3(0, 0, 0), material=core)]
     for yc in ins:
-        shapes.append(mp.Block(size=mp.Vector3(lead + 2.0, w, mp.inf),
-                               center=mp.Vector3(x_in0 - 1.0 + (lead + 2.0) / 2, yc, 0),
+        # the lead runs out through the absorber, as the normalisation guide
+        # does. Until 2026-09-05 it stopped 0.5 um inside the absorber while the
+        # normalisation guide ran past the cell edge, so the two runs terminated
+        # differently. See meep_taper.py, where the same asymmetry put a
+        # normalised transmission above unity.
+        run_out = job["pml_um"] + 1.0
+        shapes.append(mp.Block(size=mp.Vector3(lead + run_out + 1.0, w, mp.inf),
+                               center=mp.Vector3(
+                                   x_in0 - run_out + (lead + run_out + 1.0) / 2, yc, 0),
                                material=core))
         shapes.append(mp.Prism(_taper(x_in1, -Lm / 2, w, wp, yc, n), height=mp.inf,
                                axis=mp.Vector3(0, 0, 1), material=core))
     for yc in outs:
         shapes.append(mp.Prism(_taper(Lm / 2, x_out0, wp, w, yc, n), height=mp.inf,
                                axis=mp.Vector3(0, 0, 1), material=core))
-        shapes.append(mp.Block(size=mp.Vector3(lead + 2.0, w, mp.inf),
-                               center=mp.Vector3(x_out1 + 1.0 - (lead + 2.0) / 2, yc, 0),
+        run_out = job["pml_um"] + 1.0
+        shapes.append(mp.Block(size=mp.Vector3(lead + run_out + 1.0, w, mp.inf),
+                               center=mp.Vector3(
+                                   x_out1 + run_out - (lead + run_out + 1.0) / 2, yc, 0),
                                material=core))
     return shapes
 

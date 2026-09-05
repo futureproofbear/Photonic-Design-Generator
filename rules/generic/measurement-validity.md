@@ -55,6 +55,43 @@ only in a datatype will not announce the mismatch.
 and confirm it says so. A deliberately introduced violation is the cheapest
 proof a rule check is live.
 
+**Resolution.** A guard's tolerance is compared to the quantity it grades. A
+tolerance wider than the measurand admits every result the guard exists to
+reject, and it passes most loudly on the runs that need it. One normalisation
+guard admitted two per cent while the loss being reported was a few tenths of
+one, so the reference guide's own attenuation was free to exceed the structure's
+without remark. Where the two are within a small factor, the run is reported as
+unresolved by that cell rather than graded.
+
+**Bounds.** A quantity carrying a physical bound is compared to it on every run,
+and the comparison is written into the stage. Transmission through a passive
+structure is at most unity. One solve returned 1.00378 and the stage printed it,
+because every bound the code knew about was a threshold somebody had declared
+and this one belongs to physics.
+
+**Budgets, and the identities that impersonate them.** Where the outputs of a
+run are the parts of a conserved quantity, sum them, and first establish that
+the sum could come out otherwise. Three rows were once reported as an energy
+budget closing to one part in a million when the third was defined as one less
+the other two, so the total was one for any values whatever. A sum that cannot
+fail discriminates nothing, and it conceals inconsistent denominators among its
+terms, because it comes out right regardless. The information in such a
+decomposition is in the separate bound on each row.
+
+Where the outputs are genuinely independent measurements of the parts of a
+conserved quantity, sum them. Transmitted flux and reflection are both in the payload and their sum
+against unity is one addition. It closed in the plane and failed in three
+dimensions by 1.6 per cent, which localised a defect to one path without a
+further solve, and no run in the history of that stage had ever formed it. A
+budget is the cheapest check available and it is the one most often left out,
+the parts being reported individually and never added.
+
+**A ceiling on a proposed cause is computed before the cause is accepted.**
+Where a reference loses a fraction f, it lifts a quotient by at most f/(1−f). An
+excess above that ceiling is not the reference. One attribution stood for the
+length of a report on evidence that already contradicted it at one of its two
+points, the arithmetic never having been done.
+
 **Enumerate a routine's outcomes before guarding one of them.** A function
 returning an optional value has at least three: a result, an exception, and a
 quiet absence. A guard written for the exception path was added to a drawing

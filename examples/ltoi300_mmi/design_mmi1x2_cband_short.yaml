@@ -1,0 +1,94 @@
+# The cross-section of the ltoi300 single-mode O-band ring, posed to the chain.
+#
+# The geometry is that of `ring_resonator_single_mode_point_coupler_oband` in
+# the Luxtelligence PDK: a 0.7 um ridge, 180 nm etched into a 300 nm lithium
+# tantalate film, on a 120 nm slab, at 1310 nm. The purpose of the run is to
+# replace the group index of 2.2 that the PDK carries with a TODO beside it,
+# to bound the mode solver against an independent one, and to establish what
+# the 200 um bend does to the mode.
+
+meta:
+  name: ltoi300_mmi1x2_cband_short
+  title: "The mmi1x2_cband cell with shortened access tapers"
+  status: scaffold
+
+platform:
+  cut: x
+  materials_file: ../../design-chain/pdk/LXT_LT_PRO/materials_lt_pro.yaml
+  film_material: LiTaO3
+  film_thickness_um: 0.300
+  etch_depth_um: 0.180
+  sidewall_deg: 70.0            # the PDK layer stack declares 20 deg from vertical
+  box_thickness_um: 7.0
+  clad_thickness_um: 2.0
+
+waveguide:
+  top_width_um: 0.900
+  wavelength_um: 1.55
+
+mesh:
+  d_fine_um: 0.008
+  d_coarse_um: 0.050
+  num_modes: 3
+  polarisation: TE
+
+grating:
+  enabled: false
+
+electrodes:
+  enabled: false
+
+cavity:
+  enabled: false
+
+fem:
+  enabled: false
+
+bend:
+  enabled: false
+
+# The point coupler of the PDK cell, solved in the plane. The gap and the radius
+# are those of `ring_resonator_single_mode_point_coupler_oband`.
+# The splitter geometry of `lxt_pdk_gf.ltoi300.cells.mmi1x2_oband`, which the
+# kit states is optimised for transmission at 1310 nm on the 300/120 stack.
+mzm:
+  mmi_width_um: 4.5
+  mmi_length_um: 13.5
+  port_width_um: 1.95               # the access taper where it meets the section
+  port_separation_um: 2.55         # centre to centre at the end face
+
+fdtd:
+  # The splitter with its access tapers shortened to 5 um and its leads to 1.
+  #
+  # The shortening was cut for a three-dimensional cell, and `meep_mmi.py`
+  # builds every shape with an infinite extent in the third axis, so no
+  # three-dimensional solve of this structure exists. The stage now refuses
+  # `dimensions: 3` for this structure rather than recording it and returning a
+  # two-dimensional result. The vertical radiation channel of the access taper
+  # is measured separately by `design_access_taper_3d.yaml`, which uses the one
+  # runner that builds a layer stack.
+  #
+  # The excitation of the multimode section is less adiabatic here than in the
+  # kit's cell, so this design is a companion to `design_mmi1x2_cband.yaml` and
+  # is not a replacement for it.
+  enabled: true
+  structure: mmi
+  dimensions: 2
+  resolution: 20
+  pml_um: 1.5
+  mmi_taper_length_um: 5.0
+  mmi_lead_um: 1.0
+  mmi_ports_in: 1
+
+warnings:
+  acknowledged:
+    - key: fdtd.mmi_two_dimensional
+      reason: >
+        Accepted, because no alternative exists. `meep_mmi.py` builds every
+        shape with an infinite extent in the third axis, so the splitter has no
+        three-dimensional runner and the stage refuses to be asked for one. The
+        vertical radiation channel of the access taper is measured separately by
+        design_access_taper_3d.yaml, and REPORT_ACCESS_TAPER.md gives the size
+        of the reduction's error on that part of the structure.
+
+stages: [mode, fdtd, verify]

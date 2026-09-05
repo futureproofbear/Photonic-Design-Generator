@@ -34,7 +34,13 @@ def geometry(job, with_posts: bool):
     total = job["in_length_um"] + job["n_periods"] * job["period_um"] + job["out_length_um"]
     x0 = -total / 2.0
 
-    items = [mp.Block(size=mp.Vector3(total, w, mp.inf),
+    # The guide runs through the absorber and out of the cell. Terminating it at
+    # the inner face of the absorber leaves the mode meeting an abrupt end of the
+    # guide exactly where the absorber begins, which reflects. On the taper
+    # runner that facet raised the fundamental-mode reflection by a factor of 65
+    # and drove a normalised transmission above unity.
+    through = total + 2.0 * job["pml_um"]
+    items = [mp.Block(size=mp.Vector3(through, w, mp.inf),
                       center=mp.Vector3(x0 + total / 2, 0, 0), material=core)]
     if not with_posts:
         return items

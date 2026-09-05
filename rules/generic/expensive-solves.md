@@ -33,6 +33,20 @@ design point is then an assumption, and it is to be stated as one.
 differing only in the fifteenth significant figure, through floating-point
 evaluation order, are one job.
 
+**The key carries every field that changes the answer, and the job carries every
+field the design declared.** A field held outside the job is a field on which two
+solves may differ while their keys agree, and the second then returns the first.
+One declared dimensionality was passed to the runner of one structure out of
+four, recorded in the payload of all four, and omitted from every job. A
+splitter asked for three dimensions received the two-dimensional result of an
+earlier job in fourteen seconds, stamped with the dimensionality it had asked
+for.
+
+**An option is refused where the selected runner does not implement it.** A
+value recorded but not acted on is the failure mode of an option offered
+uniformly and implemented once. The refusal costs milliseconds, names the field
+and the remedy, and is placed before the solver environment is probed.
+
 ## Launching
 
 **Confirm a launch by the artifact it creates, and never by a log file read
@@ -94,6 +108,21 @@ the run still yields usable data where the teardown itself hangs.
 **Read the convergence guard before the result.** See
 [independent-cross-checks.md](independent-cross-checks.md).
 
+**An artifact records the method that produced it, and the record is checked
+against the result.** A result that misreports its own method is worse than a
+wrong number, a wrong number being contested where a method is believed. Two
+checks cost nothing. A figure agreeing to every written digit with the run it
+was intended to differ from is the finding. A quantity present in the payload
+that exists only under the other method, such as an effective index in a
+solve declared to build a layer stack, is the second.
+
+**Count the emitted artifacts by the option they selected before trusting any
+option.** One such pass returned sixteen payloads, of which one carried a
+dimensionality no runner builds, which bounded the exposure to a single run. The
+same pass showed that the one runner implementing the three-dimensional branch
+had been executed zero times, while fourteen runs had emitted a warning
+recommending it.
+
 **A decay criterion can stop a solve before the signal arrives.** A run
 terminated by field decay at a monitor stops immediately on a long cell, the
 field there being still zero when the first check falls due, and returns an
@@ -102,4 +131,6 @@ order twice the transit alongside any decay criterion.
 
 ## Evidence
 
-`.claude/LESSONS.md` T007, T027, T028, T029, T037, T038, T039, T041, T050.
+`.claude/LESSONS.md` T007, T027, T028, T029, T037, T038, T039, T041, T050,
+T073 on a field one runner reads and three record, and T074 on the runner that
+implemented the recommended branch and had never been run.

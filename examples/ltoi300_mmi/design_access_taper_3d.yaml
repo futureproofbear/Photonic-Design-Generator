@@ -1,0 +1,96 @@
+# The access taper of the mmi1x2 splitter, posed to the chain on its own.
+#
+# The splitter of `lxt_pdk_gf.ltoi300.cells.mmi1x2_cband` meets its routing
+# waveguide through a taper between 1.95 um at the face of the multimode
+# section and 0.90 um in the guide. The two-dimensional study of the splitter
+# shortened that taper from 25 um to 5, and reported an excess loss of 0.0995 dB
+# with the vertical radiation channel absent from the calculation.
+#
+# This design solves the taper alone. The runner launches the tip width and
+# widens to `waveguide.top_width_um`, so the source is the routing waveguide and
+# the output is the port of the multimode section. That output cross-section is
+# multimode at 1.95 um by construction, which is what an access taper is for.
+
+meta:
+  name: ltoi300_access_taper_3d
+  title: "The mmi1x2 access taper, solved in three dimensions"
+  status: scaffold
+
+platform:
+  cut: x
+  materials_file: ../../design-chain/pdk/LXT_LT_PRO/materials_lt_pro.yaml
+  film_material: LiTaO3
+  film_thickness_um: 0.300
+  etch_depth_um: 0.180
+  sidewall_deg: 70.0            # the PDK layer stack declares 20 deg from vertical
+  box_thickness_um: 7.0
+  clad_thickness_um: 2.0
+
+waveguide:
+  top_width_um: 1.950
+  wavelength_um: 1.55
+
+mesh:
+  d_fine_um: 0.008
+  d_coarse_um: 0.050
+  num_modes: 4
+  polarisation: TE
+
+grating:
+  enabled: false
+
+electrodes:
+  enabled: false
+
+cavity:
+  enabled: false
+
+fem:
+  enabled: false
+
+bend:
+  enabled: false
+
+# The splitter geometry of `lxt_pdk_gf.ltoi300.cells.mmi1x2_oband`, which the
+# kit states is optimised for transmission at 1310 nm on the 300/120 stack.
+
+taper:
+  length_um: 5.0
+  tip_width_um: 0.900
+  profile: linear
+
+fdtd:
+  enabled: true
+  structure: taper
+  dimensions: 3
+  # The cell is 9.60 million cells at this resolution. 10 um across leaves
+  # 2.5 um between the widest part of the guide and the absorber on each side.
+  # 6 um deep leaves 1.32 um above the top of the ridge and 1.38 um below the
+  # underside of the slab, the runner placing the slab at z = -0.120 to 0 and
+  # the ridge at z = 0 to 0.180.
+  #
+  # An earlier comment here attributed an above-unity transmission to the
+  # normalisation guide being less confined than the structure. That
+  # attribution is withdrawn, and so is the prohibition that stood beside it.
+  # The cause was a guide built only to the inner face of the absorbing
+  # boundary, which presented a facet to the mode. Carrying the guide out to the
+  # cell edge removed it, and this design's figures are quotable. See
+  # REPORT_ACCESS_TAPER.md.
+  resolution: 20
+  pml_um: 1.5
+  cell_width_um: 10.0
+  cell_height_um: 6.0
+  in_length_um: 6.0
+  out_length_um: 6.0
+
+warnings:
+  acknowledged:
+    - key: mode.cross_section_supports_3
+      reason: >
+        The declared guide is the 1.95 um port of the multimode section, not a
+        routing waveguide. An access taper exists because that port is
+        multimode, so the finding states the premise of the study. The taper is
+        launched at 0.900 um, which is single-moded, and the fundamental-mode
+        transmission the solve returns is the quantity of interest.
+
+stages: [mode, fdtd, verify]

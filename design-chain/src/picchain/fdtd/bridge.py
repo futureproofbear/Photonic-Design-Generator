@@ -359,7 +359,26 @@ def run_bandstructure(job: dict, work_dir: Path, backend: Backend | None = None,
     return _run(BAND_RUNNER, name, job, work_dir, single, timeout_s)
 
 
-def job_key(job: dict, sig: int = 10) -> str:
+def runner_digest(runner: Path) -> str:
+    """A content digest of the runner script, for the reuse key.
+
+    The runner is as much an input to the result as the job is. On 2026-09-05 a
+    third simulation and four new output fields were added to the taper runner,
+    and the next run returned a cached result carrying none of them, the job
+    being unchanged and the key being computed over the job alone. The solve is
+    deterministic in its inputs, and the code is one of them.
+    """
+    import hashlib
+
+    try:
+        return hashlib.sha256(runner.read_bytes()).hexdigest()[:16]
+    except OSError:
+        # a runner that cannot be read is a fault the solve itself will report;
+        # keying on its absence merely disables reuse, which is the safe side
+        return "unreadable"
+
+
+def job_key(job: dict, sig: int = 10, runner: Path | None = None) -> str:
     """A content key for an external solver job, insensitive to last-bit noise.
 
     Two runs computing the same geometry through the same code produce job files
@@ -370,6 +389,9 @@ def job_key(job: dict, sig: int = 10) -> str:
 
     Floats are rounded to `sig` significant figures before hashing. Ten is far
     beyond any physical significance here and far short of the noise.
+
+    Where `runner` is given, its content digest enters the key, so that editing
+    the solver invalidates every result it produced.
     """
     import hashlib
 
@@ -386,7 +408,10 @@ def job_key(job: dict, sig: int = 10) -> str:
             return [canon(x) for x in v]
         return v
 
-    blob = json.dumps(canon(job), sort_keys=True, separators=(",", ":"))
+    payload = {"job": canon(job)}
+    if runner is not None:
+        payload["runner"] = runner_digest(runner)
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
 
 
@@ -428,10 +453,12 @@ def _run(runner: Path, name: str, job: dict, work_dir: Path,
     # An identical job already solved is not solved again. The external solver is
     # the only part of this chain measured in hours, and it is deterministic in
     # its inputs, so re-solving an unchanged structure buys nothing whatever.
+    # The runner script is one of those inputs and enters the key, so editing the
+    # solver invalidates every result it produced.
     # Set the environment variable PICCHAIN_NO_REUSE to force a fresh solve.
     import os
 
-    key = job_key(job)
+    key = job_key(job, runner=runner)
     if not os.environ.get("PICCHAIN_NO_REUSE"):
         prior = _find_prior(name, key, work_dir)
         if prior is not None:

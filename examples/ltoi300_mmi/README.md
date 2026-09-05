@@ -266,11 +266,37 @@ enough to place a self-imaging length to better than seven per cent. Both
 instruments built here share that reduction, which is why they agree with each
 other and neither agrees with the kit.
 
-Three dimensions is reachable two ways. The time-domain path exists behind
-`fdtd.dimensions: 3` and is an overnight job for a section of this length. The
-eigenmode expansion would need the modes of the full two-dimensional
-cross-section rather than of a lateral profile, which the chain's own mode
-solver already computes, and it would then cost seconds rather than a night.
+Three dimensions is reachable two ways, and one of them was found on
+2026-09-05 not to exist. `meep_mmi.py` builds every shape with an infinite
+extent in the third axis, so the splitter has no three-dimensional runner, and
+`fdtd.dimensions: 3` was recorded in the payload while the plane reduction was
+returned. The stage now refuses that setting for this structure. The defect and
+the withdrawn run are described in
+[`REPORT_ACCESS_TAPER.md`](REPORT_ACCESS_TAPER.md).
+
+The time-domain path therefore needs a three-dimensional splitter runner
+written, and would be an overnight job for a section of this length once it
+exists. The eigenmode expansion would need the modes of the full
+two-dimensional cross-section rather than of a lateral profile, which the
+chain's own mode solver already computes, and it would then cost seconds rather
+than a night.
+
+The one structure whose runner does build a layer stack is the taper, and the
+access taper of this cell has been solved in both dimensionalities. The study is
+[`REPORT_ACCESS_TAPER.md`](REPORT_ACCESS_TAPER.md). It measures the plane
+reduction giving the smaller loss for that taper, 0.0228 dB against 0.0304, and
+it does not establish what the difference consists of: the vertical radiation
+channel, the lateral channel and the accuracy of the effective-index reduction
+all contribute and none was separated. It measures a taper of 5 um rather than
+the 25 um this cell draws, and no length was swept, so the figure does not
+transfer to the cell. Read the report's own limitations before quoting it.
+
+Four defects were found and fixed in reaching it, one of which moved the plane
+figure by a factor of two and had been present in three of the four FDTD runners
+since they were written. Every splitter figure on this page predates that fix.
+Re-solving the shortened splitter after it moved the transmission in the seventh
+decimal place, the splitter's leads having carried only a mild form of the
+defect, so the figures above stand.
 
 The second is the better investment, and the length sweep above is the reason.
 Once the beat length is right, the questions a designer asks are what the

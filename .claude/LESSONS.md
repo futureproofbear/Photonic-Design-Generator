@@ -2612,3 +2612,228 @@ force were a foundry agreement and a kit licence, neither of which is a project
 scope, and both were enforced by hand. **A check that cannot fail is not
 evidence.** Report what was compared and against what, and where the answer is
 nothing, say so.
+
+### T073 — A field one runner reads, three runners record, and the cache ignores
+
+`fdtd.dimensions` selects between a plane reduction and a built layer stack. One
+of the four structures reads it. The stage wrote it into the payload of all
+four, and left it out of every job dictionary, over which the content key of the
+external solve is computed. A splitter declaring three dimensions therefore
+produced a payload stamped `dimensions: 3` carrying the two-dimensional result
+of an earlier job, in 13.9 seconds, without invoking the solver.
+
+**The artifact misreported the method that produced it**, which is worse than a
+wrong number, because a wrong number is contested and a method is believed. Two
+independent signals were available and neither is the value: the transmission
+agreed with the run it was supposed to differ from to every digit written, and
+the payload carried an effective index, which exists only in the reduction. **A
+figure that matches the one it was meant to differ from is the finding.**
+
+The three faults each concealed the others. Passing the field to one runner
+looks correct in that runner. Recording it in every payload looks correct in the
+stage. Omitting it from the job looks correct until two jobs differ in nothing
+else. Sixteen payloads were then examined and one carried the false stamp, so no
+published figure was affected, and the exposure was one hour old.
+
+`s09_fdtd.py` now refuses a dimensionality its runner does not build, before the
+solver environment is probed, and names the field and the remedy. Every job
+carries its dimensionality. Held by `tests/test_fdtd_dimensions.py`.
+
+### T074 — The one runner that builds three dimensions had never been run
+
+Sixteen FDTD payloads existed, ten of a splitter and six of a coupler. The taper
+runner, which is the default structure and the only one that reads the layer
+stack, had been executed zero times, and its three-dimensional branch is the
+code every two-dimensional run's own warning had been pointing at. **A warning
+naming a capability is evidence about the capability's exercise record.**
+Fourteen runs advised raising the dimensionality, and the path that would have
+served the advice had no run behind it.
+
+The count is the instrument. Enumerating the emitted payloads by structure took
+one pass and returned a denominator, and the denominator, not the defect, is
+what showed the gap.
+
+### T075 — A passive structure returned more power than it was given, and the stage printed it
+
+The first three-dimensional taper solve reported a fundamental-mode transmission
+of 1.00378. Every bound the stage held was a threshold somebody had declared, so
+a bound belonging to physics was checked by nothing. **Thresholds are graded by
+the acceptance stage; bounds are checked in the stage that computes the
+quantity**, because a bound is a property of the quantity and not of the design.
+
+The cause is the reference. The runner normalises against a straight guide at
+the launch width, and the structure is a taper that widens away from that width
+and is better confined thereafter. The reference attenuates over its own length
+more than the structure does, which makes the denominator too small. **A
+normalisation guide is to be at least as well confined as the structure it
+grades.**
+
+Two cell sizes separated it: the reference lost 0.245 per cent and the quotient
+read 1.00378, then the reference lost 0.102 per cent and the quotient read
+1.00046. The excess follows the reference and is a property of the reference.
+
+### T076 — A three-dimensional cell filled with an index from the two-dimensional reduction
+
+`_effective_indices` returns the effective index of the slab through the ridge
+and the effective index of the unetched film beside it. The second is the
+surround of the plane reduction. The taper runner used it as the ambient of the
+cell in both dimensionalities, and the three-dimensional branch builds the slab
+explicitly, so the slab was placed twice and the whole cell was filled with a
+medium of 1.5509 where the cladding is 1.4440.
+
+**A quantity named for what it surrounds in one model is not the surround of
+another.** The name `n_clad` reads correctly at the call site in both branches,
+which is why it survived. The two branches of that one line needed different
+quantities and were given one.
+
+Two runs were withdrawn. **A first exercise of a branch is a test of the branch,
+and a result from it is provisional until the branch itself has been read**, not
+merely until the result looks physical. Both withdrawn runs had already been
+graded unresolved by a normalisation guard, and that verdict was correct for a
+reason unrelated to the defect, which delayed finding it.
+
+### T077 — Correcting one defect made the symptom worse, which is how the second was separated
+
+A three-dimensional taper cell carried the wrong ambient index and returned a
+transmission of 1.00046 for a passive structure. Correcting the index returned
+1.00769, and the energy budget of transmitted flux and reflection moved to
+1.01628 against a reference guide clean to 0.12 per cent. **A correction that
+enlarges the symptom has separated two causes**, and the enlargement is
+information rather than a setback. Had the figure fallen to 0.998 the second
+defect would have been closed over and the path declared working.
+
+The first attribution was withdrawn on its own evidence. The excess had been
+assigned to the normalisation guide on two runs at two cell sizes, and those two
+runs also differed in the absorber thickness, so they were not a controlled
+pair. At the smaller cell the excess already exceeded the ceiling the
+reference's own loss can produce, which was visible in the numbers at the time
+and was not computed. **The ceiling on a proposed systematic is arithmetic and
+costs nothing: where the observed excess exceeds it, that systematic is not the
+cause.**
+
+The energy budget was the instrument, and no run had ever formed it. Transmitted
+flux and reflection are both in the payload, and their sum against unity is one
+addition. It closes in the plane at both cells and fails in three dimensions at
+both, which localises the defect to the three-dimensional path without any
+further solve.
+
+### L042 — A component solved alone, checked against the assembly that contains it
+
+A 1x2 splitter passes light through its input taper and one of two output
+tapers, the output branches being parallel, so two tapers act in series and not
+three. **A component solved alone and the assembly that contains it are two
+routes to one quantity**, and the arithmetic joining them is the series-parallel
+topology of the assembly. Miscounting that topology turns a corroboration into a
+contradiction: three tapers in series predicted 3.43 per cent against an
+assembly measuring 2.27, which reads as a defect and is only a wrong count.
+
+**The composition is only as good as the definition of the quantity composed.**
+Squaring a fundamental-mode transmission books everything outside the
+fundamental as lost at each taper. Where the taper feeds a multimode section
+that accepts the higher-order content, that power is not lost, and the two
+readings differ by a factor of eight on the residual: 1.22 per cent against 0.15.
+Establish what the non-fundamental content is before composing, or report the
+interval both readings admit.
+
+An earlier version of this entry recorded a residual of three parts in ten
+thousand and concluded the multimode section was lossless. It rested on a taper
+figure since withdrawn under T080, and the agreement was an artifact of that
+defect.
+
+### T078 — The reuse key carried the job and not the code that consumes it
+
+A third simulation and six output fields were added to a solver runner. The next
+run returned a cached result carrying none of them, in seconds, because the key
+is computed over the job dictionary and the job had not changed. The comment
+above the cache stated that the solver "is deterministic in its inputs", which
+is true and is the argument for keying on the code as well: **the runner is an
+input.**
+
+This is T073 in the second of its two forms. There the key omitted a field the
+design declared; here it omitted the program. Both present as a result that
+arrives too quickly and answers the previous question. The tell is the same in
+both: a field expected in the payload is absent, or a figure agrees with the run
+it was meant to differ from.
+
+The digest of the runner file now enters the key. An unreadable runner keys as
+"unreadable", which disables reuse rather than matching, reuse being the side
+that fails safely.
+
+**Every cache is to be asked what it is a function of, and the answer must
+include the code.** A content key over the inputs of a pure function is sound
+only where the function itself is pinned.
+
+### T079 — A quantity graded by its own run needs no reference, and it settled what two cell sizes could not
+
+Three quantities were being used to grade a taper, and each divided a
+measurement of the structure by a measurement of a different simulation. An
+above-unity result could therefore be blamed on the reference indefinitely, and
+was, for the length of a report.
+
+The instrument that ends the argument was already in the cell. Each run carries a
+flux monitor downstream of the source and another at the output, so the quotient
+of the two is a transmission graded by that run alone. For a passive structure it
+is at most one, whatever any other simulation did. The plane reduction returns
+1.0000019 on it, which also calibrates the numerical noise of a flux ratio at
+about one part in a million and sets the tolerance for the bound.
+
+**Prefer the quantity that involves one simulation to the quantity that involves
+two**, and where a figure of merit must divide by a second run, report the
+self-referred one beside it. The reference asymmetry that had been argued about
+is now measured directly by a third straight guide at the output width: 0.109 per
+cent against 0.015 per cent over the same span, being 0.093 per cent, which is
+the whole of what that mechanism can contribute.
+
+### T080 — A waveguide that stops where the absorber starts is a facet, and it reflects by an amount that depends on the width
+
+Three of four FDTD runners terminated the guide at the inner face of the
+absorber rather than carrying it out through the cell. The absorber then
+attenuates the ambient while the guide itself simply ends, which is a dielectric
+step across the whole mode, and the mode reflects from it.
+
+**The error is invisible in any single run and appears only in a quotient
+between two.** A reflection common to both runs cancels. This one did not
+cancel, because the reference is a straight guide at the launch width and the
+structure ends at the output width, and a facet reflects by an amount that
+depends on the confinement of the mode meeting it. On one taper the two runs
+differed by 1.15 per cent in net flux at the *input* monitor, where the source
+and the input section were identical, which is impossible for any mechanism
+downstream and is the observation that located the fault.
+
+Carrying the guide through the absorber changed the plane reduction of that
+taper as follows: fundamental-mode reflection from 0.00353 to 0.0000542, a
+factor of 65; the straight guide's loss over its own length from 0.109 per cent
+to 0.0002; and the transmission from 0.98844 to 0.99475. **The figure the study
+existed to produce moved by a factor of two.**
+
+The diagnosis cost nothing once the right quantity existed. Three quantities had
+been used to grade the taper and each divided one simulation by another, so an
+above-unity result could be blamed on the reference indefinitely, and was, for
+the length of two reports. A transmission formed from one run's own two monitors
+reads 0.998 where the between-run quotient reads 1.008, which localises the
+fault to the normalisation and not to the physics. See T079.
+
+**Check the geometry against the boundary before believing any transmission.**
+The question is whether every guide reaches the edge of the cell. It is one
+comparison of two numbers already in the job.
+
+### T081 — A decomposition that sums to one by construction is not a budget
+
+Three rows were reported as an energy budget closing to one part in a million:
+the transmission into the fundamental, the flux crossing the plane outside it,
+and the remainder. The third is defined as one less the other two, so the sum is
+one for any values whatever, including wrong ones. Nothing was conserved,
+checked or closed, and the identity was printed in bold as the evidence that the
+solve was sound.
+
+**Ask what a check would have to look like to fail.** A sum that cannot come out
+otherwise has no power to discriminate, which is the measurement-validity rule
+applied to arithmetic rather than to code. The rows still carry information,
+because each is separately bounded and one of them was outside its bound, but
+the information is in the bounds and not in the total.
+
+The same construction hid a second fault. Two of the three rows were normalised
+on the reference run's fundamental-mode power and the third on its total flux, a
+mismatch of 6e-5 that is comparable to one of the rows being reported. A total
+that is an identity conceals inconsistent denominators, because it comes out
+right regardless.

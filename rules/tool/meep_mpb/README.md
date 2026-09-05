@@ -97,6 +97,56 @@ and read
 [`../../../design-chain/PICCHAIN_REFERENCE.md`](../../../design-chain/PICCHAIN_REFERENCE.md)
 under "Running the Chain Efficiently" for the measured cost of every stage.
 
+## Every guide runs out through the absorber
+
+A waveguide terminated at the inner face of the absorber presents a facet to the
+mode. The absorber attenuates the ambient while the guide itself simply ends,
+which is a dielectric step across the whole mode, and the mode reflects from it.
+The guide is therefore built to the edge of the cell or past it, and the check is
+one comparison of two numbers already in the job: the extent of the geometry
+against the half-width of the cell.
+
+**The error cancels within a run and survives every quotient between two runs.**
+A reflection common to the structure and its normalisation cancels exactly. This
+one does not, because a normalisation guide is held at the launch width while the
+structure ends at some other width, and a facet reflects by an amount that
+depends on the confinement of the mode meeting it.
+
+**The observation that locates it is a difference at the input monitor.** Two
+runs sharing a source and an input section cannot differ there by any mechanism
+downstream. One taper's two runs differed by 1.15 per cent in net flux at that
+plane, which is impossible, and which no quantity then being computed would have
+shown.
+
+Carrying the guide through the absorber changed one plane reduction as follows:
+fundamental-mode reflection from 0.00353 to 0.0000542, the straight guide's loss
+over its own length from 0.109 per cent to 0.0002, and the transmission from
+0.98844 to 0.99475. The figure the study existed to produce moved by a factor of
+two.
+
+## Grade every run by its own monitors before grading it against another run
+
+A flux monitor downstream of the source and another at the output give a
+transmission that involves no second simulation. For a passive structure it is at
+most one, whatever any other run did, so a value above unity localises the fault
+to that run and cannot be argued away as a property of the reference. A sound
+plane reduction returns 1.0000019 on it, which also calibrates the numerical
+noise of a flux ratio at about one part in a million and sets the tolerance for
+the bound.
+
+Where a figure of merit must divide by a second run, report the self-referred
+quantity beside it. Three quantities grading one taper each divided one
+simulation by another, and an above-unity result was attributed to the reference
+across two reports before the self-referred quantity was formed and settled it in
+one line.
+
+## The reuse key carries the runner
+
+The solver is deterministic in its inputs and the runner script is one of them. A
+key computed over the job alone returns a stale result the moment the solver is
+edited: a third simulation and six output fields were added to one runner, and
+the next run came back in seconds carrying none of them.
+
 ## Evidence
 
 `.claude/LESSONS.md` L010, T007, T018, T027, T037, T038, T039, T041.

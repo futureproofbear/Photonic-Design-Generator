@@ -753,3 +753,80 @@ previous numerical output pins the previous defect with equal fidelity.
     enters the two factors differently, and design the acceptance rows so the
     disputed quantity carries the lower severity. A blocking target on the
     quantity an experiment exists to settle asserts the answer in advance.
+
+58. **An option declared uniformly and implemented once must be refused where it
+    is not implemented.** `fdtd.dimensions` selects a plane reduction or a built
+    layer stack, and one of four structures reads it. Before running any
+    configuration that sets an option, confirm the selected runner acts on it,
+    by reading that runner rather than the stage. A value recorded in a payload
+    and never acted on produces an artifact that misreports its own method.
+
+59. **A solver cache key carries every field that changes the answer.** Where a
+    declared field is absent from the job, two solves differing only in that
+    field share a key and the second returns the first. The signature is a
+    figure agreeing to every written digit with the run it was meant to differ
+    from, and a suspiciously short elapsed time.
+
+60. **Check a bounded quantity against its bound on every run.** Transmission
+    through a passive structure is at most unity. Thresholds a designer declares
+    are graded by `verify`; bounds that belong to physics are checked in the
+    stage, or nothing checks them.
+
+61. **Compare a guard's tolerance to the quantity it grades before trusting the
+    guard.** A normalisation tolerance of two per cent grading a loss of a few
+    tenths of one per cent admits everything it exists to reject. Where the
+    reference's own error is within a small factor of the measurand, report the
+    run as unresolved by that cell.
+
+62. **Form the energy budget on every FDTD run, and check first that it could
+    come out wrong.** Transmitted flux and reflection are both in the payload
+    and their sum against unity is one addition, which localised a defect to the
+    three-dimensional path with no further solve. A decomposition whose last row
+    is defined as the remainder is a different thing: it sums to one for any
+    values whatever, and reporting it as a budget that closes asserts a check
+    that was never performed.
+
+63. **Compute the ceiling on a proposed systematic before accepting it as the
+    cause.** Where a reference guide loses a fraction f, it can lift a quotient
+    by at most f/(1-f). An excess larger than that ceiling is not the reference,
+    and the arithmetic costs nothing.
+
+64. **An index named for what it surrounds in one model is not the surround of
+    another.** `n_clad` is the effective index of the unetched film beside the
+    ridge, which is the surround of the plane reduction. The three-dimensional
+    branch builds the slab explicitly, so its surround is the cladding. One line
+    served both branches and read correctly at the call site in each.
+
+65. **A correction that enlarges the symptom has separated two causes.** Fixing
+    the ambient index moved a transmission from 1.00046 to 1.00769. Treat the
+    enlargement as information. Had it fallen to 0.998 the second defect would
+    have been closed over and the path declared working.
+
+66. **Count the emitted artifacts by the option each selected before trusting an
+    option.** One pass over sixteen payloads showed that the only runner
+    implementing the three-dimensional branch had never been executed, while
+    fourteen runs had emitted a warning recommending that branch.
+
+67. **Check a component solved alone against the assembly that contains it.** The
+    arithmetic joining them is the assembly's series-parallel topology, and
+    miscounting it turns a corroboration into a contradiction. A 1x2 splitter
+    puts two tapers in series and not three, the output branches being parallel.
+
+68. **Prefer the quantity graded by one simulation to the quantity graded by
+    two.** A flux monitor downstream of the source and another at the output
+    give a transmission that involves no reference run, and for a passive
+    structure it is at most one whatever any other simulation did. An
+    above-unity result can otherwise be blamed on the reference indefinitely.
+    The plane reduction returns 1.0000019 on it, which also calibrates the noise
+    of a flux ratio at about one part in a million.
+
+69. **A solver reuse key carries the runner as well as the job.** The runner is
+    an input to the result. Adding a simulation and six output fields to one
+    runner left the job unchanged, and the next run returned a cached result
+    carrying none of them, in seconds.
+
+70. **Measure a proposed systematic rather than arguing its size.** The claim
+    that a normalisation guide at the launch width attenuates more than a
+    widening structure is settled by one more straight guide at the output
+    width. That measurement gives 0.109 per cent against 0.015 over the same
+    span, so the mechanism is worth 0.093 per cent and no more.

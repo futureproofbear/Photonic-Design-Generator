@@ -6,14 +6,24 @@ from picchain, because it runs under a different interpreter from the rest of
 the chain (see ``picchain.fdtd.bridge`` for how it is invoked). Its contract is
 two file paths on the command line, one JSON job in and one JSON result out.
 
-Two runs are performed for every job, which is what makes the result a
-transmission rather than an arbitrary flux:
+Three runs are performed for every job. The first two are what make the result
+a transmission rather than an arbitrary flux; the third bounds the asymmetry
+between them:
 
 1. a normalisation run through a straight guide of the input width, giving the
    incident mode amplitude and the incident flux;
 2. the taper itself, giving the amplitude in the fundamental mode of the output
    guide, the amplitude reflected back into the input guide, and the total flux
-   crossing the output plane.
+   crossing the output plane;
+3. a straight guide of the *output* width, giving that guide's own attenuation
+   over the same span. The normalisation guide is held at the launch width and
+   the structure widens away from it, so the two differ in confinement over the
+   section downstream of the taper. The difference between the two straight
+   guides bounds what that asymmetry can contribute.
+
+Every run also reports a self-normalised transmission, being its own output flux
+over its own net input flux. That quotient involves no other simulation and is
+at most one for a passive structure.
 
 The difference between the transmitted *flux* and the transmitted *fundamental
 mode* is the quantity the eigenmode expansion could not reach: power that has
@@ -44,7 +54,7 @@ def taper_halfwidths(tip, full, length, profile, n):
     return 0.5 * (tip + (full - tip) * s)
 
 
-def build_geometry(job, straight_only: bool):
+def build_geometry(job, straight_only: bool, straight_width=None):
     """Polygon for the guide, from the input straight through to the output.
 
     Propagation is along x and the taper widens along y. ``straight_only``
@@ -54,18 +64,30 @@ def build_geometry(job, straight_only: bool):
     L_t, L_in, L_out = job["length_um"], job["in_length_um"], job["out_length_um"]
     n_stations = job["taper_stations"]
 
-    x0 = -(L_in + L_t / 2.0)
+    # The guide runs through the absorber and out of the cell. Until 2026-09-05
+    # it stopped at the inner face of the absorber, so the mode met an abrupt end
+    # of the ridge exactly where the absorber began, at both ends of the cell.
+    # That facet reflects, and it reflects by different amounts for guides of
+    # different width, so a structure normalised against a straight guide of
+    # another width inherited the difference. The two runs of one taper differed
+    # by 1.15 per cent in net flux at the input monitor, where the source and the
+    # input section were identical, and the quotient rose above unity. The slab
+    # was built with an infinite extent throughout and was never affected.
+    dpml = job["pml_um"]
+
+    x0 = -(L_in + L_t / 2.0) - dpml
+    x1 = L_t / 2.0 + L_out + dpml
     if straight_only:
-        total = L_in + L_t + L_out
-        top = [mp.Vector3(x0, tip / 2), mp.Vector3(x0 + total, tip / 2)]
-        bot = [mp.Vector3(x0 + total, -tip / 2), mp.Vector3(x0, -tip / 2)]
+        w = tip if straight_width is None else float(straight_width)
+        top = [mp.Vector3(x0, w / 2), mp.Vector3(x1, w / 2)]
+        bot = [mp.Vector3(x1, -w / 2), mp.Vector3(x0, -w / 2)]
         verts = top + bot
     else:
         hw = taper_halfwidths(tip, full, L_t, job["profile"], n_stations)
         xs = np.linspace(-L_t / 2.0, L_t / 2.0, n_stations)
         top = [mp.Vector3(x0, tip / 2)]
         top += [mp.Vector3(float(x), float(h)) for x, h in zip(xs, hw)]
-        top += [mp.Vector3(L_t / 2 + L_out, full / 2)]
+        top += [mp.Vector3(x1, full / 2)]
         bot = [mp.Vector3(v.x, -v.y) for v in reversed(top)]
         verts = top + bot
 
@@ -91,7 +113,7 @@ def build_geometry(job, straight_only: bool):
     return [slab, ridge]
 
 
-def simulate(job, straight_only: bool):
+def simulate(job, straight_only: bool, straight_width=None):
     fcen = 1.0 / job["wavelength_um"]
     df = 0.1 * fcen
     dpml = job["pml_um"]
@@ -113,8 +135,15 @@ def simulate(job, straight_only: bool):
         cell_size=cell,
         resolution=job["resolution"],
         boundary_layers=[mp.PML(dpml)],
-        geometry=build_geometry(job, straight_only),
-        default_material=mp.Medium(index=job["n_clad"]),
+        geometry=build_geometry(job, straight_only, straight_width),
+        # `n_clad` is the effective index of the unetched film beside the ridge,
+        # which is the surround of the plane reduction. In three dimensions the
+        # slab is built explicitly, so that index would place the slab twice and
+        # the ambient would be a medium of 1.55 that exists nowhere in the
+        # device. The surround there is the cladding and the buried oxide.
+        default_material=mp.Medium(
+            index=job["n_clad"] if dims == 2 else job["n_ambient"]
+        ),
         sources=[
             mp.EigenModeSource(
                 src=mp.GaussianSource(fcen, fwidth=df),
@@ -156,6 +185,14 @@ def main() -> int:
     norm = simulate(job, straight_only=True)
     tap = simulate(job, straight_only=False)
 
+    # A third simulation, of a straight guide at the *output* width. The
+    # normalisation guide is held at the launch width, which is the least
+    # confined cross-section in the problem, while the structure widens away
+    # from it. That asymmetry was proposed as the cause of a transmission above
+    # unity and could not be bounded without measuring the wide guide's own
+    # attenuation over the same span. It is measured here rather than assumed.
+    wide = simulate(job, straight_only=True, straight_width=job["full_width_um"])
+
     p_in = abs(norm["forward_amplitude"]) ** 2
     if p_in <= 0.0:
         raise RuntimeError(
@@ -167,10 +204,43 @@ def main() -> int:
     r_mode = abs(tap["backward_amplitude"]) ** 2 / p_in
     t_flux = tap["transmitted_flux"] / norm["transmitted_flux"]
 
+    # Self-normalised transmission: each run graded by its own two monitors and
+    # by nothing else. `reference_flux` is the net flux just downstream of the
+    # source, so incident less reflected, and `transmitted_flux` is the net flux
+    # at the output plane. For a passive structure the quotient is at most one,
+    # whatever any other run did. The reference simulation does not enter it, so
+    # a value above unity cannot be attributed to the normalisation guide and
+    # localises the defect to the run that produced it.
+    def self_normalised(run):
+        denom = run["reference_flux"]
+        return run["transmitted_flux"] / denom if abs(denom) > 1e-30 else float("nan")
+
     result = {
         "ok": True,
         "dimensions": job["dimensions"],
         "resolution": job["resolution"],
+        # the three self-normalised budgets, in the order the simulations ran
+        "self_normalised_taper": self_normalised(tap),
+        "self_normalised_narrow_guide": self_normalised(norm),
+        "self_normalised_wide_guide": self_normalised(wide),
+        # what the straight guides lose over the span between the two monitors
+        # the raw fluxes and amplitudes of all three simulations, so that a
+        # budget can be reconstructed by a reader without solving anything
+        "raw": {
+            name: {
+                "transmitted_flux": run["transmitted_flux"],
+                "reference_flux": run["reference_flux"],
+                "forward_amplitude_sq": abs(run["forward_amplitude"]) ** 2,
+                "backward_amplitude_sq": abs(run["backward_amplitude"]) ** 2,
+            }
+            for name, run in (("taper", tap), ("narrow_guide", norm), ("wide_guide", wide))
+        },
+        "narrow_guide_loss": 1.0 - self_normalised(norm),
+        "wide_guide_loss": 1.0 - self_normalised(wide),
+        # the quantity the reference asymmetry can contribute, being the excess
+        # attenuation of the launch width over the output width
+        "reference_asymmetry": self_normalised(wide) - self_normalised(norm),
+        "full_width_um": float(job["full_width_um"]),
         "transmission_fundamental": t_mode,
         "transmission_total_flux": t_flux,
         "reflection_fundamental": r_mode,

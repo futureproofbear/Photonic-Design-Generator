@@ -62,6 +62,40 @@ def _effective_indices(design: Design, lib: MaterialLibrary) -> tuple[float, flo
     return float(core[0]), float(clad[0])
 
 
+#: Which runners build a three-dimensional cell. `meep_taper.py` reads the layer
+#: stack and extrudes it; the coupler, the grating and the multimode splitter
+#: build their shapes with `mp.inf` in the third axis and are two-dimensional by
+#: construction, the background being an effective index.
+STRUCTURES_WITH_A_3D_RUNNER = frozenset({"taper"})
+
+
+def _refuse_a_dimension_the_runner_does_not_build(cfg) -> None:
+    """Raise where a structure is asked for three dimensions it cannot build.
+
+    Until 2026-09-05 `fdtd.dimensions` was recorded in the payload of every
+    structure and passed to the runner of one. A multimode-splitter run
+    declaring three dimensions therefore emitted a payload stamped
+    `dimensions: 3` carrying a two-dimensional result, and because the job
+    dictionary never carried the field either, the cache matched the
+    two-dimensional job and reused it. The transmission agreed to six decimals
+    with the run it was supposed to differ from, which is how it was found.
+
+    A result that misreports what produced it is worse than no result.
+    """
+    if int(cfg.dimensions) == 2:
+        return
+    if str(cfg.structure) in STRUCTURES_WITH_A_3D_RUNNER:
+        return
+    raise ValueError(
+        f"fdtd.dimensions is {cfg.dimensions} and fdtd.structure is "
+        f"{cfg.structure!r}, whose runner builds a two-dimensional cell only. "
+        f"Three dimensions are built for: "
+        f"{', '.join(sorted(STRUCTURES_WITH_A_3D_RUNNER))}. Set "
+        f"fdtd.dimensions: 2, or use a structure that carries a "
+        f"three-dimensional runner"
+    )
+
+
 def _kappa_in_two_dimensions(design: Design, n_core: float, n_clad: float,
                              period_um: float) -> dict[str, float]:
     """The chain's own kappa, recomputed for the two-dimensional structure.
@@ -118,6 +152,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         ctx.put("fdtd", {"enabled": False})
         return {"enabled": False}
 
+    _refuse_a_dimension_the_runner_does_not_build(cfg)
+
     backend = bridge.default_backend(processes=cfg.processes)
     backend.distro, backend.env = cfg.wsl_distro, cfg.environment
     status = bridge.probe(backend)
@@ -147,6 +183,14 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "n_clad": n_clad,
         "n_film": float(np.sqrt(lib[p.film_material].eps_optical_device(
             design.waveguide.wavelength_um, p.cut, p.use_index_override)[0])),
+        # the surround of the three-dimensional cell: the cladding above and the
+        # buried oxide below, whichever is the higher index. `n_clad` above is
+        # the effective index of the unetched film and belongs to the plane
+        # reduction alone.
+        "n_ambient": float(np.sqrt(max(
+            lib[p.clad_material].eps_optical_device(design.waveguide.wavelength_um)[0],
+            lib[p.box_material].eps_optical_device(design.waveguide.wavelength_um)[0],
+        ))),
         "tip_width_um": float(tip),
         "full_width_um": float(design.waveguide.top_width_um),
         "length_um": float(length),
@@ -173,6 +217,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "processes": cfg.processes,
         "n_core_effective_index": n_core,
         "n_clad_effective_index": n_clad,
+        "structure": cfg.structure,
         "tip_width_um": float(tip),
         "length_um": float(length),
         "profile": t.profile,
@@ -189,6 +234,18 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     ctx.write_stage("fdtd", payload)
 
     norm = result.get("normalisation_check", 1.0)
+    _warn_if_power_exceeds_unity(ctx, {
+        "transmission_fundamental": result.get("transmission_fundamental"),
+        "transmission_total_flux": result.get("transmission_total_flux"),
+        # graded by its own two monitors, so no other simulation enters it
+        "self_normalised_taper": result.get("self_normalised_taper"),
+        "self_normalised_narrow_guide": result.get("self_normalised_narrow_guide"),
+        "self_normalised_wide_guide": result.get("self_normalised_wide_guide"),
+    })
+    _report_what_the_reference_asymmetry_can_explain(ctx, result)
+    _warn_if_the_reference_is_not_finer_than_the_measurand(
+        ctx, norm, result.get("transmission_fundamental", 1.0)
+    )
     if abs(norm - 1.0) > 0.02:
         ctx.warn(
             f"the FDTD normalisation run transmits {norm:.3f} of its own input; the "
@@ -208,6 +265,104 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             "fdtd.dimensions: 3"
         )
     return payload
+
+
+#: Tolerance on a bound belonging to physics. A flux ratio formed from two DFT
+#: monitors carries numerical noise of order one part in a million, and the
+#: plane reduction's self-normalised budget reads 1.0000019 on a sound solve.
+#: One part in ten thousand is far above that noise and far below the 0.8 per
+#: cent excess this guard exists to catch.
+PASSIVITY_TOLERANCE = 1.0e-4
+
+
+def _warn_if_power_exceeds_unity(ctx, quantities: dict[str, float]) -> None:
+    """Report any transmitted or reflected fraction above one.
+
+    A passive structure returns at most the power it is given. The first
+    three-dimensional taper solve returned a fundamental-mode transmission of
+    1.00378 and a total flux of 1.00522, and nothing in the stage remarked on
+    it. The excess is the size of the quantity such a run exists to measure, so
+    a result above unity is reported rather than rounded down.
+    """
+    for name, value in quantities.items():
+        if value is None:
+            continue
+        if float(value) > 1.0 + PASSIVITY_TOLERANCE:
+            ctx.warn(
+                f"the FDTD solve returns {name} of {float(value):.5f}, which exceeds "
+                "unity for a passive structure by "
+                f"{(float(value) - 1.0) * 100.0:.3f} per cent. No figure of this run "
+                "is to be quoted. Candidate causes, to be separated by measurement "
+                "rather than assumed: a normalisation guide less confined than the "
+                "structure, which attenuates over its own length and makes the "
+                "denominator too small; a monitor too small to contain the mode it "
+                "grades; an ambient index that does not belong to the cell as built. "
+                "Compare the excess against normalisation_check, and where the excess "
+                "is the larger the reference is not the cause"
+            )
+
+
+def _report_what_the_reference_asymmetry_can_explain(ctx, result: dict) -> None:
+    """State how much of an above-unity transmission the reference can account for.
+
+    The normalisation guide is held at the launch width while a widening taper
+    is better confined downstream, so the reference attenuates more than the
+    structure and the quotient rises. That mechanism was proposed as the cause
+    of a transmission of 1.008 and was never bounded. The third simulation
+    measures the output width's own attenuation over the same span, and the
+    difference between the two straight guides is the whole of what the
+    asymmetry can contribute.
+    """
+    excess = float(result.get("transmission_fundamental", 1.0)) - 1.0
+    if excess <= 1e-9:
+        return
+    asymmetry = result.get("reference_asymmetry")
+    if asymmetry is None:
+        return
+    asymmetry = float(asymmetry)
+    share = asymmetry / excess if excess > 0 else 0.0
+    if share >= 0.5:
+        ctx.warn(
+            f"the transmission exceeds unity by {excess:.3%} and the two straight "
+            f"guides differ in their own attenuation by {asymmetry:.3%}, which "
+            "accounts for most of it. The reference is the cause: normalise "
+            "against a guide of the output width, or move the output monitor to "
+            "sit closer behind the taper"
+        )
+    else:
+        ctx.warn(
+            f"the transmission exceeds unity by {excess:.3%} while the two straight "
+            f"guides differ in their own attenuation by only {asymmetry:.3%}. The "
+            "reference accounts for at most that much, so the remaining "
+            f"{excess - asymmetry:.3%} has another cause and the figure is not to be "
+            "quoted. Read self_normalised_taper, which is graded by the taper run's "
+            "own monitors and involves no other simulation"
+        )
+
+
+def _warn_if_the_reference_is_not_finer_than_the_measurand(
+    ctx, normalisation_check: float, transmission: float
+) -> None:
+    """Report where the reference guide's own loss rivals the loss being reported.
+
+    The tolerance on the normalisation run was two per cent, and a taper whose
+    loss is a few tenths of a per cent was graded against it. A guard whose
+    tolerance exceeds the measurand admits every result it exists to reject, so
+    the two are compared to each other.
+    """
+    reference_loss = abs(1.0 - float(normalisation_check))
+    measured_loss = abs(1.0 - float(transmission))
+    if reference_loss <= 1e-12:
+        return
+    if measured_loss <= 3.0 * reference_loss:
+        ctx.warn(
+            f"the normalisation guide loses {reference_loss:.3%} over its own length "
+            f"while the structure is reported to lose {measured_loss:.3%}. The "
+            "reference is not finer than the quantity it grades, so the transmission "
+            "is unresolved by this cell. Widen fdtd.cell_width_um and "
+            "fdtd.cell_height_um, or raise fdtd.resolution, until the normalisation "
+            "run transmits its own input to well inside the loss expected"
+        )
 
 
 def _run_mmi(design, ctx, cfg, backend, status, n_core, n_clad):
@@ -254,6 +409,7 @@ def _run_mmi(design, ctx, cfg, backend, status, n_core, n_clad):
             if cfg.convergence_resolution is not None
             else max(8, cfg.resolution // 2)
         ),
+        "dimensions": cfg.dimensions,
     }
     result = bridge.run_mmi(job, ctx.run_dir, backend, timeout_s=cfg.timeout_s)
     guard = result.get("guard") or {}
@@ -286,6 +442,9 @@ def _run_mmi(design, ctx, cfg, backend, status, n_core, n_clad):
             "resolved": (abs(guard["shift_fraction"]) < 0.05) if guard else False,
         },
     }
+    _warn_if_power_exceeds_unity(ctx, {
+        "transmission": result["transmission_at_design"],
+    })
     ctx.put("fdtd", payload)
     ctx.write_stage("fdtd", payload)
 
@@ -367,6 +526,7 @@ def _run_coupler(design, ctx, cfg, backend, status, n_core, n_clad):
             if cfg.convergence_resolution is not None
             else max(8, cfg.resolution // 2)
         ),
+        "dimensions": cfg.dimensions,
     }
     result = bridge.run_coupler(job, ctx.run_dir, backend, timeout_s=cfg.timeout_s)
 
@@ -472,6 +632,7 @@ def _run_grating(design, ctx, cfg, backend, status, n_core, n_clad):
         "cell_width_um": cfg.cell_width_um,
         "n_frequencies": cfg.n_frequencies,
         "fractional_bandwidth": cfg.fractional_bandwidth,
+        "dimensions": cfg.dimensions,
     }
     result = bridge.run_grating(job, ctx.run_dir, backend, timeout_s=cfg.timeout_s)
     chain = _kappa_in_two_dimensions(design, n_core, n_clad, period)
@@ -540,6 +701,7 @@ def _run_bands(design, ctx, cfg, backend, status, n_core, n_clad):
         "order": g.order,
         "n_eff_guess": chain["chain_2d_n_eff"],
         "n_g": float(mode.get("n_g") or chain["chain_2d_n_eff"]),
+        "dimensions": cfg.dimensions,
     }
     result = bridge.run_bandstructure(job, ctx.run_dir, backend, timeout_s=cfg.timeout_s)
     if not result.get("ok"):
