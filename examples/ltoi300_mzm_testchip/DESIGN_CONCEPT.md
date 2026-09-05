@@ -11,14 +11,32 @@ The half-wave voltage of a push-pull interferometer on an X-cut Pockels film is
     Vpi . L  =  lambda . g  /  ( 2 . n_eff^3 . r33 . Gamma )
 
 Every term on the right but the last is known to better than a per cent. The
-wavelength is chosen, the gap is drawn, the effective index is solved by the
-chain's mode stage, and r33 is a material constant the foundry manual states.
+wavelength is chosen, the gap is drawn, the effective index is solved by two
+independent solvers that agree, and r33 is a material constant the foundry
+manual states.
 
-**No second solver was run on this cross-section.** The design's stage list
-carries neither `fem` nor `fdtd`, so the agreement between two independent
-solvers that an earlier revision of this sentence claimed is a check that was
-not exercised here. It has been made on a silicon cross-section elsewhere in
-this repository and not on this one. **Gamma, the overlap between the applied electric field and the
+**The second solver was run on 2026-09-05 and it narrows the experiment.** The
+finite-element stage solves the same cross-section full-vectorially on a
+conforming triangulation, and it returns:
+
+| | |
+| --- | ---: |
+| `n_eff`, finite difference | 1.7713563 |
+| `n_eff`, finite element | 1.7712140 |
+| Relative disagreement | **8.0e-5** |
+| Polarisation purity | **0.99961** |
+| Film confinement, the two solvers | 0.65218, 0.65206 |
+| Mesh convergence | resolved, shift 9e-6 |
+| Anisotropy bracket, weighted | 2e-6 |
+
+**Every term of the expression above but the last two is now confirmed by an
+independent route.** The mode is 99.96 per cent transverse-electric, so the
+semi-vectorial approximation the overlap is computed under is sound on this
+cross-section, and the two solvers agree on the effective index to the fourth
+decimal. The 31 per cent disagreement therefore does not live in the optical
+mode. It lives in the overlap integral, in the electrostatic solve that feeds
+it, or in the kit's own model, and the ladder is built to separate the first of
+those from r33. **Gamma, the overlap between the applied electric field and the
 optical mode, is the only free term, and the two available models of it differ
 by 38 per cent.**
 

@@ -65,8 +65,9 @@ layer biases and the film thickness. All fourteen corners pass.
 | Drawn dimensions: gap ±200 nm, arm ±50 nm | **8.5 %** in `eo.VpiL_V_cm`, 7.035 to 7.663 | the gap |
 | Layer biases and film: WG ±50 nm, METAL ±200 nm, film ±10 nm | 7.0 %, 7.092 to 7.605 | the film |
 
-**The disagreement is 31.2 per cent, which is 3.7 times the wider of the two
-windows.** It cannot be a process effect, and that is the result that makes the
+**The disagreement is 31.2 per cent as the run reports it, and 20.6 per cent
+once the electrostatic mesh is extrapolated, which is 2.4 times the wider of the
+two windows.** It cannot be a process effect, and that is the result that makes the
 chip worth fabricating. An earlier revision of this document called the 7.0 per
 cent figure "the entire process window" and did not mention the first sweep,
 which was wrong on both counts: the drawn-dimension sweep is wider, and it
@@ -209,6 +210,85 @@ Eight of the deck's twelve layers carry no polygon on this mask because
 [mask study](../ltoi300_mask/REPORT.md) records. **Renumbering the layer map is
 the remedy for both categories and it is not done here**, so the deck's verdict
 covers four layers of twelve and the release gate blocks on it.
+
+## The S-bends, which turn out not to matter
+
+The device draws two S-bends per arm: the splitter to the electrode gap, moving
+9.35 um over 220, and the electrode to the probe pad, moving 17.17 um over the
+same. A cosine S-bend of lateral offset d over length L carries a minimum radius
+of 2L²/(dπ²), so those are 1050 um and 570 um. Radiation from either goes into
+the interferometer as loss, and any asymmetry between the arms goes in as
+imbalance. Neither had been checked.
+
+| Radius | `n_eff` | Δ from straight | Outward shift | Caustic |
+| ---: | ---: | ---: | ---: | --- |
+| 1050 um, the splitter bend | 1.771378 | 2.1e-5 | 0.021 um | at 139.5 um, outside the window |
+| 570 um, the pad bend | 1.771429 | 7.2e-5 | 0.038 um | at 75.8 um |
+| 350 um | 1.771548 | 1.9e-4 | 0.062 um | at 46.5 um |
+| 200 um | 1.771943 | 5.9e-4 | 0.107 um | at 26.6 um |
+| 100 um | 1.773673 | 2.3e-3 | 0.209 um | at 13.4 um |
+
+**Both drawn bends are far from the radiation limit and the item closes as a
+negative.** The caustic does not enter the solve window at any radius down to
+100 um, an order of magnitude tighter than either bend draws, and at the drawn
+radii the mode centroid moves 21 and 38 nanometres. The straight mode index is
+1.771356 against a slab floor of 1.550957, so the guide is strongly bound and
+this is the expected result rather than a surprising one.
+
+**Imbalance from the bends is zero by symmetry** and this measurement does not
+establish that: the two arms are mirror images, so whatever the bends cost is
+common to both, and the imbalance a fabricated device carries comes from width
+and etch asymmetry that no figure here represents.
+
+## The mesh carries a third of the disagreement
+
+The electro-optic stage raises a finding on every run of this design: halving the
+cell moves the overlap by 3.0 per cent against a 2.0 per cent tolerance. The
+design acknowledges it and the concept calls it the reason the chip exists. It
+was never quantified here, and it should have been, because a third of the
+headline number is in it.
+
+Five cells, the convergence check switched off so that each is one solve:
+
+| Cell | Overlap | Vπ·L, one arm | Capacitance |
+| ---: | ---: | ---: | ---: |
+| 50.0 nm | 0.371775 | 7.66895 | 1.66717 |
+| 35.0 nm | 0.381668 | 7.47016 | 1.68885 |
+| **25.0 nm**, as published | **0.388001** | **7.34825** | 1.69750 |
+| 17.5 nm | 0.394466 | 7.22781 | 1.69723 |
+| 12.5 nm | 0.399539 | 7.13604 | 1.69442 |
+
+**The capacitance is converged and the overlap is not.** Over the last three
+cells the capacitance moves 0.18 per cent, so every line parameter that follows
+from it — the microwave index, the impedance, the bandwidth, the far-end penalty
+— is sound. The overlap rises monotonically and has not stopped.
+
+Fitting `Gamma(h) = Gamma_inf − C h^p` over all five points gives p = 0.570 and
+Gamma_inf = 0.4222, with a residual under 5e-4. The sub-linear exponent is the
+signature the design file names: the ridge sidewall is sloped and the
+permittivity steps across it by a factor of eleven, so the staircased boundary
+converges as roughly the square root of the cell.
+
+| Vπ·L, one arm | Value | Against the kit's 5.600 |
+| --- | ---: | ---: |
+| As published, at a 25 nm cell | 7.3483 | +31.2 % |
+| At a 12.5 nm cell | 7.1360 | +27.4 % |
+| **Extrapolated to a converged mesh** | **6.7530** | **+20.6 %** |
+
+**A third of the disagreement was the mesh.** That is a correction to this
+document, which quoted 31.2 per cent throughout and attributed all of it to the
+overlap model.
+
+**The chip is still justified and its margin is thinner.** The remaining 20.6 per
+cent is 2.4 times the wider of the two corner windows, so the process is still
+eliminated, but the factor is 2.4 and not the 4.5 an earlier revision claimed.
+The extrapolation is itself an extrapolation, resting on a two-parameter fit to
+five points of a quantity that has not converged, so it is a correction to be
+measured rather than a figure to design against — which is what the chip is for.
+
+**The mesh was not changed.** Running at 12.5 nm costs four times the solve for a
+figure that is still 27 per cent from the kit, and the extrapolation is carried
+beside the run's own number rather than replacing it.
 
 ## Every finding the run emitted, and where each went
 

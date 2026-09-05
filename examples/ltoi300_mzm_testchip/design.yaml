@@ -91,6 +91,24 @@ electrodes:
   refinement: 0.5
   rf_mesh_fine_um: 0.025
 
+bend:
+  # The two S-bends this device draws, and smaller radii to find where the
+  # caustic begins. A cosine S-bend of lateral offset d over length L carries a
+  # minimum radius of 2L^2/(d pi^2): the splitter-to-electrode bend moves
+  # 9.35 um over 220 and implies 1050 um, and the electrode-to-pad bend moves
+  # 17.17 um over 220 and implies 570. Radiation from either goes straight into
+  # the interferometer as loss and as imbalance, and neither had been checked.
+  enabled: true
+  radii_um: [100.0, 200.0, 350.0, 570.0, 1050.0]
+
+fem:
+  # The guard on the semi-vectorial assumption. The whole purpose of this chip
+  # is the electro-optic overlap, the overlap is computed on a mode this chain
+  # solves semi-vectorially, and `fem.polarisation_purity` is the quantity that
+  # bounds the error of that assumption on this cross-section. It had not been
+  # read on any LTOI300 cross-section before 2026-09-05.
+  enabled: true
+
 modulator:
   enabled: true
   configuration: mach_zehnder
@@ -355,4 +373,4 @@ release:
   # before the verdict is read would decide the answer in advance.
   waive: []
 
-stages: [mode, eo, modulator, layout, reticle, drc, mask, verify, release]
+stages: [mode, fem, bend, eo, modulator, layout, reticle, drc, mask, verify, release]

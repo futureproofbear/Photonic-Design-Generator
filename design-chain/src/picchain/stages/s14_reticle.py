@@ -483,7 +483,14 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     comp_top = dev_dy + dev_box.bottom
     for k, (cell, desc) in enumerate(zip(comp_cells, comp_desc)):
         box = cell.dbbox()
-        dy = comp_top - k * comp_pitch - 40.0 - box.top
+        # The gap to the device above is the one the pitch implies, and it is
+        # derived rather than written as a constant. A literal 40 um sat here
+        # while the pitch carried 60, so the first companion landed 20 um closer
+        # to the primary device than every other pair on the die: 324.4 um where
+        # the rest read 344.4. The two devices whose independence is the design's
+        # premise were the tightest-spaced pair on it, and the ladder loop below
+        # carried the same constant since it was written.
+        dy = comp_top - k * comp_pitch - (comp_pitch - box.height()) - box.top
         dx = (facet_x - box.left) if cfg.align_facet_to_edge else -box.left
         die.insert(db.DCellInstArray(
             cell.cell_index(), db.DTrans(db.DVector(dx, dy))))
@@ -503,7 +510,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     split_top = comp_top - comp_h
     for k, (cell, desc) in enumerate(zip(split_cells, split_desc)):
         box = cell.dbbox()
-        dy = split_top - k * split_pitch - 40.0 - box.top
+        dy = split_top - k * split_pitch - (split_pitch - box.height()) - box.top
         # A ladder copy exists to be measured, so it needs light coupled into
         # it, so its facet must reach the polish line exactly as the primary
         # device's does. Left at its own origin the copy sat a few hundred
