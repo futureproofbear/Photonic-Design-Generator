@@ -154,30 +154,73 @@ other and none is settled**, and an earlier version of this section claimed the
 first two agreed within a quarter, which was an artifact of anchoring on the
 superseded baseline.
 
-## What is assumed in the transfer
+## The transfer assumption is removed: the E-DBR grating was measured directly
 
-The measurement is on lithium tantalate and the extended-DBR is lithium niobate.
-Carrying sigma across assumes the mechanism is common. The proposed mechanism,
-an overstatement of the third-order Fourier amplitude for a perturbation carried
-by posts beside the guide rather than by a corrugation of it, is a property of
-the geometry and the order rather than of the film, and the two gratings share
-both. It remains an assumption and is recorded as one.
+Run `20260906-101437-edbr_tfln_grating_fdtd`, 450 periods of the candidate's own
+grating at resolution 30 with the guard at 20.
 
-**No direct measurement of the lithium-niobate grating exists.** Its own
-time-domain solve moved 86 per cent with mesh and is unresolved, and no
-band-structure payload exists in the run tree on either platform. A solve of it
-at the settings that resolved this one is the measurement that would remove the
-assumption, and it is running.
+| | LTOI, this study | E-DBR candidate, measured directly |
+|---|---|---|
+| kappa, time domain | 1.299 /cm | 0.861 /cm |
+| kappa, coupled mode in the plane | 2.459 /cm | 1.323 /cm |
+| ratio | 0.528 | 0.651 |
+| mesh shift | 5.6 % between 20 and 30 | 5.5 % between 20 and 30 |
+| **sigma implied** | **67.3 nm** | **64.0 nm** |
 
-Until it returns, the defensible statement is narrower than a value. **The
-analytic coupling is overstated on the one grating where it has been checked,
-by about a factor of two, and the design of record is tuned against the analytic
-coupling.** Whether the candidate's mirror is adequate therefore rests on a
-transfer that has not been tested, and the reflectivity row is the one that
-turns on it.
+**Two time-domain measurements, on two films, at two periods, with two post
+gaps, give sigma within five per cent of each other.** Nothing was transferred
+between them. The earlier version of this report carried the cross-platform
+transfer as its principal assumption; it is now a corroboration instead.
 
-The candidate's coupling as designed is 1.476 /cm. The measured correction would
-put it at 0.92 and its reflectivity below target. Sizing the mirror so that it
-meets the target under both values, which needs about 17 mm rather than 11,
-costs area and buys immunity to the question, and is the decision this
-measurement puts in front of the design.
+The same grating at resolution 20 with the guard at 10 had moved 86 per cent and
+was unresolved. Raising the primary mesh to 30 and lengthening the section from
+300 to 450 periods resolved it. **The earlier run was not evidence that the
+structure could not be measured; it was evidence that it had not been.**
+
+The signal is poorer here than on LTOI. The reflectivity of 0.00254 sits on an
+unaccounted background of 3.3 per cent, against 0.42 per cent on 1.6 for LTOI,
+so the ratio of background to signal is thirteen to one rather than four. The
+35 per cent departure is seven times its own mesh shift and stands, and it is
+the less well conditioned of the two measurements.
+
+## What it costs the design, and what fixes it
+
+At the sigma measured on its own grating the candidate's coupling falls from
+1.476 to 0.961 /cm and its mirror reflectivity from 0.832 to 0.593, which fails
+the floor of its target by one per cent of the value. Everything else it is
+graded on continues to pass.
+
+The remedy is length, and the chain gives it directly:
+
+| mirror | kappa times length | peak reflectivity | acceptance | stopband /GHz |
+|---|---|---|---|---|
+| 11.0 mm, as drawn | 1.057 | 0.593 | **unmet** | 7.42 |
+| 12.0 mm | 1.153 | 0.645 | met | 7.10 |
+| **13.5 mm** | 1.297 | **0.711** | met | **6.72** |
+| 15.0 mm | 1.441 | 0.766 | met | 6.43 |
+
+**Lengthening the mirror from 11 to about 13.5 mm restores the reflectivity and
+improves the agreement with the published device at the same time.** At that
+length the stopband is 6.72 GHz against the 6.5 GHz the paper simulates, where
+the design as drawn gives 9.48. The two constraints that pulled in opposite
+directions at fixed length are satisfied together once length is the free
+variable, which is the resolution of the tension the earlier version of this
+report recorded and could not settle.
+
+The cost is 23 per cent more mirror. The mode-hop-free range, the side-mode
+suppression and the chirp linearity all improve slightly across that range, so
+nothing is traded away for it.
+
+## The design value
+
+**kappa = 0.96 /cm for the E-DBR candidate**, from a direct time-domain
+measurement of its own grating, against the 1.476 the coupled-mode route gives.
+Equivalently, `grating.profile_sigma_um: 0.064`.
+
+**kappa = 1.30 /cm for the LTOI mirror as drawn**, against the coupled-mode
+2.459 in the plane, or `profile_sigma_um: 0.067`.
+
+Both rest on two-dimensional reductions on both sides of the comparison, so they
+say the two routes disagree on the same reduced structure and do not say that
+either matches the drawn device. No three-dimensional solve, no apodisation and
+no fabrication tolerance enters either figure.

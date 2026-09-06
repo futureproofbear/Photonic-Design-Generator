@@ -3047,12 +3047,17 @@ the tuning lever with it, so the tuning coefficient improves by 28 per cent, the
 mode-hop-free range by 35 and the chirp nonlinearity by 27. A design tuned
 against an overstated kappa is tuned against the wrong trade.
 
-The transfer between the two platforms is an assumption and is recorded as one.
-The mechanism proposed, an overstatement of the third-order Fourier amplitude
-for a laterally posted perturbation, is common to both, and the two gratings
-share their order and their post geometry. No direct measurement of the
-lithium-niobate grating exists: its own time-domain solve moved 86 per cent with
-mesh and is unresolved.
+The transfer between platforms was an assumption for four hours and is now a
+corroboration. The lithium-niobate grating was re-solved at the settings that
+resolved the tantalate one, resolution 30 with the guard at 20 and 450 periods
+rather than 300 at 20 with the guard at 10, and returned sigma = 64.0 nm against
+the tantalate's 67.3. Two films, two periods, two post gaps, five per cent
+apart, nothing carried between them.
+
+**The earlier unresolved run was not evidence that the structure could not be
+measured. It was evidence that it had not been.** A mesh shift of 86 per cent
+says the settings are wrong, and the settings that worked elsewhere were the
+first thing to try.
 
 ### T089 — A study was propagated through a superseded baseline for an hour before anyone asked which file was the design
 
@@ -3078,3 +3083,22 @@ conclusion published in a report.
 **Where two designs sit on opposite sides of a target, a correction improves one
 and breaks the other.** Reporting the direction of a correction without naming
 the design it was applied to carries no information at all.
+
+### L044 — Two constraints that fight at fixed geometry agree once the right variable is freed
+
+A published device is quoted at a mirror reflectivity of about 75 per cent and a
+stopband of 6.5 GHz. On the drawn 11 mm mirror those two select different values
+of the profile smoothing, 45 nm and above 67, and no single value satisfies
+both. That was recorded as evidence that the smoothing was absorbing more than
+one effect.
+
+It was evidence that the wrong variable was being varied. With the smoothing
+fixed at the measured 64 nm and the mirror length free, both constraints are met
+at 13.5 mm: reflectivity 0.711 inside a target of 0.75 plus or minus a fifth,
+and stopband 6.72 GHz against the 6.5 quoted. **A contradiction between two
+requirements is a statement about the parameter held fixed, and the first
+question is whether it should have been.**
+
+The design consequence is 23 per cent more mirror, and nothing is traded for it:
+the mode-hop-free range, the side-mode suppression and the chirp linearity all
+improve slightly over the same range.
