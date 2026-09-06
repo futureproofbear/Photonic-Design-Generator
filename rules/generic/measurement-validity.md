@@ -117,6 +117,26 @@ first stage, the captured status belonging to the pipe's last element. Use
 `PIPESTATUS` or `set -o pipefail` wherever an exit code is the branch
 condition.
 
+## Which artifact is the design
+
+**A directory holding more than one design file states which is the design, in
+the first line of every other one.** A superseded baseline is retained because
+reports cite it, and nothing about the file itself distinguishes it from the one
+that supersedes it. A correction was propagated through such a baseline and
+reported as moving two acceptance rows from unmet to met; on the design of
+record it moves one the other way, the two sitting on opposite sides of the
+target.
+
+**A figure in a report that disagrees with the file you are running is an
+orientation signal before it is a discrepancy.** One report quoted a coupling
+constant of 1.28 and 1.48 per centimetre throughout while the file being run
+returned 3.90. That factor of three was visible for an hour and was read as a
+property of the physics rather than as evidence that the wrong file was open.
+
+**Name the design beside the figure, always**, and say which of the files in the
+directory it came from. A conclusion about a direction of change carries no
+information without it.
+
 ## The questions to ask before quoting a number
 
 * **Could this have come out differently?** Where the answer is no under any

@@ -34,7 +34,7 @@ grating:
   points: 6001
 meta:
   name: edbr_tfln_grating_fdtd
-  title: The E-DBR grating, measured in the time domain
+  title: The E-DBR grating in the time domain, at the settings that resolved LTOI
   status: scaffold
 electrodes:
   enabled: false
@@ -48,32 +48,32 @@ fdtd:
   enabled: true
   structure: grating
   dimensions: 2
-  resolution: 20
-  grating_periods: 300
+  resolution: 30
+  grating_periods: 450
   pml_um: 2.0
-  cell_width_um: 12.0
+  cell_width_um: 10.0
   in_length_um: 6.0
   out_length_um: 6.0
+  convergence_resolution: 20
 warnings:
   acknowledged:
-    - key: fdtd.time_domain_kappa_moves
-      reason: >
-        Accepted as the finding of this design rather than a defect in it. The
-        purpose of the run is the first execution of the finite-grating
-        time-domain runner, which no design had ever selected. The coupling
-        constant moves by 86 per cent between resolution 10 and 20, so the route
-        does not resolve this grating at a mesh this host can afford. The
-        perturbation is an index step of 3.7e-4 from posts 0.3 um wide, which is
-        six cells at resolution 20. The design of record for this device takes
-        the band-structure route for that reason, and this run measures the
-        reason rather than asserting it.
-    - key: grating.uniform_unapodised_grating_expect
-      reason: >
-        The grating is uniform by construction, being the one the E-DBR
-        baseline draws. Sidelobes are expected and are graded in that design,
-        not here. This design exists to exercise the runner and carries no
-        acceptance target.
+  - key: fdtd.time_domain_kappa_moves
+    reason: 'Accepted as the finding of this design rather than a defect in it. The
+      purpose of the run is the first execution of the finite-grating time-domain
+      runner, which no design had ever selected. The coupling constant moves by 86
+      per cent between resolution 10 and 20, so the route does not resolve this grating
+      at a mesh this host can afford. The perturbation is an index step of 3.7e-4
+      from posts 0.3 um wide, which is six cells at resolution 20. The design of record
+      for this device takes the band-structure route for that reason, and this run
+      measures the reason rather than asserting it.
 
+      '
+  - key: grating.uniform_unapodised_grating_expect
+    reason: 'The grating is uniform by construction, being the one the E-DBR baseline
+      draws. Sidelobes are expected and are graded in that design, not here. This
+      design exists to exercise the runner and carries no acceptance target.
+
+      '
 stages:
 - mode
 - grating

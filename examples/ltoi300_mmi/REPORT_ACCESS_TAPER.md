@@ -74,14 +74,22 @@ The figures are quoted here, and the reason is stated rather than assumed. The
 quantity the run exists to measure is a loss of 5.25e-3, forty times the
 residual, so the measurement is resolved despite it.
 
-**The residual is a discretisation artifact.** The resolution ladder below reads
-+129, −313, −483, −580 and −626 parts per million at resolutions 20, 30, 40, 60
-and 80. It crosses unity between resolution 20 and 30 and falls monotonically
-thereafter, so the bound is violated only on the coarsest mesh of the ladder and
-the violation is removed by refining. An earlier version of this section
-recorded the cause as unestablished and named discrete Fourier truncation as an
-untested candidate; the ladder settles it without a further solve. The two
-findings are acknowledged in the design on those terms.
+**The residual falls with mesh, and its cause is not yet separated.** The
+resolution ladder below reads +129, -313, -483, -580 and -626 parts per million
+at resolutions 20, 30, 40, 60 and 80. It crosses unity between resolution 20 and
+30 and falls monotonically thereafter, so the bound is violated only on the
+coarsest mesh of the ladder and refining removes it.
+
+That behaviour is consistent with discretisation and an earlier version of this
+section attributed it to discretisation on that evidence alone. A second
+candidate has since appeared and predicts the same behaviour. The input flux
+plane sits 0.4 um downstream of the source, where the launch near field is still
+forming, and the splitter runner uses 0.5 um for the same measurement. A plane
+reading low there inflates every quotient normalised on it, and the error would
+also fall as the mesh samples the near field better. **The ladder therefore does
+not separate the two**, and the attribution stands only as far as "it refines
+away" until the plane is moved and the run repeated. The two findings are
+acknowledged in the design on those terms.
 
 The three-dimensional member violates no bound.
 

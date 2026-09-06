@@ -170,26 +170,34 @@ def simulate(job, straight_only: bool, straight_width=None, resolution=None):
     # loss besides. These four planes sit just inside the absorber and separate
     # the two axes directly, at the cost of four discrete Fourier transforms and
     # no further simulation.
-    span_x = sx - 2 * dpml
+    # The side planes bound a control volume together with the two x planes, so
+    # they span x_ref to x_out and no further. Spanning the whole cell counts
+    # power twice: once crossing x_out and again when it radiates sideways
+    # downstream of it. On the first execution of these monitors the transmitted
+    # 1.000129 and the escaped 0.000692 summed to 1.000821, and differencing
+    # against the reference run moved that by 2e-7, which ruled out the source
+    # and left the control volume.
+    span_x = x_out - x_ref
+    centre_x = 0.5 * (x_ref + x_out)
     span_y = sy - 2 * dpml
     y_face = sy / 2.0 - dpml
     sides = {
         "lateral_plus": sim.add_flux(fcen, 0, 1, mp.FluxRegion(
-            center=mp.Vector3(0, y_face, 0),
+            center=mp.Vector3(centre_x, y_face, 0),
             size=mp.Vector3(span_x, 0, 0 if dims == 2 else sz - 2 * dpml),
             direction=mp.Y)),
         "lateral_minus": sim.add_flux(fcen, 0, 1, mp.FluxRegion(
-            center=mp.Vector3(0, -y_face, 0),
+            center=mp.Vector3(centre_x, -y_face, 0),
             size=mp.Vector3(span_x, 0, 0 if dims == 2 else sz - 2 * dpml),
             direction=mp.Y)),
     }
     if dims == 3:
         z_face = sz / 2.0 - dpml
         sides["vertical_plus"] = sim.add_flux(fcen, 0, 1, mp.FluxRegion(
-            center=mp.Vector3(0, 0, z_face),
+            center=mp.Vector3(centre_x, 0, z_face),
             size=mp.Vector3(span_x, span_y, 0), direction=mp.Z))
         sides["vertical_minus"] = sim.add_flux(fcen, 0, 1, mp.FluxRegion(
-            center=mp.Vector3(0, 0, -z_face),
+            center=mp.Vector3(centre_x, 0, -z_face),
             size=mp.Vector3(span_x, span_y, 0), direction=mp.Z))
 
     # The run must not be stopped before the pulse has crossed the cell. A decay
@@ -216,6 +224,22 @@ def simulate(job, straight_only: bool, straight_width=None, resolution=None):
             mp.get_fluxes(sides["vertical_plus"])[0]
             - mp.get_fluxes(sides["vertical_minus"])[0]) if dims == 3 else 0.0,
     }
+
+
+
+def _escape_share(tap, norm, self_normalised_taper):
+    """The fraction of a run's own loss that the escape planes account for.
+
+    Returns None where that loss is not resolved, rather than a number computed
+    against a clamped denominator.
+    """
+    loss = 1.0 - self_normalised_taper
+    if loss <= 1.0e-6:
+        return None
+    escaped = (
+        (tap["escaped_lateral"] + tap["escaped_vertical"]) / tap["reference_flux"]
+        - (norm["escaped_lateral"] + norm["escaped_vertical"]) / norm["reference_flux"])
+    return escaped / loss
 
 
 def main() -> int:
@@ -304,16 +328,39 @@ def main() -> int:
             }
             for name, run in (("taper", tap), ("narrow_guide", norm), ("wide_guide", wide))
         },
-        # the two escape channels, each as a fraction of the taper run's own net
-        # input flux, so neither involves the reference simulation. Their sum
-        # against the taper's own loss is the check that they account for it.
-        "escaped_lateral": tap["escaped_lateral"] / tap["reference_flux"],
-        "escaped_vertical": tap["escaped_vertical"] / tap["reference_flux"],
+        # The two escape channels, each as a fraction of the taper run's own net
+        # input flux.
+        #
+        # The side planes span the whole cell in x, so they intercept the lateral
+        # radiation of the source launch as well as that of the structure. That
+        # component is present in the normalisation run too, on an identical
+        # source and an identical input section, so it is removed by
+        # differencing. The raw figures are kept beside the differenced ones
+        # because their sum with the transmission is the check that the planes
+        # are placed correctly: on the first execution of these monitors the
+        # transmitted 1.000129 and the raw escape 0.000692 summed to 1.000821,
+        # six times the residual, which is what showed the source term was in
+        # there.
+        "escaped_lateral_raw": tap["escaped_lateral"] / tap["reference_flux"],
+        "escaped_vertical_raw": tap["escaped_vertical"] / tap["reference_flux"],
+        "escaped_lateral": (
+            tap["escaped_lateral"] / tap["reference_flux"]
+            - norm["escaped_lateral"] / norm["reference_flux"]),
+        "escaped_vertical": (
+            tap["escaped_vertical"] / tap["reference_flux"]
+            - norm["escaped_vertical"] / norm["reference_flux"]),
         "escaped_total": (
-            tap["escaped_lateral"] + tap["escaped_vertical"]) / tap["reference_flux"],
-        "escape_accounts_for": (
             (tap["escaped_lateral"] + tap["escaped_vertical"]) / tap["reference_flux"]
-        ) / max(1.0 - self_normalised(tap), 1e-12),
+            - (norm["escaped_lateral"] + norm["escaped_vertical"]) / norm["reference_flux"]),
+        # What fraction of the run's own loss the two channels account for.
+        #
+        # Undefined where that loss is at or below the noise of a flux ratio,
+        # which is about one part in a million, and negative losses occur: the
+        # plane reduction at resolution 20 returns a self-normalised
+        # transmission of 1.000129. Clamping the denominator to 1e-12 turned
+        # that into 6.9e8 and reported it, which is the failure a clamp always
+        # has where the clamped value is a denominator.
+        "escape_accounts_for": _escape_share(tap, norm, self_normalised(tap)),
         "narrow_guide_loss": 1.0 - self_normalised(norm),
         "wide_guide_loss": 1.0 - self_normalised(wide),
         # the quantity the reference asymmetry can contribute, being the excess

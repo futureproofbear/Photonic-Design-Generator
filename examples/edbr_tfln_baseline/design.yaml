@@ -1,3 +1,19 @@
+# SUPERSEDED. THE DESIGN OF RECORD IS design_candidate.yaml.
+#
+# This file is the first-pass baseline and is retained because the reports cite
+# it as the starting point. It is not the design. Its mirror reflectivity is
+# 0.9747 against a target of 0.75 +-20%, which is a `must` row it fails, and the
+# candidate exists because that was corrected: the post gap opens from 0.63 to
+# 0.855 um and the grating lengthens from 7.25 to 11 mm, landing a coupling of
+# 1.476 /cm and a reflectivity of 0.832.
+#
+# Read design_candidate.yaml before drawing any conclusion about the device, and
+# state which of the two a figure came from whenever one is quoted. On
+# 2026-09-06 a study of the coupling constant was propagated through this file
+# and reported that a correction moved two acceptance rows from unmet to met; on
+# the candidate the same correction moves one row from met to unmet. See
+# ../ltoi300_mask/REPORT_KAPPA.md.
+
 # =====================================================================
 # TFLN extended-DBR Pockels laser  (TOOLCHAIN VALIDATION)
 #

@@ -2964,3 +2964,117 @@ the facet width falls back to `layout.taper_tip_width_um`, and the focused
 design carried no layout block, so the fallback took a schema default that
 happened to equal the test chip's own 0.4 um. **A device dimension that is
 correct by coincidence is declared explicitly.**
+
+### T087 — A clamp on a denominator turns an out-of-range value into a confident wrong answer
+
+A ratio was written as `escaped / max(loss, 1e-12)` so that a zero loss could not
+divide. The plane reduction returns a self-normalised transmission of 1.000129,
+so its loss is *negative*, the clamp supplied 1e-12, and the payload recorded
+that the escape channels accounted for 691,534,002 times the loss. The figure
+was published by the first run that exercised the code.
+
+**A clamp is appropriate on a value that is displayed and wrong on a value that
+is divided by.** Where the denominator leaves its valid range the quotient does
+not exist, and the honest return is nothing at all with the reason recorded. A
+clamp converts an undefined result into a defined and absurd one, which is worse
+because it propagates.
+
+The sign was the tell and was not considered. `max(x, tiny)` reads as a guard
+against zero and silently also guards against negative, which is a different
+condition with a different meaning: here it meant the run had returned more
+power than it was given, which the payload separately recorded and which nothing
+connected to the ratio being formed three lines away.
+
+### T088 — Two hypotheses, both wrong, and the arithmetic that outlived them
+
+The escape planes over-counted: transmitted and escaped power summed to 1.000821
+of the input across a control volume containing no absorber. Two explanations
+were proposed and both were tested rather than adopted.
+
+The first was that the planes, spanning the whole cell in x, were catching the
+source's own lateral radiation. Differencing against the reference run, which
+carries an identical source and input section, moved the figure by 2e-7. The
+second was a control-volume error, the planes reaching downstream of the output
+monitor so that power crossing it and then radiating sideways was counted twice.
+Bounding them to the two flux planes moved 1.000821 to 1.000793.
+
+**Neither hypothesis was worth more than the run that tested it, and the cost of
+testing was one two-dimensional solve each.** What survives is the arithmetic:
+for lossless media the input flux equals the output flux plus the escape, the
+residual is 7.9e-4, and one of the three planes is wrong by that amount. That
+statement was available before either hypothesis and did not depend on either.
+
+The remaining candidate is the placement of the input plane, 0.4 um downstream
+of the source where the launch near field is still forming; the splitter runner
+uses 0.5 um for the same measurement. A plane that reads low there inflates
+every quotient normalised on it, which would include the 1.29e-4 residual above
+unity that the resolution ladder attributes to discretisation. **Both
+explanations predict a residual that falls with mesh, so the ladder does not
+separate them**, and the attribution recorded in the report is provisional until
+the plane is moved and the run repeated.
+
+### L043 — A third-order grating's coupled-mode kappa was high by a factor of two, and two independent routes agree on the correction
+
+A time-domain solve of a 500 um third-order post grating returned a coupling
+constant 0.53 times the coupled-mode value on the identical two-dimensional
+structure. The mesh moved that number by 6 per cent between resolutions 20 and
+30 while the disagreement was 47 per cent, so the disagreement survives its own
+discretisation and is a statement about the model.
+
+**The chain already carried the knob and named the measurement that sets it.**
+`grating.profile_sigma_um` suppresses the m-th harmonic by
+exp(-(2*pi*m*sigma/period)^2/2), and its own comment says the suppression is
+quadratic in the order, that an assumption benign at first order is not benign
+at third, and that the value is obtained by setting the coupled-mode kappa
+against a band-structure or time-domain solve. Both gratings here are third
+order. Inverting the measured ratio gives sigma = 67 nm.
+
+**A second and wholly independent route lands within a quarter of it.** The
+extended-DBR baseline reproduces a published device whose reflectivity is stated
+as about 75 per cent, and the chain computes 97.5 per cent from the same
+geometry. The sigma that reconciles those two is 84 nm.
+
+Propagating the correction was done first through the wrong file. On the
+superseded baseline it moves two acceptance rows from unmet to met; on the
+design of record it moves one row from met to unmet, the mirror reflectivity
+falling from 0.832 to 0.586 against a floor of 0.60. **The direction of a
+correction is a property of which side of the target the design sits on**, and
+the two files sit on opposite sides. See T089.
+
+**A lower kappa is a trade and not a degradation.** Reflectivity, stopband width
+and free spectral range fall; penetration depth rises by 55 per cent and carries
+the tuning lever with it, so the tuning coefficient improves by 28 per cent, the
+mode-hop-free range by 35 and the chirp nonlinearity by 27. A design tuned
+against an overstated kappa is tuned against the wrong trade.
+
+The transfer between the two platforms is an assumption and is recorded as one.
+The mechanism proposed, an overstatement of the third-order Fourier amplitude
+for a laterally posted perturbation, is common to both, and the two gratings
+share their order and their post geometry. No direct measurement of the
+lithium-niobate grating exists: its own time-domain solve moved 86 per cent with
+mesh and is unresolved.
+
+### T089 — A study was propagated through a superseded baseline for an hour before anyone asked which file was the design
+
+An example directory held `design.yaml` and `design_candidate.yaml`. The first
+is a first-pass baseline retained because the reports cite it as a starting
+point; the second is the design. Nothing in either file said so. A correction to
+the coupling constant was propagated through the first, and the conclusion drawn
+was that it moved two acceptance rows from unmet to met. On the design of record
+the same correction moves one row the other way.
+
+**The tell was in the reports and was read too late.** `DESIGN_REPORT.md` quotes
+a coupling of 1.276 and 1.479 per centimetre throughout while the file being run
+returned 3.902, a factor of three, and that discrepancy sat in front of the work
+for an hour. A figure in a report that disagrees with the file you are running
+by a factor of three is telling you that you are running the wrong file.
+
+**A superseded file says so in its first line.** The banner now at the head of
+that baseline names the design of record, states the row it fails and why the
+candidate exists, and points at the study that was misdirected. The cost of
+writing it is a minute and the cost of not writing it was an hour and a wrong
+conclusion published in a report.
+
+**Where two designs sit on opposite sides of a target, a correction improves one
+and breaks the other.** Reporting the direction of a correction without naming
+the design it was applied to carries no information at all.

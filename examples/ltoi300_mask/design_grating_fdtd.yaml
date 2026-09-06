@@ -1,0 +1,57 @@
+meta:
+  name: ltoi300_grating_fdtd
+  title: The LTOI300 O-band grating, measured in the time domain
+  status: scaffold
+platform:
+  cut: x
+  stack: ltoi300
+  materials_file: design-chain/pdk/LXT_LT_PRO/materials_lt_pro.yaml
+  film_material: LiTaO3
+  film_thickness_um: 0.3
+  etch_depth_um: 0.18
+  sidewall_deg: 70.0
+  box_thickness_um: 7.0
+  clad_thickness_um: 2.0
+  slab_offset_um: 6.0
+  propagation_loss_dB_per_cm: 0.2
+waveguide:
+  top_width_um: 0.7
+  wavelength_um: 1.31
+mesh:
+  d_fine_um: 0.01
+  d_coarse_um: 0.06
+  num_modes: 3
+  polarisation: TE
+grating:
+  enabled: true
+  order: 3
+  target_wavelength_um: 1.31
+  length_um: 500.0
+  post_width_um: 0.3
+  post_gap_um: 0.63
+  span_GHz: 6000.0
+  points: 2001
+electrodes:
+  enabled: false
+cavity:
+  enabled: false
+fem:
+  enabled: false
+bend:
+  enabled: false
+fdtd:
+  enabled: true
+  structure: grating
+  dimensions: 2
+  resolution: 30
+  convergence_resolution: 20
+  grating_periods: 445
+  pml_um: 2.0
+  cell_width_um: 10.0
+  in_length_um: 5.0
+  out_length_um: 5.0
+stages:
+- mode
+- grating
+- fdtd
+- verify
