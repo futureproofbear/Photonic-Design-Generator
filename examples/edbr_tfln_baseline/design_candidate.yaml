@@ -870,7 +870,13 @@ search:
   # target and carried 11330 rule violations.  The constraint cannot be written
   # in the `constraints` list because it is an arithmetic combination of four
   # dimensions rather than a comparison of two fields.
-  stages: [mode, grating, eo, cavity, dynamics, layout, drc]
+  # `reticle` added 2026-09-10. `drc` checks an assembled die, and without
+  # `reticle` in this list it raises before any candidate is evaluated, so
+  # the block above could not run at all. The rule-violation figure quoted
+  # in the comment predates that requirement, which `drc` gained later; the
+  # search is off by default, so nothing exercised the list afterwards and
+  # nothing reported it broken.
+  stages: [mode, grating, eo, cavity, dynamics, layout, reticle, drc]
   severities: [must, should]
   max_evaluations: 60
 

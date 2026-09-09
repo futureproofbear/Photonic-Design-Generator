@@ -3102,3 +3102,47 @@ question is whether it should have been.**
 The design consequence is 23 per cent more mirror, and nothing is traded for it:
 the mode-hop-free range, the side-mode suppression and the chirp linearity all
 improve slightly over the same range.
+
+### T090 — The one command that designs had never been run, and the design's own configuration for it could not run
+
+A chain carrying `run`, `sweep`, `corners`, `sensitivity`, `golden` and `search`
+had artifacts for all of them but the last. `search` is 271 lines and states the
+unmet targets, probes every parameter for elasticity, evaluates each at both
+bounds so that an unreachable requirement is named rather than approached, and
+bisects on the dominant control. **Zero runs.** Every design decision in the
+repository had been reached by hand.
+
+The design of record carried a fully specified `search` block, four parameters,
+a constraint, a stage list and a budget, with `enabled: false`. Enabling it
+raised at once: `drc` checks an assembled die and the declared stage list omits
+`reticle`, so the nominal design would not evaluate and no candidate could be
+tried. The block's own comment quotes a specific result, 11330 rule violations
+at a 740 nm post gap, so it had run once; `drc` gained the die requirement
+afterwards, and **because the block is off by default nothing exercised it again
+and nothing reported it broken.**
+
+**A capability that is off by default decays silently.** A test that enables it
+on one design would have caught this the day the requirement changed.
+
+### L045 — The search found a better answer than the hand analysis, using a parameter the hand analysis never considered
+
+One `must` row was unmet, a mirror reflectivity of 0.593 against a floor of
+0.60. By hand the mirror was lengthened from 11 to 13.5 mm, which met the row at
+a cost of 23 per cent more area.
+
+The directed search reached the same requirement by closing the post gap from
+0.855 to 0.750 um, at no area cost, and returned 12 of 12 targets met against
+the hand answer's 10. An independent full-chain run confirmed it, mask and rule
+check included.
+
+**The hand analysis varied the parameter it thought of first.** Length was not
+among the four the design declared free, and the search's sensitivity phase
+showed why it should not have been the first choice: the post gap moves the
+reflectivity with an elasticity of −5.79 while the other three declared
+parameters move it by exactly zero and cannot reach the requirement from either
+bound. Three quarters of the declared search space is irrelevant to this
+problem, which is itself worth knowing and took four evaluations to establish.
+
+The search used 29 evaluations of 60. **The phases that cost the least returned
+the most**: stating the problem identified the single unmet row, and
+reachability eliminated three parameters, before any bisection began.

@@ -1,0 +1,250 @@
+{
+  "design": "..\\examples\\edbr_tfln_baseline\\design_search.yaml",
+  "stages": [
+    "mode",
+    "grating",
+    "eo",
+    "cavity",
+    "dynamics",
+    "layout",
+    "reticle",
+    "drc"
+  ],
+  "excluded": [],
+  "nominal": {
+    "mode.n_guided_modes": 1.0,
+    "grating.bragg_wavelength_nm": 1546.4221597958574,
+    "grating.peak_reflectivity": 0.5927505212363523,
+    "grating.fwhm_GHz": 7.4198381285,
+    "eo.tuning_MHz_per_V": 647.7324585274372,
+    "eo.VpiL_ideal_V_cm": 3.9062854039863435,
+    "eo.mode_overlap_with_metal": 1.4506325006039828e-09,
+    "cavity.mode_hop_free_range_GHz": 13.7453282865625,
+    "cavity.schawlow_townes_henry_linewidth_kHz": 4.551542733832459,
+    "cavity.smsr_dB": 48.77619739593509,
+    "drc.error_violations": 0.0
+  },
+  "unmet": [
+    {
+      "metric": "grating.peak_reflectivity",
+      "severity": "must",
+      "requires": "0.6 to 0.9",
+      "actual": 0.5927505212363523,
+      "shortfall": 0.012082464606079462
+    }
+  ],
+  "sensitivity": [
+    {
+      "parameter": "grating.post_gap_um",
+      "nominal": 0.855,
+      "probed": 0.89775,
+      "elasticity": {
+        "mode.n_guided_modes": 0.0,
+        "grating.bragg_wavelength_nm": -0.0002515308611676384,
+        "grating.peak_reflectivity": -5.78871714313266,
+        "grating.fwhm_GHz": -2.000699246769615,
+        "eo.tuning_MHz_per_V": -0.025783030591189617,
+        "eo.VpiL_ideal_V_cm": -0.0002515308611676384,
+        "eo.mode_overlap_with_metal": 2.3724567697050962,
+        "cavity.mode_hop_free_range_GHz": -2.4163365505012058,
+        "cavity.schawlow_townes_henry_linewidth_kHz": 1.2301813653895055,
+        "cavity.smsr_dB": -0.4827630378329892,
+        "drc.error_violations": NaN
+      }
+    },
+    {
+      "parameter": "cavity.rsoa.length_um",
+      "nominal": 1000.0,
+      "probed": 1100.0,
+      "elasticity": {
+        "mode.n_guided_modes": 0.0,
+        "grating.bragg_wavelength_nm": 0.0,
+        "grating.peak_reflectivity": 0.0,
+        "grating.fwhm_GHz": 0.0,
+        "eo.tuning_MHz_per_V": -3.506144033942916e-05,
+        "eo.VpiL_ideal_V_cm": 0.0,
+        "eo.mode_overlap_with_metal": 0.0,
+        "cavity.mode_hop_free_range_GHz": -0.19240703203902734,
+        "cavity.schawlow_townes_henry_linewidth_kHz": -0.0672057459017953,
+        "cavity.smsr_dB": -0.08286694760352034,
+        "drc.error_violations": NaN
+      }
+    },
+    {
+      "parameter": "cavity.feed_length_um",
+      "nominal": 200.0,
+      "probed": 220.00000000000003,
+      "elasticity": {
+        "mode.n_guided_modes": 0.0,
+        "grating.bragg_wavelength_nm": 0.0,
+        "grating.peak_reflectivity": 0.0,
+        "grating.fwhm_GHz": 0.0,
+        "eo.tuning_MHz_per_V": -3.506144033942916e-05,
+        "eo.VpiL_ideal_V_cm": 0.0,
+        "eo.mode_overlap_with_metal": 0.0,
+        "cavity.mode_hop_free_range_GHz": -6.301272393947059,
+        "cavity.schawlow_townes_henry_linewidth_kHz": -0.06957222525321746,
+        "cavity.smsr_dB": -0.023397503076373855,
+        "drc.error_violations": NaN
+      }
+    },
+    {
+      "parameter": "electrodes.gap_um",
+      "nominal": 7.6,
+      "probed": 7.9799999999999995,
+      "elasticity": {
+        "mode.n_guided_modes": 0.0,
+        "grating.bragg_wavelength_nm": 0.0,
+        "grating.peak_reflectivity": 0.0,
+        "grating.fwhm_GHz": 0.0,
+        "eo.tuning_MHz_per_V": -1.1116799266159176,
+        "eo.VpiL_ideal_V_cm": 1.0000000000000044,
+        "eo.mode_overlap_with_metal": -22.853451173065626,
+        "cavity.mode_hop_free_range_GHz": -0.624451495404016,
+        "cavity.schawlow_townes_henry_linewidth_kHz": 0.0,
+        "cavity.smsr_dB": 0.0,
+        "drc.error_violations": NaN
+      }
+    }
+  ],
+  "reachability": {
+    "grating.post_gap_um": {
+      "grating.peak_reflectivity": {
+        "at_min": 0.9933142383343934,
+        "at_max": 0.18512408122326843,
+        "monotone": true,
+        "can_reach": true
+      }
+    },
+    "cavity.rsoa.length_um": {
+      "grating.peak_reflectivity": {
+        "at_min": 0.5927505212363523,
+        "at_max": 0.5927505212363523,
+        "monotone": true,
+        "can_reach": false
+      }
+    },
+    "cavity.feed_length_um": {
+      "grating.peak_reflectivity": {
+        "at_min": 0.5927505212363523,
+        "at_max": 0.5927505212363523,
+        "monotone": true,
+        "can_reach": false
+      }
+    },
+    "electrodes.gap_um": {
+      "grating.peak_reflectivity": {
+        "at_min": 0.5927505212363523,
+        "at_max": 0.5927505212363523,
+        "monotone": true,
+        "can_reach": false
+      }
+    }
+  },
+  "candidate": {
+    "grating.post_gap_um": 0.75
+  },
+  "notes": [],
+  "result": [
+    {
+      "metric": "mode.n_guided_modes",
+      "severity": "must",
+      "requires": "<= 1",
+      "nominal": 1.0,
+      "candidate": 1.0,
+      "met": true,
+      "moved": "unchanged"
+    },
+    {
+      "metric": "grating.bragg_wavelength_nm",
+      "severity": "must",
+      "requires": "1514.98 to 1576.82",
+      "nominal": 1546.4221597958574,
+      "candidate": 1546.4826260195518,
+      "met": true,
+      "moved": "unchanged"
+    },
+    {
+      "metric": "grating.peak_reflectivity",
+      "severity": "must",
+      "requires": "0.6 to 0.9",
+      "nominal": 0.5927505212363523,
+      "candidate": 0.8899229246568945,
+      "met": true,
+      "moved": "improved"
+    },
+    {
+      "metric": "grating.fwhm_GHz",
+      "severity": "should",
+      "requires": "5 to 14",
+      "nominal": 7.4198381285,
+      "candidate": 10.5014821,
+      "met": true,
+      "moved": "unchanged"
+    },
+    {
+      "metric": "eo.tuning_MHz_per_V",
+      "severity": "must",
+      "requires": "385 to 715",
+      "nominal": 647.7324585274372,
+      "candidate": 646.7833571691813,
+      "met": true,
+      "moved": "unchanged"
+    },
+    {
+      "metric": "eo.VpiL_ideal_V_cm",
+      "severity": "should",
+      "requires": "3 to 5",
+      "nominal": 3.9062854039863435,
+      "candidate": 3.906438142567821,
+      "met": true,
+      "moved": "unchanged"
+    },
+    {
+      "metric": "eo.mode_overlap_with_metal",
+      "severity": "must",
+      "requires": "<= 1e-05",
+      "nominal": 1.4506325006039828e-09,
+      "candidate": 1.2483171943983007e-09,
+      "met": true,
+      "moved": "unchanged"
+    },
+    {
+      "metric": "cavity.mode_hop_free_range_GHz",
+      "severity": "should",
+      "requires": ">= 8",
+      "nominal": 13.7453282865625,
+      "candidate": 12.2733702766875,
+      "met": true,
+      "moved": "unchanged"
+    },
+    {
+      "metric": "cavity.schawlow_townes_henry_linewidth_kHz",
+      "severity": "should",
+      "requires": "0 to 5.6",
+      "nominal": 4.551542733832459,
+      "candidate": 5.40274787678153,
+      "met": true,
+      "moved": "unchanged"
+    },
+    {
+      "metric": "cavity.smsr_dB",
+      "severity": "should",
+      "requires": ">= 40",
+      "nominal": 48.77619739593509,
+      "candidate": 51.1052038144779,
+      "met": true,
+      "moved": "unchanged"
+    },
+    {
+      "metric": "drc.error_violations",
+      "severity": "must",
+      "requires": "<= 0",
+      "nominal": 0.0,
+      "candidate": 0.0,
+      "met": true,
+      "moved": "unchanged"
+    }
+  ],
+  "all_met": true
+}

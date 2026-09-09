@@ -190,7 +190,24 @@ At the sigma measured on its own grating the candidate's coupling falls from
 the floor of its target by one per cent of the value. Everything else it is
 graded on continues to pass.
 
-The remedy is length, and the chain gives it directly:
+The remedy is not length, though length works. **The directed search finds a
+better one**: closing the post gap from 0.855 to 0.750 um restores the mirror at
+no area cost and meets all twelve targets, where lengthening meets ten. The post
+gap moves the reflectivity with an elasticity of -5.79 and is the only one of
+the design's four declared free parameters that moves it at all; the other three
+cannot reach the requirement from either bound. The candidate is confirmed by an
+independent full-chain run, `20260910-005501-edbr_postgap075`, mask and rule
+check included.
+
+| | post gap /um | mirror /mm | kappa /cm | reflectivity | targets met |
+|---|---|---|---|---|---|
+| as drawn | 0.855 | 11.0 | 0.961 | 0.593 | 9 of 12 |
+| lengthened by hand | 0.855 | 13.5 | 0.961 | 0.711 | 10 of 12 |
+| **the search's candidate** | **0.750** | **11.0** | **1.719** | **0.890** | **12 of 12** |
+
+The hand analysis varied the parameter it thought of first, and length is not
+among the four the design declares free. Lengthening the mirror remains a valid
+answer and is recorded below for the trade it represents:
 
 | mirror | kappa times length | peak reflectivity | acceptance | stopband /GHz |
 |---|---|---|---|---|
