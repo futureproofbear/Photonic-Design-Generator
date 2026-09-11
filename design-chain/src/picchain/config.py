@@ -600,13 +600,21 @@ class FDTDCfg(BaseModel):
     #: This host bugchecked on 2026-09-05 while a three-dimensional taper of
     #: 32.4 million cells was allocating, at resolution 30. The largest
     #: three-dimensional solve it has completed is 9.6 million cells, at
-    #: resolution 20, which ran in 1530 s. The machine had also bugchecked on
-    #: 2026-09-03 with a solve running and twice on 28 August with nothing
-    #: running, so the instability is not attributed to the solver alone; the
-    #: correlation is nonetheless three occasions out of three with a solve in
-    #: flight, and `.wslconfig` caps the virtual machine at 16 GB with swap, so
-    #: an overrun inside it should be killed by Linux rather than reaching the
-    #: host.
+    #: resolution 20, which ran in 1530 s.
+    #:
+    #: The attribution to the solve was examined on 2026-09-11 and does not
+    #: hold. Six bugchecks between 28 August and 10 September carry six
+    #: different codes: 0x0A twice, 0xEF, 0x10E in video memory, 0x7A on a
+    #: paging read and 0x1A in memory management. Two occurred with nothing
+    #: running. An over-allocation inside a virtual machine capped at 16 GB is
+    #: killed by Linux and does not bugcheck the host, and 0x0A is a driver or
+    #: memory fault rather than an exhaustion signature. The memory is non-ECC
+    #: DDR5-5600, which cannot report a corrected error, and no WHEA event was
+    #: logged for any of the six.
+    #:
+    #: The ceiling is therefore retained as prudence and not as a diagnosis. A
+    #: solve drives heavy memory traffic and plausibly triggers an underlying
+    #: instability; it is not established to cause it.
     #:
     #: Sixteen million is above every solve this host has completed and below
     #: the one that took it down. Raising it is a deliberate act and the reason

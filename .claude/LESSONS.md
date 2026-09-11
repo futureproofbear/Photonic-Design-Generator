@@ -2872,6 +2872,9 @@ three dimensions is the fourth power of the ratio.
 
 ### T083 — The cost of a solve was estimated in time and never in memory, and the host went down
 
+**Revised 2026-09-11. The attribution below to the solve does not hold, and the
+revision is at the foot of this entry.**
+
 Raising a three-dimensional resolution from 20 to 30 was reasoned about as a
 factor of five in run time, the fourth power of the ratio, and the two hours
 were budgeted. The grid went from 9.6 to 32.4 million cells at the same moment
@@ -3146,3 +3149,29 @@ problem, which is itself worth knowing and took four evaluations to establish.
 The search used 29 evaluations of 60. **The phases that cost the least returned
 the most**: stating the problem identified the single unmet row, and
 reachability eliminated three parameters, before any bisection began.
+
+### T091 — Six bugchecks, six codes, and a guard built on the wrong cause
+
+A ceiling on the solver grid was added after a host bugcheck during a large
+allocation, and recorded as caused by it. The event log was not read at the
+time. It shows six bugchecks in two weeks carrying six different codes, two of
+them with nothing running, one inside video memory and one on a paging read.
+The memory is non-ECC, so an uncorrectable error is not reported and surfaces as
+an arbitrary kernel fault instead, and no hardware-error event was logged for
+any of the six.
+
+**One code would have been evidence; six different codes are evidence against.**
+A single application exhausting memory produces one failure mode, and inside a
+capped virtual machine it produces a Linux kill rather than a host bugcheck.
+
+A seventh interruption, on 2026-09-11, was assumed to be the same thing and was
+not a crash at all: Windows Update restarted the machine through TrustedInstaller
+while a solve was running. **The absence of an unexpected-shutdown event is what
+distinguishes the two, and it is one query.**
+
+The guard is kept, because a ceiling below what the host has completed is
+prudent whatever the cause. Its stated reason is corrected: heavy memory traffic
+plausibly triggers an underlying instability rather than causing the failure.
+
+**Read the log before recording a cause.** Three sessions of work were planned
+around an attribution that six lines of event query contradict.
