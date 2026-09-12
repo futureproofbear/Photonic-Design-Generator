@@ -3259,3 +3259,34 @@ The extrapolation is large, 2.41 times the last difference, and its robustness
 was reported rather than asserted: any order between 0.40 and 0.60 leaves the
 residue between 16.9 and 20.7 per cent. **Where a limit rests on an extrapolation
 of that size, quote it against a range of the exponent.**
+
+### L049 — The only measured device on the platform was missed by 26 per cent, and 13 of them were the mesh
+
+A design file posed the one published thin-film lithium tantalate modulator
+that states a geometry and a measured half-wave voltage together, and its header
+set out the test: a run that reproduces the measurement establishes that a
+separate disagreement with a supplied kit belongs to the kit geometry rather
+than to the model. The run gave 3.481 V.cm against a measured 2.754, missing by
+26.4 per cent, and stood that way for nine days.
+
+Half of that was the mesh. A three-point ladder on this geometry fits a
+convergence order of 0.502 and extrapolates the overlap from 0.3965 to 0.4417,
+which moves the half-wave voltage to 3.125 and the disagreement to 13.5 per
+cent. **The order agrees with the 0.496 fitted on an unrelated cross-section**,
+which is the evidence that square-root convergence is a property of the
+conductor corner rather than of either geometry.
+
+**The residue is real and the verdict is marginal.** An acceptance band of plus
+or minus fifteen per cent admits 13.5, and the extrapolation uncertainty spans
+11.0 to 15.1 across orders from 0.40 to 0.60, so the row passes or fails
+depending on the third decimal of a fitted exponent. A margin smaller than the
+uncertainty of the correction that produced it is not a margin.
+
+**Two hand-scalings of this figure were wrong before the ladder was run.** The
+first used a factor measured on a different geometry and gave 3.158. The second
+scaled by the refined point of the convergence guard rather than the base mesh
+the device figure is computed from, and gave 3.230. The two straddle the
+acceptance limit of 3.167 and disagree with the correct 3.125 by 1 and 3 per
+cent. The invariant that settles it is that the product of the overlap and the
+device half-wave voltage is constant, 1.380366 in both runs of the ladder, so
+the device figure follows the base mesh and nothing else.
