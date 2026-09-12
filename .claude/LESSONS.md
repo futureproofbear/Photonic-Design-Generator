@@ -3175,3 +3175,36 @@ plausibly triggers an underlying instability rather than causing the failure.
 
 **Read the log before recording a cause.** Three sessions of work were planned
 around an attribution that six lines of event query contradict.
+
+### L046 — Two parameterisations fitted one measurement, and the variable that separates them was the one held fixed
+
+A coupled-mode coupling constant disagreed with a time-domain solve by a factor
+of two, and a Gaussian smoothing of the longitudinal profile reproduced it. So
+did an effective post 19 nm longer at each edge. **Both fitted the same single
+point**, because the drawn duty sat close to the null of the third-order Fourier
+amplitude, where that amplitude is small and steep and almost any small error in
+the effective duty produces a large relative error in the coupling.
+
+The two differ in their dependence on duty: a smoothing has none and a
+lengthening has a strong one. Moving the duty from 0.267 to 0.150 separates the
+predictions by a factor of two, and the measurement landed four per cent from
+the smoothing and eliminated the alternative.
+
+**A fit that reproduces one measurement is a description of that measurement.**
+The question to ask of it is which variable the two candidate mechanisms depend
+on differently, and whether that variable was varied. Here it had not been, and
+the design sat beside a null where the sensitivity was largest.
+
+The test was also the better measurement. Away from the null the analytic
+amplitude is 1.68 times larger, so the signal rose by a factor of 2.6, the
+unaccounted background halved, and the mesh shift fell from 5.6 per cent to
+0.24. **A falsification test chosen for its discriminating power was cheaper and
+cleaner than the measurement it tested**, which is the usual case and is not the
+usual expectation.
+
+An earlier proposal to falsify the same mechanism by measuring a first-order
+grating was withdrawn before it ran. At a fixed Bragg wavelength the period
+scales with the order, so the order cancels from the suppression entirely and
+every order predicts the same value. The claim that the effect is quadratic in
+the order, taken from a comment in the configuration and repeated without
+checking, is true only at fixed period.

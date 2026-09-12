@@ -113,8 +113,13 @@ class Grating(BaseModel):
     #: micrometres. Zero is the identity and assumes a perfectly rectangular
     #: profile, which is what the closed-form Fourier coefficient describes.
     #: A non-zero value suppresses the m-th harmonic by
-    #: exp(-(2*pi*m*sigma/Lambda)^2/2), which is quadratic in the order: an
-    #: assumption that is benign at first order is not benign at third. The
+    #: exp(-(2*pi*m*sigma/Lambda)^2/2), which is quadratic in the order at fixed
+    #: period. At a fixed Bragg wavelength the period scales with the order, so
+    #: m/Lambda is 2*n_bar/lambda_B and the order cancels: every order predicts
+    #: the same suppression, exp(-(4*pi*n_bar*sigma/lambda_B)^2/2). The
+    #: quadratic reading was taken from this comment on 2026-09-10 and used to
+    #: propose a first-order grating as a falsification test, which cannot
+    #: discriminate. The
     #: value is a measurement, obtained by setting the coupled-mode kappa
     #: against a band-structure or time-domain solve, and it is not to be
     #: adjusted to make a target pass.

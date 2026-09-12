@@ -183,6 +183,59 @@ so the ratio of background to signal is thirteen to one rather than four. The
 35 per cent departure is seven times its own mesh shift and stands, and it is
 the less well conditioned of the two measurements.
 
+## The smoothing is tested against an alternative, and survives
+
+The drawn duty of 0.2669 sits close to the null of the third-order Fourier
+amplitude at one third, where that amplitude is small and varies steeply. An
+effective post 37 nm longer than drawn, 19 nm per edge, reproduces the measured
+ratio exactly. **Two parameterisations therefore fitted the same measurement**,
+and they are not the same physics: a smoothing is independent of duty, while an
+effective lengthening is not.
+
+They diverge away from the null, so the test is to move the duty. Run
+`20260911-094049-ltoi300_grating_duty015` repeats the measurement with the posts
+shortened to 0.169 um, a duty of 0.1504, and everything else identical.
+
+| duty | smoothing predicts | lengthening predicts | measured |
+|---|---|---|---|
+| 0.2669, as drawn | 0.528 | 0.528 | 0.5283 |
+| **0.1504** | **0.528** | **0.999** | **0.5067** |
+
+The measurement lands four per cent from the smoothing prediction and a factor
+of two from the alternative. **The lengthening reading is eliminated**, and with
+it the concern that the original result was an artefact of measuring beside a
+null.
+
+The test is also the better measurement of the two, in every respect that the
+original was weak:
+
+| | duty 0.2669 | duty 0.1504 |
+|---|---|---|
+| peak reflectivity | 0.00421 | 0.01097 |
+| unaccounted background at the peak | 1.6 % | 0.74 % |
+| mesh shift, resolutions 20 to 30 | 5.6 % | **0.24 %** |
+
+The analytic amplitude is 1.68 times larger away from the null, so the signal
+rises while the background falls, and the convergence guard reads 0.24 per cent
+against a 49 per cent departure. The disagreement is two hundred times its own
+discretisation error.
+
+### Three measurements of sigma
+
+| | duty | ratio | sigma |
+|---|---|---|---|
+| LTOI as drawn | 0.267 | 0.528 | 67.4 nm |
+| E-DBR, measured directly | 0.230 | 0.651 | 63.5 nm |
+| LTOI at the shifted duty | 0.150 | 0.507 | 69.5 nm |
+
+Two films, two wavelengths, and a duty varied by nearly a factor of two, giving
+sigma within nine per cent. **A parameter that holds across the variable chosen
+to break it is doing work rather than absorbing a local sensitivity.**
+
+What none of the three tests is the effective-index reduction itself. All are
+plane against plane, so they establish that the two routes disagree on the same
+reduced structure and say nothing about whether either matches the drawn device.
+
 ## What it costs the design, and what fixes it
 
 At the sigma measured on its own grating the candidate's coupling falls from
