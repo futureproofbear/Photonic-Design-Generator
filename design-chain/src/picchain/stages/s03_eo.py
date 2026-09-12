@@ -403,6 +403,9 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     mat = lib[p.film_material]
     n_e = mat.index(lam, "e", p.use_index_override)
     r = mat.r_pm_per_V(e.eo_coefficient) * 1e-12  # m/V
+    # captured here rather than read at the payload: `mat` is rebound by a loop
+    # over material names further down, so the name holds a string by then
+    film_provenance = mat.provenance
 
     E_ref = V / (geom.electrode_gap_um * 1e-6)                  # parallel-plate reference, V/m
     dn_ideal = 0.5 * n_e**3 * r * E_ref
@@ -568,6 +571,14 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "test_voltage_V": V,
         "eo_coefficient": e.eo_coefficient,
         "r_pm_per_V": r * 1e12,
+        # The source of that coefficient, carried beside it. Two material files
+        # in this repository state different values for the same constant on the
+        # same material, one from a foundry manual and one from the literature,
+        # and a half-wave voltage scales as its reciprocal. Two designs quoting
+        # disagreements against different anchors were not comparable until this
+        # was visible, the difference being 1.67 per cent in every half-wave
+        # voltage derived from them.
+        "eo_coefficient_provenance": film_provenance,
         "n_extraordinary": n_e,
         "eo_overlap_gamma": gamma,
         # the same overlap from the finite-element solver, and their disagreement

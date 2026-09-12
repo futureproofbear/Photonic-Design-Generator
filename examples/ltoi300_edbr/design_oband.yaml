@@ -1,0 +1,130 @@
+meta:
+  name: ltoi300_edbr_oband
+  title: An extended-DBR laser on lithium tantalate, at the measured coupling
+  status: scaffold
+platform:
+  cut: x
+  stack: ltoi300
+  materials_file: design-chain/pdk/LXT_LT_PRO/materials_lt_pro.yaml
+  film_material: LiTaO3
+  film_thickness_um: 0.3
+  etch_depth_um: 0.18
+  sidewall_deg: 70.0
+  box_thickness_um: 7.0
+  clad_thickness_um: 2.0
+  slab_offset_um: 6.0
+  propagation_loss_dB_per_cm: 0.2
+waveguide:
+  top_width_um: 0.7
+  wavelength_um: 1.31
+mesh:
+  d_fine_um: 0.01
+  d_coarse_um: 0.06
+  num_modes: 3
+  polarisation: TE
+grating:
+  enabled: true
+  order: 3
+  target_wavelength_um: 1.31
+  length_um: 7800.0
+  post_width_um: 0.3
+  post_gap_um: 0.63
+  span_GHz: 6000.0
+  points: 2001
+  profile_sigma_um: 0.067
+electrodes:
+  enabled: true
+  gap_um: 7.6
+  width_um: 20.0
+  thickness_um: 0.9
+  material: Au
+  eo_coefficient: r33
+  test_voltage_V: 1.0
+  drive_impedance_ohm: 50.0
+  max_drive_voltage_V: 30.0
+cavity:
+  enabled: true
+  feed_length_um: 200.0
+  rsoa:
+    length_um: 1000.0
+    group_index: 3.6
+    back_facet_R: 0.9
+    front_facet_R: 0.0001
+    confinement_factor: 0.035
+    internal_loss_per_cm: 10.0
+    coupling_loss_dB_per_facet: 3.13
+    linewidth_enhancement_alpha: 3.0
+    spontaneous_emission_factor_nsp: 2.0
+    output_power_mW: 24.93
+    gain:
+      differential_gain_cm2: 2.5e-16
+      transparency_density_per_cm3: 1.0e18
+      carrier_lifetime_ns: 1.0
+      gain_compression_cm3: 1.5e-17
+      spontaneous_coupling_beta: 0.0001
+      injection_efficiency: 0.8
+      active_width_um: 2.0
+      active_thickness_um: 0.024
+fem:
+  enabled: false
+bend:
+  enabled: false
+fdtd:
+  enabled: false
+mzm:
+  enabled: false
+stages:
+- mode
+- grating
+- eo
+- cavity
+- dynamics
+- circuit
+- verify
+targets:
+- metric: mode.n_guided_modes
+  max: 1
+  severity: must
+  source: a single-mode ridge is the premise of the mask this grating is drawn on
+- metric: grating.peak_reflectivity
+  value: 0.75
+  rel_tol: 0.2
+  severity: must
+  source: sized to the same mirror reflectivity the TFLN baseline is graded at
+- metric: grating.bragg_wavelength_nm
+  value: 1310.0
+  rel_tol: 0.02
+  severity: must
+  source: the O-band target the mask's grating is solved for
+- metric: cavity.smsr_dB
+  min: 40.0
+  severity: should
+  source: the side-mode suppression the TFLN baseline is graded at
+- metric: cavity.mode_hop_free_range_GHz
+  min: 8.0
+  severity: should
+  source: carried across from the TFLN baseline; not a requirement of this platform
+- metric: circuit.peak_reflectivity_at_chip
+  min: 0.15
+  severity: must
+  source: what the gain chip actually sees, which is the grating's reflectivity through
+    the facet twice. The TFLN baseline grades the grating alone and its laser sees
+    0.19 against a graded 0.75.
+circuit:
+  enabled: true
+warnings:
+  acknowledged:
+  - key: grating.uniform_unapodised_grating_expect
+    reason: The grating is uniform by construction, being the one the mask draws.
+      Sidelobes are expected and are not graded on this scaffold.
+  - key: eo.electrostatic_solve_converged_halving
+    reason: The overlap moves 2.0 per cent under a cell halving, at the tolerance.
+      The convergence order is fitted at 0.50 on this platform and the extrapolation
+      is recorded in ../ltoi300_mask/REPORT_KAPPA.md; no figure here is quoted to
+      better than that.
+  - key: eo.lumped_rc_estimate_gives
+    reason: Over 7.8 mm the electrode is a transmission line and the lumped estimate
+      is not the bandwidth. The travelling-wave figure is the one to read.
+  - key: cavity.fitted_laser_tuning_1115
+    reason: The fitted slope is taken over one hop-free segment and this scaffold
+      carries no tuning requirement, so the divergence is recorded and not acted on.

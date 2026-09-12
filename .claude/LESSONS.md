@@ -3290,3 +3290,37 @@ acceptance limit of 3.167 and disagree with the correct 3.125 by 1 and 3 per
 cent. The invariant that settles it is that the product of the overlap and the
 device half-wave voltage is constant, 1.380366 in both runs of the ladder, so
 the device figure follows the base mesh and nothing else.
+
+### L050 — A laser was graded on the mirror it contains rather than on the mirror it sees
+
+An extended-DBR design carries a blocking requirement on the peak reflectivity
+of its grating, 0.75 plus or minus a fifth, and meets it. The circuit stage
+assembles the same mirror through the chip facet and reports what the gain
+element actually sees: **0.1895**, a quarter of the graded figure, the facet
+transmission of 0.486 costing 0.236 on the round trip.
+
+The requirement is that the laser has enough feedback to reach threshold. The
+grating's bare reflectivity is not that quantity and cannot be, because nothing
+in it knows there is a facet. **A target that names the wrong metric passes for
+the wrong reason**, and this one has passed for as long as the design has
+existed.
+
+The quantity that does encode the requirement was already being computed. The
+circuit stage reports it, had executed twice in the repository's history, and
+nothing grades its output. **Where a stage exists to assemble what the device
+actually presents, the acceptance rows belong on its output and not on the
+components it assembles.**
+
+Two further findings of that stage were surfaced by the same run and are
+recorded rather than acted on: the mirror bandwidth seen at the facet is 3.1 per
+cent from the grating's own, and the group delay of the assembly is 83 per cent
+above the grating delay plus twice the feed. A passive feed does not filter, so
+neither is obviously right.
+
+An etalon ratio reported as a power was also checked and is sound. The residual
+facet reflection modulates the mirror between 1.026 and 1.049, entirely above
+unity, which reads as a passive assembly returning more power than it is given.
+It is a ratio to the unmodulated mirror, and the stop band spans under one per
+cent of the etalon free spectral range, so the ripple cannot complete a cycle
+across it and need not cross one. **The finding text calls it a power and should
+not.**
