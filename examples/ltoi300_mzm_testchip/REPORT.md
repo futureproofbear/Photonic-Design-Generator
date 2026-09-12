@@ -11,9 +11,25 @@ Conducted 2026-09-05. The concept is in
 
 Not to make a modulator. This chain and the Luxtelligence kit disagree by 31 per
 cent about the half-wave voltage of the kit's own C-band modulator arm, the
-disagreement sits entirely in the electro-optic overlap, and one device cannot
-separate the overlap from the material constant it multiplies. A ladder over
-electrode gap can, and the concept sets out why.
+disagreement sits in the product of the electro-optic overlap and the material
+constant it multiplies, and one device cannot separate the two factors. A ladder
+over electrode gap can, and the concept sets out why.
+
+**An earlier version of this paragraph said the disagreement sits entirely in
+the overlap. That is now measured and it does not.** On 2026-09-12 the overlap
+was evaluated a second time by the full-vectorial finite-element solver on its
+own triangulation, sharing the radio-frequency field, the gap and the voltage
+with the finite-difference route and differing in the optical field and the
+quadrature. The two agree to twelve parts per million, 0.3880006 against
+0.3880052, in run `20260912-112152-ltoi300_gamma_xcheck`.
+
+Reaching the kit's 5.6 V·cm from this chain's ideal 2.851 requires an overlap of
+0.5091. The chain computes 0.3880, which is 23.8 per cent away, and two
+independent solvers now agree on that figure. **The optical half of the overlap
+is not the discrepancy.** What remains untested is the electrostatic field, which
+both routes share and which this stage separately reports as unconverged at 3.0
+per cent against a 2.0 per cent tolerance, and the material constant, and the
+convention behind the kit's own number.
 
 **Two figures for that disagreement appear in this repository and both are
 right.** The chain returns 7.3482 V·cm on the rail cross-section it solves,

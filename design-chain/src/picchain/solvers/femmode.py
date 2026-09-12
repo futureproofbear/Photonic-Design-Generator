@@ -124,6 +124,51 @@ class FemModeResult:
         part = energy.assemble(sub, E=sub.interpolate(self._mode.E))
         return float(np.real(part / total))
 
+    def eo_overlap(self, rf_field, active_material: str, gap_um: float,
+                   voltage: float) -> float:
+        """Electro-optic overlap assembled on this solver's own triangulation.
+
+            Gamma = (G/V) * Int_active( E_rf |E_t|^2 ) / Int_all( |E_t|^2 )
+
+        which is the definition `solvers.electrostatic.eo_overlap` evaluates on
+        a rectangular grid. `rf_field` is a callable taking two arrays of
+        coordinates and returning the radio-frequency field at them, so the two
+        figures share that field and differ only in the optical field and the
+        quadrature that integrates it.
+
+        Point evaluation of the finite-element field is not available: the
+        vector basis raises on `probes`, so the optical field cannot be resampled
+        onto the rectangular grid and the integral is assembled here instead.
+        That leaves the quadrature differing between the two figures as well as
+        the field, and a disagreement cannot be attributed to the field alone
+        without a mesh ladder.
+        """
+        if self._mode is None:
+            return float("nan")
+        basis = self._mode.basis
+        keys = [k for k in self._subdomains.get(active_material, [])
+                if k in basis.mesh.subdomains]
+        if not keys:
+            return float("nan")
+
+        @_Functional
+        def energy(w):
+            return np.abs(w["E"][0][0]) ** 2 + np.abs(w["E"][0][1]) ** 2
+
+        @_Functional
+        def weighted(w):
+            inten = np.abs(w["E"][0][0]) ** 2 + np.abs(w["E"][0][1]) ** 2
+            erf = rf_field(np.asarray(w.x[0]), np.asarray(w.x[1]))
+            return erf * inten
+
+        den = energy.assemble(basis, E=basis.interpolate(self._mode.E))
+        elements = np.unique(np.concatenate([basis.mesh.subdomains[k] for k in keys]))
+        sub = basis.with_elements(elements)
+        num = weighted.assemble(sub, E=sub.interpolate(self._mode.E))
+        if not np.isfinite(np.real(den)) or np.real(den) == 0.0:
+            return float("nan")
+        return float((gap_um / voltage) * np.real(num) / np.real(den))
+
 
 @dataclass
 class FemSolveResult:

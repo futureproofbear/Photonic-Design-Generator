@@ -3208,3 +3208,28 @@ scales with the order, so the order cancels from the suppression entirely and
 every order predicts the same value. The claim that the effect is quadratic in
 the order, taken from a comment in the configuration and repeated without
 checking, is true only at fixed period.
+
+### L047 — Two solvers agreeing on an eigenvalue say nothing about the shape of the field
+
+A chain and a supplied kit disagreed by 31 per cent about a half-wave voltage,
+and the disagreement was attributed in the design report to the electro-optic
+overlap. The finite-element stage had cross-checked that cross-section for weeks
+and reported the two solvers agreeing on the effective index to six parts in a
+hundred thousand. **That agreement was read as covering the overlap and does not
+touch it.** An eigenvalue is an integral over the whole field and can be right
+while the shape of the field inside the active region is wrong; the overlap is
+entirely a statement about shape.
+
+Evaluating the overlap a second time, on the finite-element solver own
+triangulation and sharing the radio-frequency field, gives agreement to twelve
+parts per million. The optical half of the overlap is sound and the 31 per cent
+is not there. What the comparison does not touch is the electrostatic field,
+which both routes share, and which the same stage separately reports as
+unconverged at 3.0 per cent.
+
+**A cross-check covers the quantity it evaluates and no other.** Where a stage
+reports two solvers agreeing, the list of quantities compared belongs beside the
+verdict, because a reader will otherwise extend it to whatever is in dispute.
+
+The check cost one extra solve of a cross-section the chain already meshes. It
+had been available for as long as the disagreement had.

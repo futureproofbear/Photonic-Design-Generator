@@ -40,6 +40,7 @@ from ..artifacts import RunContext
 from ..config import Design
 from ..geometry import RasterGrid, graded_axis, material_mask, rasterise
 from ..materials import MaterialLibrary
+from ..solvers import femmode
 from ..solvers.electrostatic import eo_overlap, solve_potential
 from .s01_mode import _build
 
@@ -306,6 +307,58 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 
     gamma = eo_overlap(Ex_opt, intensity, mask_film_opt, ox, oy, geom.electrode_gap_um, V)
 
+    # ---- the same overlap from the finite-element solver -------------------
+    #
+    # The chain and the Luxtelligence kit disagree by 31 per cent about the
+    # half-wave voltage of the kit's own C-band arm, and the disagreement sits
+    # in this overlap, which multiplies a material constant. One device cannot
+    # separate the two factors and the test chip drawn to do so has not been
+    # fabricated. An independent evaluation of the overlap can still say whether
+    # the chain's factor is sound.
+    #
+    # The finite-element stage already cross-checks this cross-section, and the
+    # two solvers agree on the effective index to six parts in a hundred
+    # thousand. That says nothing about the overlap: an eigenvalue can be right
+    # while the shape of the field inside the active region is not, and the
+    # overlap is entirely a statement about shape.
+    #
+    # The radio-frequency field, the gap and the voltage are shared. What
+    # differs is the optical field and the quadrature that integrates it, the
+    # finite-element field not being evaluable at arbitrary points.
+    gamma_fem = float("nan")
+    if design.fem.enabled and femmode.available():
+        try:
+            from .s13_fem import _eps_scalar as _fem_eps
+            # the optical cross-section, built the way the finite-element stage
+            # builds it: no posts, no electrodes, no handle wafer
+            xs_opt = _build(design, with_posts=False, electrodes=False,
+                            name="eo_gamma_xcheck")
+            eps_fem = _fem_eps(xs_opt, lib, lam, p.cut, p.use_index_override, 0)
+            fem_res = femmode.solve_cross_section(
+                xs_opt, eps_fem, lam,
+                num_modes=design.fem.num_modes,
+                element_order=design.fem.element_order,
+                resolution_max_um=design.fem.resolution_max_um,
+                fine_resolution_um=design.fem.resolution_fine_um,
+                fine_distance_um=design.fem.fine_distance_um,
+                n_guess=float((ctx.get("mode") or {}).get("n_eff_bare") or 0.0) or None,
+            )
+            fem_mode = fem_res.select(design.mesh.polarisation,
+                                      float((ctx.get("mode") or {}).get("n_eff_bare") or 0.0) or None)
+
+            def _rf_at(X, Y):
+                pts = np.stack([np.ravel(X) + arm_offset_um, np.ravel(Y)], axis=-1)
+                return interp(pts).reshape(np.shape(X))
+
+            gamma_fem = fem_mode.eo_overlap(
+                _rf_at, p.film_material, geom.electrode_gap_um, V)
+        except Exception as exc:                                  # noqa: BLE001
+            ctx.warn(
+                "the finite-element cross-check of the electro-optic overlap did "
+                f"not complete: {type(exc).__name__}: {exc}. The overlap reported "
+                "rests on the finite-difference solver alone"
+            )
+
     # ---- THE PHASE SECTION'S OWN GAP, SOLVED RATHER THAN SCALED ------------------
     #
     # The cavity stage took the phase section's index change per volt as the
@@ -510,6 +563,11 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "r_pm_per_V": r * 1e12,
         "n_extraordinary": n_e,
         "eo_overlap_gamma": gamma,
+        # the same overlap from the finite-element solver, and their disagreement
+        "eo_overlap_gamma_fem": gamma_fem,
+        "eo_overlap_gamma_fem_rel_delta": (
+            float((gamma_fem - gamma) / gamma)
+            if gamma and gamma_fem == gamma_fem else float("nan")),
         "dn_ideal_per_V": dn_ideal / V,
         "dn_eff_per_V": dn_eff_per_V,
         "tuning_MHz_per_V": tuning_Hz_per_V / 1e6,
