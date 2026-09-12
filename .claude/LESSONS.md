@@ -3239,9 +3239,10 @@ had been available for as long as the disagreement had.
 A stage comment recorded an electro-optic overlap converging as roughly the 0.8
 power of the cell. Fitting it over a three-point ladder gives 0.496, which is
 square-root behaviour and is what a field singularity at a conductor corner
-produces. The difference matters because the extrapolation divides by
-: at 0.8 the Richardson factor is 1.35 times the last difference and at
-0.496 it is 2.41, so the limit moves by a third of the correction.
+produces. The difference matters because the extrapolation divides by two to the
+power p, less one: at 0.8 the Richardson factor is 1.35 times the last
+difference and at 0.496 it is 2.41, so the limit moves by a third of the
+correction.
 
 **An order is cheap to fit and expensive to estimate.** The ladder needed one
 extra run, and it was affordable because it was extended *downward*. A further
