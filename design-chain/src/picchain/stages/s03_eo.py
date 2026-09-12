@@ -283,8 +283,15 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # about that guide's position in the line rather than about the axis.
     # The interpolation order was investigated and is not the limitation.
     #
-    # Gamma converges as roughly the 0.8 power of the cell while the capacitance
-    # converges cleanly, and the natural suspect was this interpolant carrying a
+    # Gamma converges as the 0.496 power of the cell while the capacitance
+    # converges cleanly. The order was fitted on 2026-09-12 over a three-point
+    # ladder at 0.050, 0.025 and 0.0125 um, giving 0.371775, 0.388049 and
+    # 0.399588, and the 0.025 point reproduces across two runs to 0.0125 per
+    # cent. Square-root convergence is what a field singularity at a conductor
+    # corner gives. This comment previously said 0.8, which was an estimate
+    # rather than a fit.
+    #
+    # The natural suspect was this interpolant carrying a
     # first-order error. Solving at 50, 35 and 25 nm with a cubic interpolant
     # instead moved Gamma by 0.06 per cent and left the convergence order
     # unchanged. What converges slowly is the field itself at the conductor
@@ -510,7 +517,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # converges as the square of the cell; the overlap is that field
         # interpolated linearly onto the optical mesh, through a region holding a
         # ridge corner and the metal edge singularity, so it converges as the
-        # first power. A guard reporting 0.21 per cent on the capacitance was
+        # square root of the cell, measured at 0.496. A guard reporting 0.21 per cent on the capacitance was
         # read as authorising a Vpi whose overlap was still moving by several per
         # cent between meshes.
         gamma_ref = _gamma_from(_sr)

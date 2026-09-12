@@ -3233,3 +3233,28 @@ verdict, because a reader will otherwise extend it to whatever is in dispute.
 
 The check cost one extra solve of a cross-section the chain already meshes. It
 had been available for as long as the disagreement had.
+
+### L048 — A convergence order carried as an estimate for weeks, and the fit changed the extrapolation by a third
+
+A stage comment recorded an electro-optic overlap converging as roughly the 0.8
+power of the cell. Fitting it over a three-point ladder gives 0.496, which is
+square-root behaviour and is what a field singularity at a conductor corner
+produces. The difference matters because the extrapolation divides by
+: at 0.8 the Richardson factor is 1.35 times the last difference and at
+0.496 it is 2.41, so the limit moves by a third of the correction.
+
+**An order is cheap to fit and expensive to estimate.** The ladder needed one
+extra run, and it was affordable because it was extended *downward*. A further
+halving of the finest mesh would have been 16.6 million unknowns through a
+direct sparse factorisation, which this host would not survive; a coarser third
+point costs seconds and fits the same order.
+
+The fitted extrapolation reduced a 31.2 per cent disagreement with a supplied
+kit to 19.0. **A mesh error worth twelve points of thirty-one is neither the
+cause nor negligible**, and reporting the disagreement without it overstated the
+physics by that much for as long as the comment stood.
+
+The extrapolation is large, 2.41 times the last difference, and its robustness
+was reported rather than asserted: any order between 0.40 and 0.60 leaves the
+residue between 16.9 and 20.7 per cent. **Where a limit rests on an extrapolation
+of that size, quote it against a range of the exponent.**

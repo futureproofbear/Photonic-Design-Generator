@@ -1,0 +1,288 @@
+meta:
+  name: ltoi300_gamma_coarse
+  title: The electro-optic overlap on a coarser pair, to fit the convergence order
+  status: scaffold
+platform:
+  cut: x
+  materials_file: design-chain/pdk/LXT_LT_PRO/materials_lt_pro.yaml
+  film_material: LiTaO3
+  film_thickness_um: 0.3
+  etch_depth_um: 0.18
+  slab_offset_um: 6.0
+  sidewall_deg: 70.0
+  box_thickness_um: 7.0
+  clad_thickness_um: 2.0
+  substrate_material: Si
+waveguide:
+  top_width_um: 2.5
+  wavelength_um: 1.55
+mesh:
+  d_fine_um: 0.01
+  d_coarse_um: 0.06
+  num_modes: 4
+  polarisation: TE
+grating:
+  enabled: false
+electrodes:
+  enabled: true
+  topology: gsg
+  gap_um: 5.5
+  width_um: 16.0
+  ground_width_um: 50.0
+  length_um: 5000.0
+  thickness_um: 0.9
+  material: Au
+  eo_coefficient: r33
+  test_voltage_V: 1.0
+  drive_impedance_ohm: 50.0
+  travelling_wave: true
+  far_end_stub_um: 210.0
+  far_end_load_ohm: 1.0e9
+  convergence_check: true
+  refinement: 0.5
+  rf_mesh_fine_um: 0.05
+bend:
+  enabled: true
+  radii_um:
+  - 100.0
+  - 200.0
+  - 350.0
+  - 570.0
+  - 1050.0
+fem:
+  enabled: true
+modulator:
+  enabled: true
+  configuration: mach_zehnder
+  drive: push_pull
+  rf_band_GHz:
+  - 0.1
+  - 5.0
+mzm:
+  mmi_width_um: 4.5
+  mmi_length_um: 13.5
+  port_separation_um: 2.8
+  port_width_um: 1.95
+  count: 1
+  labels:
+  - G5P5
+cavity:
+  enabled: false
+circuit:
+  enabled: false
+process:
+  bias_um: {}
+  depth_bias_um: 0.0
+  precompensate: true
+  simulate: printed
+  grid_nm: 1.0
+  max_snap_displacement_nm: 0.0
+layout:
+  enabled: true
+  device: mach_zehnder
+  cell_name: LTOI300_MZM_TESTCHIP
+  compare_backends: true
+  check_geometry: true
+  taper_length_um: 150.0
+  taper_tip_width_um: 0.4
+  taper_segments: 64
+  slab_min_width_um: 0.3
+  input_facet_angle_deg: 8.0
+  output_facet_angle_deg: 8.0
+  facet_route: angled
+  facet_bend_radius_um: 500.0
+  facet_angled_length_um: 40.0
+  draw_facets: true
+  facet_recess_um: 5.0
+  facet_keepout_um: 30.0
+  bond_pad_um: 100.0
+  draw_orientation_key: true
+reticle:
+  enabled: true
+  die_width_um: 10100.0
+  die_height_um: 5050.0
+  margin_um: 40.0
+  dicing_lane_um: 80.0
+  align_facet_to_edge: true
+  device_y: top
+  label: MZMOVL
+  revision: A
+  label_height_um: 40.0
+  label_layers:
+  - LABEL
+  seal_ring:
+    enabled: false
+  chip_frame:
+    enabled: true
+    exclusion_zone_um: 50.0
+    allowed_edges_um:
+    - 2500.0
+    - 5050.0
+    - 10100.0
+  split:
+    enabled: true
+    parameter: electrodes.gap_um
+    values:
+    - 3.5
+    - 8.0
+    - 11.0
+    - 15.0
+    pitch_um: 0.0
+    label_each: true
+    label_height_um: 25.0
+mask:
+  enabled: true
+  target: die
+  connected_layers:
+  - WG
+  - METAL
+  - PAD
+  expectations_describe: device
+  extract_netlist: true
+  joined_layers:
+  - - METAL
+    - PAD
+  label_layer: LABEL
+  density_tile_um: 200.0
+  density_windows: []
+  fill:
+    enabled: false
+drc:
+  enabled: true
+  target: die
+  deck: ../../design-chain/pdk/LXT_KLayout_DRC_Runsets/LT_PRO_ltoi300.lydrc
+  rules:
+  - name: RIDGE_min_width
+    kind: min_width
+    layer: WG
+    value_um: 0.25
+    severity: error
+    ignore_angle_deg: 20.0
+  - name: RIDGE_min_space
+    kind: min_space
+    layer: WG
+    value_um: 0.3
+    severity: error
+    ignore_angle_deg: 20.0
+  - name: M1_min_width
+    kind: min_width
+    layer: METAL
+    value_um: 0.8
+    severity: error
+  - name: M1_min_space
+    kind: min_space
+    layer: METAL
+    value_um: 1.0
+    severity: error
+corners:
+  enabled: true
+  parameters:
+    process.bias_um.WG: 0.05
+    process.bias_um.METAL: 0.2
+    platform.film_thickness_um: 0.01
+  metrics:
+  - eo.eo_overlap_gamma
+  - eo.VpiL_V_cm
+  - modulator.Vpi_V
+  - eo.travelling_wave.far_end_worst_penalty_dB
+  - eo.travelling_wave.characteristic_impedance_ohm
+targets:
+- metric: modulator.Vpi_V
+  max: 25.0
+  severity: must
+  source: the concept requires every rung to be reachable by an ordinary laboratory
+    source. Above 25 V the null cannot be found and the rung measures nothing
+- metric: eo.eo_overlap_gamma
+  min: 0.05
+  severity: must
+  source: the concept requires the overlap to be a quantity the chip measures. An
+    overlap below five per cent is a device that does not modulate, whatever the ladder
+    does
+- metric: eo.VpiL_V_cm
+  value: 5.6
+  rel_tol: 0.2
+  severity: should
+  source: 'the PDK compact model in ltoi300/models.py sets V_pi of a 5000 um C-band
+    phase shifter to 11.2 V, which is 5.6 V cm read as a single arm. The concept states
+    why this is a should and not a must: the disagreement is the subject of the experiment
+    and a must here would assert its answer'
+- metric: modulator.VpiL_device_V_cm
+  value: 2.8
+  rel_tol: 0.2
+  severity: should
+  source: the same figure read through the push-pull convention, being half the arm
+    figure
+- metric: eo.travelling_wave.far_end_worst_penalty_dB
+  min: -3.0
+  severity: should
+  source: 'the concept requires the half-wave measurement not to be distorted at the
+    speed it is taken. On a line whose far end is open the 3 dB point is the wrong
+    quantity to ask that of: it is referred to a zero-frequency value the open end
+    has doubled, so it reports 4.4 GHz while the device is within half a decibel of
+    a matched line above 49 GHz. What a driver and a measurement see is the comparison
+    against a matched line, which `far_end_worst_penalty_dB` gives, and its worst
+    point over the whole band is the figure bounded here'
+- metric: eo.travelling_wave.characteristic_impedance_ohm
+  min: 35.0
+  max: 65.0
+  severity: should
+  source: 50 ohm plus or minus 15. A mismatch costs drive and is corrected in the
+    measurement rather than in the mask, which is why this is a should
+warnings:
+  acknowledged:
+  - key: mode.cross_section_supports_3
+    reason: The finding states a requirement of the extended-DBR laser this chain
+      was first written for and states nothing about a modulator arm. The PDK widens
+      each arm to 2.5 um through the modulation section and names that cross-section
+      `xs_rwg2500`. The device drives the fundamental TE mode, which is what the electro-optic
+      stage weights.
+  - key: eo.electrostatic_solve_converged_halving
+    reason: Accepted with the residual carried as a declared uncertainty. The overlap
+      of this cross-section converges as about the square root of the cell, the cause
+      being the sloped ridge sidewall across which the permittivity steps by a factor
+      of eleven. The companion study reports a four-point ladder and the Richardson
+      limit it extrapolates to. This chip exists to replace that extrapolation with
+      a measurement, so the residual is the reason for the design rather than a defect
+      in it.
+  - key: modulator.3_db_bandwidth_4
+    reason: 'The finding is correct about the number and the number is the wrong figure
+      of merit for this line. The mask draws an open far end, so the 3 dB point is
+      referred to a zero-frequency value the open end has doubled: it reports 4.4
+      GHz while the run puts the open line 5.37 dB better than a matched one at 0.1
+      GHz. What bounds this chip is the target on `far_end_worst_penalty_dB`, being
+      -1.85 dB at a null near 9.93 GHz, outside the 0.1 to 5 GHz declared here. The
+      drive figure the finding quotes is likewise self-referred.'
+  - key: reticle.die_carries_seal_ring
+    reason: The LT-PRO manual states that the foundry adds the seal ring, the filler
+      and the guard rails during mask preparation, so none is drawn here. The entry
+      is recorded in references/README.md.
+  - key: reticle.fill_placed_mask_stage
+    reason: The same manual entry. The foundry places the fill, and the three figures
+      the mask stage would need to place it are a foundry statement that this repository
+      does not hold.
+  - key: drc.rule_deck_named_input
+    reason: The deck was written for the graphical application and names no input
+      and no report. The chain binds it without altering a rule, which is what the
+      finding says it did.
+  - key: drc.rule_deck_names_12
+    reason: The deck reads layer numbers this chain does not emit, so eight of its
+      twelve layers are evaluated against nothing. That is a property of the layer
+      map rather than of this design, it is recorded in the companion mask study under
+      section 3, and the remedy is to renumber layout.layer_map to the process numbers
+      before any submission. Until then the deck verdict covers four layers and is
+      read as covering four.
+  - key: drc.foundry_deck_reports_11
+    reason: Read and resolved. Five were M2_HRL_no_contact, the deck requiring the
+      line to contact a terminating resistor that this chain draws no layer for; the
+      design now declares the far end open, which is what the mask carries. Six were
+      M2 outside CHIP_INNER, the electrode leads reaching the die boundary, which
+      follows from the same layer-number mismatch recorded above.
+release:
+  enabled: true
+  revision: A
+  strict: true
+  waive: []
+stages:
+- mode
+- eo
+- verify

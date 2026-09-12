@@ -26,10 +26,28 @@ quadrature. The two agree to twelve parts per million, 0.3880006 against
 Reaching the kit's 5.6 V·cm from this chain's ideal 2.851 requires an overlap of
 0.5091. The chain computes 0.3880, which is 23.8 per cent away, and two
 independent solvers now agree on that figure. **The optical half of the overlap
-is not the discrepancy.** What remains untested is the electrostatic field, which
-both routes share and which this stage separately reports as unconverged at 3.0
-per cent against a 2.0 per cent tolerance, and the material constant, and the
-convention behind the kit's own number.
+is not the discrepancy.**
+
+**Nor is the mesh, though it is worth twelve points of the thirty-one.** The
+electrostatic field is shared by both routes and was the remaining untested
+half. A three-point ladder at 0.050, 0.025 and 0.0125 um gives overlaps of
+0.371775, 0.388049 and 0.399588, fitting a convergence order of 0.496, which is
+the square-root behaviour a field singularity at a conductor corner produces.
+The 0.025 point reproduces across two runs to 0.0125 per cent.
+
+| | overlap | half-wave voltage | against the kit |
+|---|---|---|---|
+| at the mesh as run | 0.3880 | 7.348 V·cm | +31.2 % |
+| Richardson limit | 0.4277 | 6.666 V·cm | **+19.0 %** |
+
+The extrapolation is a large one, the factor at this order being 2.41 times the
+last difference, and it is insensitive to the fit: an order anywhere between 0.40
+and 0.60 leaves the disagreement between 16.9 and 20.7 per cent.
+
+**So the overlap in all its parts accounts for twelve points of thirty-one and
+nineteen remain.** What is left is the material constant, the drawn geometry the
+kit assumes, or the convention behind its own figure. None of the three is
+testable by this chain against itself, and a measured device would settle it.
 
 **Two figures for that disagreement appear in this repository and both are
 right.** The chain returns 7.3482 V·cm on the rail cross-section it solves,
