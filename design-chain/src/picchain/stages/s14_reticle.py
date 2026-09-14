@@ -518,10 +518,40 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # monitors below the ladder
     mon_dy = split_top - split_h - monitor_gap
     mon_dx = -dev_box.left
+    # The extent of every monitor polygon on every layer, accumulated as they
+    # are placed. This is what the monitor field is, and deriving it any other
+    # way under-covers it.
+    _mon_extent: list[float] | None = None
     for layer, plist in mon_polys.items():
         add(layer, plist, mon_dx, mon_dy)
+        if layer not in lmap:
+            continue          # not drawn, so not part of the field
+        for _poly in plist:
+            for _px, _py in _poly:
+                _x, _y = _px + mon_dx, _py + mon_dy
+                if _mon_extent is None:
+                    _mon_extent = [_x, _y, _x, _y]
+                else:
+                    _mon_extent = [min(_mon_extent[0], _x), min(_mon_extent[1], _y),
+                                   max(_mon_extent[2], _x), max(_mon_extent[3], _y)]
 
-    monitor_field_box = None   # measured from the written die, below
+    # Clipped here, in the frame the extent was accumulated in. A field that
+    # reaches the device band would declare a real violation a monitor, which is
+    # the one thing it must never do.
+    if _mon_extent is not None:
+        _dev_floor = split_top - split_h - 1.0
+        if _mon_extent[3] > _dev_floor:
+            _mon_extent[3] = _dev_floor
+            ctx.warn(
+                "the monitor field reaches the device band and was clipped. A "
+                "monitor placed that close to a device cannot be set aside "
+                "without setting the device aside with it; increase the gap "
+                "between the ladder and the monitors",
+                key="reticle.monitor_field_clipped")
+        if _mon_extent[3] <= _mon_extent[1]:
+            _mon_extent = None
+
+    monitor_field_box = None   # from the placed monitors, below
 
     # --- optical ports for the monitors, added 2026-08-16 -----------------
     #
@@ -693,6 +723,13 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         cx = 0.5 * ((die_x0 - lane) + (die_x1 + lane))
         cy = 0.5 * ((die_y0 - lane) + (die_y1 + lane))
         die.transform(db.DTrans(db.DVector(-cx, -cy)))
+        # The monitor extent was accumulated as the monitors were placed, which
+        # is before this, so it moves with the die. Omitting this put the
+        # declared field 4.8 mm from the structures it declares, and the ten
+        # vernier marks it exists to set aside were counted against the design.
+        if _mon_extent is not None:
+            _mon_extent = [_mon_extent[0] - cx, _mon_extent[1] - cy,
+                           _mon_extent[2] - cx, _mon_extent[3] - cy]
 
         ez = cfg.chip_frame.exclusion_zone_um
         hw, hh = outer_w / 2.0, outer_h / 2.0
@@ -793,42 +830,34 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # the box from the offsets was tried and disagreed with the mask, so it is
     # measured from the polygons instead, which is the only frame that cannot
     # drift from what was drawn.
+    # ---- the monitor field, from what was drawn ---------------------------
+    #
+    # This is the region a rule-deck driver sets aside, because the structures
+    # in it violate deliberately: the critical-dimension vernier steps below the
+    # minimum feature to find where the process stops printing, and the
+    # electrode ladder steps below the metal-to-ridge separation for the same
+    # reason. A monitor that never crosses a rule measures nothing.
+    #
+    # Until 2026-09-14 this box was reverse-engineered from a width check on the
+    # waveguide layer: it found the vernier's sub-minimum rows and padded around
+    # them. That covers a monitor which violates a WIDTH rule on ONE layer and
+    # no other. The electrode ladder violates a SEPARATION rule between metal
+    # and ridge, so it was never found, and its two marks were reported against
+    # the design. The box was 84.7 um wide where the ladder it should have
+    # covered runs 400.
+    #
+    # The field is now the extent of every monitor polygon actually placed,
+    # padded. A declaration derived from what was drawn cannot miss a structure;
+    # one derived from what happened to violate can only ever find the
+    # violations it was written for.
     monitor_field_box = None
-    try:
-        _wl = lmap.get(design.mask.label_layer if False else "WG")
-        if _wl:
-            _idx = layout.layer(_wl[0], _wl[1])
-            _reg = db.Region(die.begin_shapes_rec(_idx))
-            _floor = _min_space(design)
-            _sub = _reg.width_check(int(round(design.drc_min_width_um / layout.dbu))
-                                    if hasattr(design, "drc_min_width_um") else
-                                    int(round(0.25 / layout.dbu)),
-                                    False, db.Metrics.Projection, 3, None, None)
-            if _sub.count():
-                _b = _sub.polygons().bbox()
-                # Padded by the vernier's own recorded height, not by a token
-                # margin. Only its sub-minimum ROWS are found by a width check,
-                # and the rows at and above the floor sit below them: the 0.30 um
-                # row's spaces are at the limit and fail on tolerance, and a box
-                # drawn round the sub-minimum rows alone leaves that row outside
-                # and counts a monitor against the design.
-                _vh = 0.0
-                for _st_ in mon_desc:
-                    if _st_.get("structure") == "cd_vernier":
-                        _vh = float(_st_.get("height_um") or 0.0)
-                # Asymmetric on purpose. The vernier's rows step DOWNWARD from
-                # its origin, so the rows a width check does not find lie below
-                # the ones it does. Padding symmetrically reached to within 9 um
-                # of a device, and a box that touches a device would declare a
-                # real violation as a monitor, which is the one thing this must
-                # never do.
-                monitor_field_box = [_b.left * layout.dbu - 40.0,
-                                     _b.bottom * layout.dbu - (_vh + 40.0),
-                                     _b.right * layout.dbu + 40.0,
-                                     _b.top * layout.dbu + 40.0]
-    except Exception as _exc:      # pragma: no cover - backend specific
-        ctx.warn("the monitor field could not be measured from the die "
-                 f"({_exc}); a rule-deck driver cannot set the vernier aside",
+    if _mon_extent is not None:
+        _pad = 40.0
+        monitor_field_box = [_mon_extent[0] - _pad, _mon_extent[1] - _pad,
+                             _mon_extent[2] + _pad, _mon_extent[3] + _pad]
+    else:
+        ctx.warn("no monitor polygon was placed, so no monitor field is "
+                 "declared and a rule-deck driver cannot set the vernier aside",
                  key="reticle.monitor_field_not_measured")
 
     payload = {

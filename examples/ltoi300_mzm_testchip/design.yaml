@@ -224,6 +224,14 @@ reticle:
   label_height_um: 40.0
   label_layers: [LABEL]
   seal_ring:
+    # Off deliberately. The release gate warns that a die carrying no seal ring
+    # will be refused by most processes, which is true in general and not of
+    # this one: the LT-PRO manual entry held at design-chain/pdk/LXT_LT_PRO/
+    # states no seal-ring requirement and provides instead a 50 um exclusion
+    # zone around the die and four reserved 75 by 75 um corners, both of which
+    # this design declares. The absence is a reading of that entry rather than
+    # proof the process asks for nothing, and it is to be confirmed with the
+    # foundry in the submission note.
     enabled: false
   chip_frame:
     enabled: true
@@ -439,9 +447,28 @@ release:
   enabled: true
   revision: A
   strict: true
-  # nothing is waived. The gate is being run to find out what it says about a
-  # chip whose purpose is measurement rather than function, and a waiver written
-  # before the verdict is read would decide the answer in advance.
-  waive: []
+  # Nothing was waived until 2026-09-14, the gate being run first to find out
+  # what it says about a chip whose purpose is measurement rather than function.
+  # It has now been read, and two of its eleven conditions are waived against the
+  # process documentation rather than against convenience. A waiver is recorded
+  # in the manifest, so a reader sees what was set aside and why.
+  waive:
+    # All twelve marks the deck reports lie inside the monitor field this run
+    # declares. They are the chip working: the critical-dimension vernier steps
+    # below the minimum feature to find where the process stops printing, and
+    # the electrode ladder steps below the metal-to-ridge separation for the
+    # same reason. A monitor that never crosses a rule measures nothing. The
+    # in-process check reads the declaration and reports the die clean; the
+    # foundry deck cannot, because a KLayout runset has no way to be told which
+    # region is a monitor. The field is recorded in reticle.monitor_field_box_um
+    # and is to be named in the submission note.
+    - a foundry rule deck was executed
+    # The LT-PRO manual entry held at design-chain/pdk/LXT_LT_PRO/ states that
+    # filler patterns and guard-rail dummy waveguides are added by the foundry
+    # during mask preparation, and states no density window. Declaring one here
+    # would be inventing a figure the process does not give, and placing fill
+    # would be doing the foundry's step with numbers this repository does not
+    # hold.
+    - density is within the declared windows
 
 stages: [mode, fem, bend, eo, modulator, layout, reticle, drc, mask, verify, release]
