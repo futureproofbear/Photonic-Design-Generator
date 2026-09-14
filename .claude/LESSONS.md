@@ -3324,3 +3324,62 @@ It is a ratio to the unmodulated mirror, and the stop band spans under one per
 cent of the etalon free spectral range, so the ripple cannot complete a cycle
 across it and need not cross one. **The finding text calls it a power and should
 not.**
+
+### L051 — A rule deck reported eleven violations while checking none of the geometry
+
+A mask passed its in-process rule check and its foundry deck reported eleven
+violations, which were acknowledged as understood. The deck was reading the
+wrong layers. The design drew its waveguide on 1/0, which the deck names
+nowhere, and its slab on 2/0, where the deck expects the ridge, so **neither was
+ever checked**. The deck meanwhile matched its first metal to the chip seal
+ring, its second metal to the dicing lane and its high-resistance layer to the
+facet, and the eleven violations followed from that: six were the second metal
+lying outside the inner chip, which a dicing lane is by definition.
+
+Correcting the layer map turned eleven violations into 620. **The number rose by
+a factor of fifty-six and the mask got better**, because the deck began reading
+the geometry it is written for. A violation count falling is not evidence of a
+mask improving, and a low count from a deck matching four of its twelve layers
+is evidence of nothing at all.
+
+The remedy was known. The design's own acknowledgement named it: renumber the
+layer map to the process numbers before any submission. A sibling example in the
+same repository already carried the correct table, including the practice of
+placing everything the process does not read on a decade the deck names nowhere,
+so that it cannot be read as metal. **The fix was a copy from a file in the next
+directory and it waited for somebody to want to submit.**
+
+### L052 — The ladder had a rung the process cannot make, and dropping it was the wrong repair
+
+Of the 620 violations, 608 were one rung of a five-rung parameter ladder: an
+electrode gap of 3.5 um against a rule requiring 1.5 um between metal and ridge,
+which at a 2.5 um ridge makes 5.5 um the narrowest gap the geometry admits.
+
+Removing the rung is legal and costs the instrument a quarter of its lever. The
+ladder exists to separate an electro-optic overlap from the material constant it
+multiplies, so what it needs is span in that overlap, and the overlap across the
+ladder measures 0.3947, 0.3718, 0.3532, 0.3364, 0.3065 and 0.2726 at 3.5, 5.5,
+8, 11, 15 and 20 um. Dropping 3.5 leaves 21.3 per cent of span against the 28.8
+the illegal ladder had.
+
+**Replacing it at the other end returns more than was lost.** The overlap moves
+faster at the wide end than the narrow, so extending to 20 um gives 36.4 per
+cent, wider than the ladder that could not be made. The cost is drive: the
+half-wave voltage over this electrode is 15.3 V at the nominal and 76.1 V at
+20 um, so the widest rung needs a source that reaches it.
+
+**A rung removed for a rule is a question about where the span went, not a
+subtraction.** The first instinct was to drop it and report a shorter lever.
+
+### L053 — The cell being adjudicated sits exactly on the foundry's own rule
+
+The nominal rung is the kit's own radio-frequency gap and the ridge is the kit's
+own arm width. Together they place the metal 1.50 um from the ridge against a
+rule requiring 1.5, so the cell passes the deck with no margin whatever, and any
+bias widening either feature puts the kit's cell in violation of the kit's deck.
+
+It surfaced only because a ladder rung beside it failed loudly. **A quantity
+sitting exactly on a limit raises nothing, because a rule check reports
+violations and not margins.** Where a study adjudicates somebody else's cell,
+the margin of that cell against its own rules is a finding worth returning to
+them.
