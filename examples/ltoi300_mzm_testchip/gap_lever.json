@@ -1,0 +1,48 @@
+{
+  "design": "..\\examples\\ltoi300_mzm_testchip\\_tmp_gap_lever.yaml",
+  "param": "electrodes.gap_um",
+  "rows": [
+    {
+      "param": "electrodes.gap_um",
+      "value": "3.5",
+      "eo.eo_overlap_gamma": 0.3946657356291144,
+      "eo.VpiL_V_cm": 4.597185286009967
+    },
+    {
+      "param": "electrodes.gap_um",
+      "value": "5.5",
+      "eo.eo_overlap_gamma": 0.3717748861291319,
+      "eo.VpiL_V_cm": 7.668952132293058
+    },
+    {
+      "param": "electrodes.gap_um",
+      "value": "8.0",
+      "eo.eo_overlap_gamma": 0.35317469998461865,
+      "eo.VpiL_V_cm": 11.742316683858773
+    },
+    {
+      "param": "electrodes.gap_um",
+      "value": "11.0",
+      "eo.eo_overlap_gamma": 0.3364000044568671,
+      "eo.VpiL_V_cm": 16.950795290958943
+    },
+    {
+      "param": "electrodes.gap_um",
+      "value": "15.0",
+      "eo.eo_overlap_gamma": 0.3065168217222554,
+      "eo.VpiL_V_cm": 25.3682396734657
+    },
+    {
+      "param": "electrodes.gap_um",
+      "value": "20.0",
+      "eo.eo_overlap_gamma": 0.27256085094984595,
+      "eo.VpiL_V_cm": 38.0381954845499
+    },
+    {
+      "param": "electrodes.gap_um",
+      "value": "25.0",
+      "eo.eo_overlap_gamma": 0.2554113612689788,
+      "eo.VpiL_V_cm": 50.74031788540454
+    }
+  ]
+}

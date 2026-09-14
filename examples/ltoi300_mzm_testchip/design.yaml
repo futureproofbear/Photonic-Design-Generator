@@ -50,7 +50,19 @@ electrodes:
   enabled: true
   topology: gsg
   gap_um: 5.5                   # cells.py: rf_gap. The nominal rung, and the
-                                # one the kit states a figure for
+                                # one the kit states a figure for.
+                                #
+                                # NOT TO BE MOVED. It is the kit's own arm and
+                                # is the device this chip adjudicates.
+                                #
+                                # FINDING, 2026-09-12. Taken with the 2.5 um
+                                # ridge, which is also the kit's, this sits
+                                # exactly on the foundry's 1.5 um metal-to-ridge
+                                # rule: 5.5/2 - 2.5/2 = 1.50. It passes the deck
+                                # and has no margin, so any bias that widens the
+                                # metal or the ridge puts the kit's own cell in
+                                # violation of the kit's own deck. That is a
+                                # property of the cell and not of this chip.
   width_um: 16.0                # cells.py: rf_central_conductor_width, C band
   ground_width_um: 50.0         # _builders/mzms.py: rf_ground_planes_width
   length_um: 5000.0             # cells.py: modulation_length
@@ -154,6 +166,32 @@ process:
 
 layout:
   enabled: true
+  # The LT-PRO layer table, taken from examples/ltoi300_mask/design.yaml,
+  # added 2026-09-12. The acknowledgement of drc.rule_deck_names_12 below
+  # named this as the remedy to be applied before any submission.
+  #
+  # Without it this chip drew its waveguide on 1/0, which the deck names
+  # nowhere, and its slab on 2/0, where the deck expects the ridge, so
+  # neither was rule-checked. The deck matched its M1 to this chip's SEAL,
+  # its M2 to the DICE lane and its HRL to FACET, and the eleven violations
+  # it reported follow from that: six were M2 outside CHIP_INNER, which a
+  # dicing lane is by definition. Everything the process does not read is
+  # placed on 2xx, which the deck names nowhere and cannot read as metal.
+  layer_map:
+    WG:         [2, 10]
+    SLAB:       [3, 10]
+    METAL:      [20, 0]
+    PAD:        [20, 0]
+    LABEL:      [4, 0]
+    CHIP_INNER: [6, 0]
+    CHIP_OUTER: [6, 1]
+    SEAL:       [200, 0]
+    MARK:       [201, 0]
+    DICE:       [202, 0]
+    FACET:      [203, 0]
+    ORIENT:     [204, 0]
+    FILL:       [205, 0]
+    FLOORPLAN:  [206, 0]
   device: mach_zehnder
   cell_name: LTOI300_MZM_TESTCHIP
   compare_backends: true
@@ -199,7 +237,24 @@ reticle:
     # from the material constant.
     enabled: true
     parameter: electrodes.gap_um
-    values: [3.5, 8.0, 11.0, 15.0]
+    # 3.5 um was drawn here until 2026-09-12 and cannot be made. The foundry
+    # deck requires 1.5 um between metal and ridge, so the narrowest gap this
+    # ridge admits is its own width plus 3.0, being 5.5 um, and a 3.5 um gap
+    # leaves 0.5. It produced 608 of the 620 violations the deck reported once
+    # the layer map was corrected, and removing it leaves 12.
+    #
+    # It is replaced by 20.0 rather than simply dropped. The ladder exists to
+    # separate the overlap from the material constant, so what it needs is span
+    # in the overlap, and the overlap moves faster at the wide end than the
+    # narrow: measured here it runs 0.3947, 0.3718, 0.3532, 0.3364, 0.3065,
+    # 0.2726 at 3.5, 5.5, 8, 11, 15 and 20 um. Dropping 3.5 would leave a span
+    # of 21.3 per cent against the 28.8 originally drawn; extending to 20
+    # gives 36.4, which is wider than the illegal ladder achieved.
+    #
+    # The cost is drive. Half-wave voltage over this 5 mm electrode is 15.3 V
+    # at the nominal and 76.1 V at 20 um, so the widest rung needs a source
+    # that reaches it or a partial fringe and an extrapolation.
+    values: [8.0, 11.0, 15.0, 20.0]
     pitch_um: 0.0               # derived from the device extent
     label_each: true
     label_height_um: 25.0
@@ -355,14 +410,30 @@ warnings:
         mask study under section 3, and the remedy is to renumber
         layout.layer_map to the process numbers before any submission. Until
         then the deck verdict covers four layers and is read as covering four.
-    - key: drc.foundry_deck_reports_11
+    - key: drc.foundry_deck_reports_12
       reason: >-
-        Read and resolved. Five were M2_HRL_no_contact, the deck requiring the
-        line to contact a terminating resistor that this chain draws no layer
-        for; the design now declares the far end open, which is what the mask
-        carries. Six were M2 outside CHIP_INNER, the electrode leads reaching
-        the die boundary, which follows from the same layer-number mismatch
-        recorded above.
+        Twelve remain and all eleven that stood before were artefacts. Until the
+        layer map was corrected on 2026-09-12 the deck matched its M1 to this
+        chip's seal ring, its M2 to the dicing lane and its HRL to the facet,
+        so the five M2_HRL_no_contact and six M2-outside-CHIP_INNER it reported
+        were properties of that mismatch: a dicing lane is outside the inner
+        chip by definition. The waveguide and the slab were meanwhile checked by
+        nothing.
+        With the map corrected the deck reads the real geometry and reports 620,
+        of which 608 were the 3.5 um rung of the ladder violating the 1.5 um
+        metal-to-ridge rule by 1.0 um. That rung is removed and replaced by
+        20 um. The twelve left are ten RIB minimum-feature marks on one 5 um
+        feature and two isolated separation marks, and neither is yet diagnosed.
+    - key: drc.more_than_one_design
+      reason: >-
+        METAL and PAD both land on 20/0, which is the process layer for the
+        first metal, so the deck evaluates its M1 rules over their union. That
+        is intended: the pads are the same metal as the electrodes and the
+        process draws no separate pad layer.
+    - key: layout.layer_20_0_carries
+      reason: >-
+        The same fact seen from the layout stage. One number is one layer and
+        the union is what the process will make.
 
 release:
   enabled: true
