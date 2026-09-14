@@ -3383,3 +3383,54 @@ sitting exactly on a limit raises nothing, because a rule check reports
 violations and not margins.** Where a study adjudicates somebody else's cell,
 the margin of that cell against its own rules is a finding worth returning to
 them.
+
+### L054 — A declaration derived from violations covers only the violations it was written for
+
+A mask carries process monitors that violate deliberately: a critical-dimension
+vernier steps below the minimum feature to find where the process stops
+printing, and an electrode ladder steps below the metal-to-ridge separation for
+the same reason. A monitor that never crosses a rule measures nothing, so the
+region holding them is declared and a rule-deck driver sets it aside.
+
+That region was derived by running a width check on the waveguide layer and
+padding around whatever it found. It therefore covered a monitor violating a
+WIDTH rule on ONE layer and no other. The electrode ladder violates a SEPARATION
+rule between two layers, so it was never covered, and its marks were reported
+against the design. The declared box was 84.7 um wide where the ladder it should
+have covered runs 400.
+
+**A declaration is a statement about what was drawn, not about what failed.**
+Deriving it from failures is circular: it can only ever find the failure modes
+somebody already thought of, and the one it misses is the one nobody did. The
+field is now the extent of every monitor polygon placed.
+
+Two attempts at the replacement were wrong and both produced a plausible box in
+the wrong place. The extent is accumulated as the monitors are placed, which is
+before the die is centred on the origin, so it must move with the die; omitting
+that put the field 4.8 mm from the structures it declares and the run still
+completed. The field is separately clipped so it cannot reach the device band,
+and clipping after the transform using a pre-transform bound inverted the box in
+y. **A box has an orientation and a frame, and neither is checked by anything
+that merely reads its four numbers.**
+
+### L055 — Two of eleven release conditions were answered by reading the process documentation rather than by changing the mask
+
+A release gate blocked on a foundry deck reporting twelve violations and on a
+density window that measured nothing. Neither was a defect.
+
+All twelve marks lie inside the declared monitor field, and a KLayout runset has
+no way to be told which region is a monitor, so the external deck must report
+them however the design is drawn. The process documentation states that filler
+patterns and guard-rail dummy waveguides are added by the foundry during mask
+preparation and states no density window, so declaring one would be inventing a
+figure the process does not give.
+
+**Where a gate blocks, the first question is whether the condition applies.** The
+same documentation was consulted for the seal ring, which the gate warns about
+in general terms: it states no seal requirement and provides a 50 um exclusion
+zone and four reserved corners instead. That absence is a reading of the entry
+held here and not proof the process asks for nothing, and it is recorded as
+something to confirm with the foundry rather than as a settled fact.
+
+A waiver is recorded in the manifest, so a reader sees what was set aside and
+why. **That is the difference between a waiver and a silence.**
