@@ -248,6 +248,39 @@ def material_mask(xs: CrossSection, grid: RasterGrid, material: str, subsample: 
     return rasterise(xs, grid, vals, subsample=subsample)
 
 
+def widen_cross_section(xs: CrossSection, extra_x_um: float, extra_y_um: float = 0.0,
+                        name: str | None = None) -> CrossSection:
+    """A copy of ``xs`` with its window widened, the blanket layers stretched with it.
+
+    A leaky-mode solve needs room outside the guide for the radiation to leave
+    into, and a window test needs the same problem posed on a larger domain.
+    Shapes that reached both lateral limits of the old window, the blanket
+    layers, are stretched to the new limits so that the stack continues to the
+    edge; shapes that ended inside the window, a ridge, a post, a conductor or
+    a slab of finite offset, keep their extent, because their edges are the
+    design's. The vertical widening applies to the top only, the bottom being
+    the handle, and the blanket layers are treated the same way there.
+    """
+    x0, x1, y0, y1 = xs.window
+    out = CrossSection(background=xs.background,
+                       window=(x0 - extra_x_um, x1 + extra_x_um, y0, y1 + extra_y_um),
+                       name=name or (xs.name + "_wide"))
+    for s in xs.shapes:
+        bx0, bx1, by0, by1 = s.bbox()
+        blanket_x = bx0 <= x0 + 1e-9 and bx1 >= x1 - 1e-9
+        blanket_top = extra_y_um > 0 and by1 >= y1 - 1e-9
+        if not (blanket_x or blanket_top):
+            out.add(Shape(s.material, list(s.points), s.name)); continue
+        pts = []
+        for (px, py) in s.points:
+            qx = px - extra_x_um - 1.0 if (blanket_x and px <= bx0 + 1e-9) else (
+                px + extra_x_um + 1.0 if (blanket_x and px >= bx1 - 1e-9) else px)
+            qy = py + extra_y_um + 1.0 if (blanket_top and py >= by1 - 1e-9) else py
+            pts.append((qx, qy))
+        out.add(Shape(s.material, pts, s.name))
+    return out
+
+
 # --------------------------------------------------------------------------
 # E-DBR specific cross-sections
 # --------------------------------------------------------------------------

@@ -73,11 +73,25 @@ def travelling_wave(grid, eps_x, eps_y, drive, V, C_per_m, e, n_g, length_m, geo
     Z0 = line["characteristic_impedance_ohm"]
     n_m = line["microwave_index"]
 
-    def alpha(f_Hz):
+    def alpha_uniform(f_Hz):
         R = rf.skin_resistance_per_m(f_Hz, e.conductivity_S_per_m,
                                      geom.electrode_width_um * 1e-6, e.thickness_um * 1e-6,
                                      n_conductors=n_conductors)
         return R / (2.0 * Z0)
+
+    # A ground-signal-ground line takes the coplanar closed form, whose edge
+    # terms carry the current crowding a uniform skin resistance omits; the
+    # two-conductor slot keeps the uniform model, no closed form for its
+    # crowding being carried here. Both figures are reported.
+    gsg_line = str(getattr(e, "topology", "slot")).lower() == "gsg"
+    if gsg_line:
+        def alpha(f_Hz):
+            return rf.cpw_conductor_loss_np_per_m(f_Hz, e.conductivity_S_per_m,
+                                                  geom.electrode_width_um * 1e-6,
+                                                  geom.electrode_gap_um * 1e-6,
+                                                  e.thickness_um * 1e-6, n_m * n_m)
+    else:
+        alpha = alpha_uniform
 
     gamma = rf.load_reflection(e.far_end_load_ohm, Z0)
     if gamma <= -0.999:
@@ -107,6 +121,10 @@ def travelling_wave(grid, eps_x, eps_y, drive, V, C_per_m, e, n_g, length_m, geo
         "reflection_at_driver": mismatch,
         "return_loss_dB": -20 * math.log10(mismatch) if mismatch > 0 else float("inf"),
         "conductor_loss_dB_per_cm_at_10GHz": alpha(1e10) * rf.NEPER_TO_DB / 100,
+        "conductor_loss_dB_per_cm_at_15GHz": alpha(1.5e10) * rf.NEPER_TO_DB / 100,
+        "conductor_loss_model": ("coplanar closed form with edge crowding, finite-thickness surface resistance"
+                                 if gsg_line else "uniform skin-depth resistance across the conductor width"),
+        "conductor_loss_uniform_skin_dB_per_cm_at_10GHz": alpha_uniform(1e10) * rf.NEPER_TO_DB / 100,
         "electro_optic_3dB_GHz": f_3dB / 1e9,
         "electro_optic_6dB_GHz": f_6dB / 1e9,
         # what the far end returns, and hence which of the two variants of the
@@ -229,21 +247,30 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     fx = sorted(set(fx))
     eps_rf = {m: lib[m].eps_rf_device(p.cut) for m in xs_rf.materials_used()}
 
-    def _rf_solve(d_fine: float, d_coarse: float):
-        """The electrostatic problem at one mesh density.
+    def _rf_solve(d_fine: float, d_coarse: float, xs_=None):
+        """The electrostatic problem at one mesh density, on ``xs_rf`` or a widened copy of it.
 
         Returned so that the same problem can be posed twice and the shift
-        between the two reported, rather than a single mesh being trusted.
+        between the two reported, rather than a single mesh being trusted; and
+        posed on a wider window, so that the outer boundary's influence is
+        measured rather than assumed absent.
         """
+        xsr = xs_ or xs_rf
+        if xs_ is None:
+            wx0, wx1, wy0, wy1, wfx, wfy = x0, x1, y0, y1, fx, fy
+        else:
+            wx0, wx1, wy0, wy1 = xsr.window
+            wfx = sorted(set(v for v in fx) | {float(pt[0]) for sh in xsr.shapes for pt in sh.points if wx0 < pt[0] < wx1})
+            wfy = sorted(set(v for v in fy) | {float(pt[1]) for sh in xsr.shapes for pt in sh.points if wy0 < pt[1] < wy1})
         g = RasterGrid(
-            graded_axis(x0, x1, fx, d_fine, d_coarse,
+            graded_axis(wx0, wx1, wfx, d_fine, d_coarse,
                         fine_margin=float(e.rf_mesh_fine_margin_um)),
-            graded_axis(y0, y1, fy, d_fine, d_coarse,
+            graded_axis(wy0, wy1, wfy, d_fine, d_coarse,
                         fine_margin=float(e.rf_mesh_fine_margin_um)),
         )
-        ex = rasterise(xs_rf, g, {m: v[0] for m, v in eps_rf.items()}, subsample=2)
-        ey = rasterise(xs_rf, g, {m: v[1] for m, v in eps_rf.items()}, subsample=2)
-        met = material_mask(xs_rf, g, e.material, subsample=2)
+        ex = rasterise(xsr, g, {m: v[0] for m, v in eps_rf.items()}, subsample=2)
+        ey = rasterise(xsr, g, {m: v[1] for m, v in eps_rf.items()}, subsample=2)
+        met = material_mask(xsr, g, e.material, subsample=2)
         if str(e.topology).lower() == "gsg":
             hs = geom.electrode_width_um / 2
             dr = [(met * (np.abs(g.x)[:, None] <= hs + 1e-9), V),
@@ -549,7 +576,54 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             bw_shift = convergence.get("electro_optic_3dB_GHz_rel_shift")
             if bw_shift is not None and bw_shift > float(e.convergence_tolerance):
                 convergence["resolved"] = False
-        if not convergence["resolved"]:
+        # ---- the window, doubled ------------------------------------------
+        #
+        # The outer boundary of the electrostatic solve is a Neumann wall, and
+        # the guard above halves the cell and never moves that wall. On one gsg
+        # line the impedance moved 3.6 per cent when the padding went from 40 to
+        # 100 um. The same problem is therefore posed once more on a window
+        # widened by the declared padding on every open side, and the shifts
+        # are reported with the mesh shifts; a shift above the tolerance
+        # unresolves the guard as a mesh shift would.
+        try:
+            from ..geometry import widen_cross_section
+            pad = float(e.rf_window_pad_um)
+            xs_w = widen_cross_section(xs_rf, pad, pad, name="rf_wide")
+            gw, exw, eyw, drw, sw, C_w = _rf_solve(d_fine_rf, d_coarse_rf, xs_=xs_w)
+            gamma_w = _gamma_from(sw)
+            wcheck = {"performed": True, "window_pad_um": pad, "window_pad_um_widened_to": 2 * pad,
+                      "nx": int(len(gw.x)), "ny": int(len(gw.y)),
+                      "capacitance_pF_per_cm": C_w * 1e12 / 100,
+                      "capacitance_rel_shift": abs(C_w - C_per_m) / C_per_m if C_per_m else float("inf"),
+                      "eo_overlap_gamma": gamma_w,
+                      "eo_overlap_gamma_rel_shift": abs(gamma_w - gamma) / abs(gamma) if gamma else float("inf")}
+            if e.travelling_wave and tw.get("enabled"):
+                tw_w = travelling_wave(gw, exw, eyw, drw, V, C_w, e, n_g, L_electrode_m, geom, n_conductors)
+                for key in ("microwave_index", "characteristic_impedance_ohm", "electro_optic_3dB_GHz"):
+                    a, b = tw.get(key), tw_w.get(key)
+                    if a and b:
+                        wcheck[key] = b
+                        wcheck[key + "_rel_shift"] = abs(b - a) / abs(a)
+            worst = max(v for k, v in wcheck.items() if k.endswith("_rel_shift"))
+            wcheck["worst_rel_shift"] = worst
+            wcheck["resolved"] = bool(worst <= float(e.convergence_tolerance))
+            convergence["window"] = wcheck
+            if not wcheck["resolved"]:
+                convergence["resolved"] = False
+                ctx.warn(
+                    "the electrostatic window is not converged: doubling the padding "
+                    "moves the capacitance by %.1f per cent, the overlap by %.1f, the "
+                    "microwave index by %.1f and the impedance by %.1f, against a "
+                    "tolerance of %.1f. The outer boundary is a Neumann wall and it is "
+                    "close enough to act" % (
+                        100 * wcheck["capacitance_rel_shift"], 100 * wcheck["eo_overlap_gamma_rel_shift"],
+                        100 * wcheck.get("microwave_index_rel_shift", 0.0),
+                        100 * wcheck.get("characteristic_impedance_ohm_rel_shift", 0.0),
+                        100 * float(e.convergence_tolerance)))
+        except Exception as ex:  # pragma: no cover - the check's own failure is recorded
+            convergence["window"] = {"performed": False, "reason": str(ex)}
+
+        if not convergence["resolved"] and convergence.get("window", {}).get("resolved", True):
             ctx.warn(
                 "the electrostatic solve is not converged: halving the cell moves "
                 "the electro-optic overlap by %.1f per cent, the capacitance by "

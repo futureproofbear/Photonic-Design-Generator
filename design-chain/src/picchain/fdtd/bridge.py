@@ -453,6 +453,33 @@ def _find_prior(name: str, key: str, work_dir: Path,
     return None
 
 
+def detached_command(backend: Backend, cmd: list[str], log_path: Path) -> list[str]:
+    """The same solver command, launched so that it outlives the process that starts it.
+
+    On the WSL backend the inner command is wrapped in `nohup ... &` with its
+    output redirected into the run's log inside the guest, and the wrapper
+    returns at once; the guest keeps the solver alive after wsl.exe exits, and
+    the result file appears in the run directory when it finishes. On a native
+    backend the caller detaches the process itself (see `_run`). Three
+    time-domain solves of one grating died on this machine with the session
+    that launched them, each after an hour or more, which is what this exists
+    to end.
+    """
+    if backend.kind == "wsl":
+        # `nohup ... &` inside `bash -lc` was tried first and the child died with
+        # the wsl.exe that launched it: the guest ends the session's processes
+        # when the invocation returns. `setsid -f` starts the shell in a session
+        # of its own, forked, and wsl.exe returns while the guest keeps the
+        # instance alive for as long as the solver runs. Measured: a sleep under
+        # nohup was gone within three seconds; under setsid it was still there.
+        inner = cmd[-1]                                 # the `bash -lc` payload
+        wrapped = f"{inner} > {to_wsl_path(log_path)} 2>&1 < /dev/null"
+        head = cmd[:-1]                                 # wsl.exe -d <distro> -- bash -lc
+        assert head[-2:] == ["bash", "-lc"], head
+        return head[:-2] + ["setsid", "-f", "bash", "-lc", wrapped]
+    return cmd
+
+
 def _run(runner: Path, name: str, job: dict, work_dir: Path,
          backend: Backend | None = None, timeout_s: int = 7200) -> dict:
     backend = backend or default_backend()
@@ -507,6 +534,44 @@ def _run(runner: Path, name: str, job: dict, work_dir: Path,
     # most was the case where it was least complete.
     log = (work_dir / f"meep_{name}_run.log")
     tail: deque[str] = deque(maxlen=40)
+
+    # DETACHED, on request, from 2026-09-23. With PICCHAIN_FDTD_DETACH set the
+    # solver is started so that it outlives this process, and this process
+    # waits for the result file by polling. If the waiting process dies, the
+    # solver continues, the result lands in the run directory, and the next
+    # run of an identical job is served from it by `_find_prior` above. The
+    # log is written by the guest directly and read here as it grows.
+    if os.environ.get("PICCHAIN_FDTD_DETACH"):
+        import time
+        dcmd = detached_command(backend, cmd, log)
+        log.write_text(f"$ {' '.join(str(c) for c in dcmd)}\n\n", encoding="utf-8")
+        if backend.kind == "wsl":
+            started = subprocess.run(dcmd, capture_output=True, text=True, timeout=120)
+            note = "started in its own session in the guest (setsid); wsl.exe returned " + str(started.returncode)
+        else:
+            flags = 0
+            if hasattr(subprocess, "DETACHED_PROCESS"):
+                flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+            with open(log, "a", encoding="utf-8") as fh:
+                proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                        creationflags=flags, start_new_session=(flags == 0))
+            note = f"started pid {proc.pid}"
+        t0 = time.time()
+        while not out_path.exists():
+            if time.time() - t0 > timeout_s:
+                raise RuntimeError(
+                    f"meep exceeded its {timeout_s} s ceiling while detached ({note}); the solver "
+                    f"may still be running and its result will be reused by an identical job when it "
+                    f"lands. See {log.name}")
+            time.sleep(10)
+        time.sleep(2)                                   # let the writer close the file
+        result = json.loads(out_path.read_text(encoding="utf-8"))
+        result["runner_digest"] = runner_digest(runner)
+        result["job_key"] = key
+        result["detached"] = note
+        out_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        return result
+
     with open(log, "w", encoding="utf-8", buffering=1) as fh:
         fh.write(f"$ {' '.join(str(c) for c in cmd)}\n\n")
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,

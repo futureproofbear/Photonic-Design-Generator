@@ -104,6 +104,14 @@ class FemModeResult:
     transversality: float
     _mode: Any = field(repr=False, default=None)
     _subdomains: dict[str, list[str]] = field(repr=False, default_factory=dict)
+    #: the imaginary part of the effective index, non-zero only where the
+    #: problem carried an absorbing margin or a lossy material
+    n_eff_imag: float = 0.0
+
+    def loss_dB_per_m(self, wavelength_um: float) -> float:
+        """Power attenuation from the imaginary index: 20 log10(e) k0 Im(n)."""
+        import math
+        return 20.0 / math.log(10.0) * (2 * math.pi / (wavelength_um * 1e-6)) * abs(self.n_eff_imag)
 
     def confinement(self, material: str) -> float:
         """Fraction of |E_t|^2 within the regions made of ``material``."""
@@ -289,8 +297,21 @@ def solve_cross_section(
     fine_shapes: tuple[str, ...] = ("ridge", "post_L", "post_R"),
     n_guess: float | None = None,
     metallic_boundaries: bool = True,
+    radius_um: float | None = None,
+    absorber_um: float = 0.0,
+    absorber_strength: float = 1.0,
 ) -> FemSolveResult:
     """Solve ``xs`` by finite elements at a scalar permittivity per material.
+
+    ``radius_um`` bends the guide: femwell scales the permittivity by
+    (1 + x / R)^2, the bend axis lying at x = -R, so the outer wall is the +x
+    side. ``absorber_um`` gives the lateral margin of the window an imaginary
+    permittivity rising quadratically from zero at its inner edge to
+    ``absorber_strength`` times the real part at the window edge. That margin
+    is the absorbing boundary a leaky mode needs; without it a bend mode is
+    reflected from the electric wall and its loss is unobservable. The
+    imaginary part of each mode's effective index is returned, and the
+    attenuation it implies is ``FemModeResult.loss_dB_per_m``.
 
     ``fine_shapes`` names the shapes across which the mesh is refined, matched
     against the ``name`` given to each ``Shape``. The guiding features are small
@@ -330,6 +351,13 @@ def solve_cross_section(
         if key in mesh.subdomains:
             eps[basis_eps.get_dofs(elements=key)] = float(eps_of_material[material])
 
+    if absorber_um and absorber_um > 0:
+        x0, x1 = xs.window[0], xs.window[1]
+        xc = basis_eps.doflocs[0]                      # element centroids of the P0 basis
+        d = np.maximum(0.0, xc - (x1 - absorber_um)) + np.maximum(0.0, (x0 + absorber_um) - xc)
+        ramp = np.minimum(1.0, d / absorber_um) ** 2
+        eps = eps.astype(complex) * (1.0 + 1j * float(absorber_strength) * ramp)
+
     modes = _compute_modes(
         basis_eps,
         eps,
@@ -338,6 +366,7 @@ def solve_cross_section(
         order=element_order,
         n_guess=n_guess,
         metallic_boundaries=bool(metallic_boundaries),
+        radius=(float(radius_um) if radius_um else np.inf),
     )
 
     out: list[FemModeResult] = []
@@ -350,6 +379,7 @@ def solve_cross_section(
                 transversality=float(np.real(m.transversality)),
                 _mode=m,
                 _subdomains=by_material,
+                n_eff_imag=float(np.imag(n_eff)),
             )
         )
     return FemSolveResult(
