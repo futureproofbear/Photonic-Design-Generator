@@ -126,12 +126,12 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # forward, and the response is no longer the one a matched line has.
         gamma = float(tw.get("far_end_reflection") or 0.0)
 
-        def alpha(f_Hz: float) -> float:
-            R = rf.skin_resistance_per_m(f_Hz, e.conductivity_S_per_m,
-                                         geom.electrode_width_um * 1e-6,
-                                         e.thickness_um * 1e-6,
-                                         n_conductors=n_cond)
-            return R / (2.0 * Z0)
+        # The attenuation is the one the electro-optic stage reported, read
+        # back through its 10 and 15 GHz figures, for the reason given above:
+        # this stage carried a skin-depth model of its own, and when the
+        # electro-optic stage moved to the coplanar closed form on 2026-09-23
+        # the in-band response here did not move with it.
+        alpha = rf.attenuation_from_reported(tw)
 
         f_lo, f_hi = float(min(m.rf_band_GHz)), float(max(m.rf_band_GHz))
         points = [f_lo, 0.5 * (f_lo + f_hi), f_hi]

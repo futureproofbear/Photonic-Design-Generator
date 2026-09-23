@@ -98,6 +98,29 @@ def cpw_conductor_loss_np_per_m(f_Hz: float, sigma: float, signal_width_m: float
     return rs * math.sqrt(max(eps_eff, 1.0)) / (480 * math.pi * K * Kp * (1 - k * k)) * (term_a + term_b)
 
 
+def attenuation_from_reported(tw: dict):
+    """The attenuation the electro-optic stage reported, as a function of frequency.
+
+    A stage that re-derives the loss from the geometry is a second
+    implementation of it, and the two diverged once before, the bandwidth being
+    computed on one model and the in-band response on another. The reporting
+    stage writes its figure at 10 GHz and, since 2026-09-23, at 15 GHz; the
+    power law through the two carries the frequency dependence of whatever
+    model produced them (0.5 for a thick uniform sheet, about 0.35 for the
+    coplanar form on gold of one skin depth), and a payload with the 10 GHz
+    figure alone is read as the square root of frequency.
+    """
+    a10 = float(tw.get("conductor_loss_dB_per_cm_at_10GHz") or 0.0) / NEPER_TO_DB * 100.0
+    a15 = tw.get("conductor_loss_dB_per_cm_at_15GHz")
+    if a10 <= 0:
+        return lambda f_Hz: 0.0
+    if a15:
+        p = math.log((float(a15) / NEPER_TO_DB * 100.0) / a10) / math.log(1.5)
+    else:
+        p = 0.5
+    return lambda f_Hz: a10 * (max(f_Hz, 1.0) / 1e10) ** p
+
+
 def response(f_Hz: float, length_m: float, alpha_np_per_m: float,
              n_microwave: float, n_optical: float) -> float:
     """Modulation response of a travelling-wave electrode, normalised to unity.

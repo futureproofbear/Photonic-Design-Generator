@@ -607,23 +607,27 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             worst = max(v for k, v in wcheck.items() if k.endswith("_rel_shift"))
             wcheck["worst_rel_shift"] = worst
             wcheck["resolved"] = bool(worst <= float(e.convergence_tolerance))
+            convergence["mesh_resolved"] = convergence["resolved"]
             convergence["window"] = wcheck
             if not wcheck["resolved"]:
                 convergence["resolved"] = False
                 ctx.warn(
                     "the electrostatic window is not converged: doubling the padding "
                     "moves the capacitance by %.1f per cent, the overlap by %.1f, the "
-                    "microwave index by %.1f and the impedance by %.1f, against a "
-                    "tolerance of %.1f. The outer boundary is a Neumann wall and it is "
-                    "close enough to act" % (
+                    "microwave index by %.1f, the impedance by %.1f and the 3 dB "
+                    "bandwidth by %.1f, against a tolerance of %.1f. The outer boundary "
+                    "is a Neumann wall and it is close enough to act; the bandwidth is "
+                    "the amplified one, a near-matched line's bandwidth going as the "
+                    "reciprocal of a small velocity mismatch" % (
                         100 * wcheck["capacitance_rel_shift"], 100 * wcheck["eo_overlap_gamma_rel_shift"],
                         100 * wcheck.get("microwave_index_rel_shift", 0.0),
                         100 * wcheck.get("characteristic_impedance_ohm_rel_shift", 0.0),
+                        100 * wcheck.get("electro_optic_3dB_GHz_rel_shift", 0.0),
                         100 * float(e.convergence_tolerance)))
         except Exception as ex:  # pragma: no cover - the check's own failure is recorded
             convergence["window"] = {"performed": False, "reason": str(ex)}
 
-        if not convergence["resolved"] and convergence.get("window", {}).get("resolved", True):
+        if not convergence.get("mesh_resolved", convergence["resolved"]):
             ctx.warn(
                 "the electrostatic solve is not converged: halving the cell moves "
                 "the electro-optic overlap by %.1f per cent, the capacitance by "
