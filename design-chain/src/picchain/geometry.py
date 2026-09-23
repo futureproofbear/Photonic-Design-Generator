@@ -340,6 +340,22 @@ def edbr_cross_section(
     if include_substrate:
         xs.add(Shape.rect(substrate_material, -xe, xe, y_bottom - 1.0, y_lo, "substrate"))
     xs.add(Shape.rect(box_material, -xe, xe, y_lo, 0.0, "box"))
+    # AIR ABOVE THE CLADDING, ADDED 2026-09-23. The background of the section is
+    # the cladding material, and the window of the optical problem stops inside
+    # the cladding, so no air was ever needed there. The RF problem pads the
+    # window by tens of micrometres in y, and until this shape existed that
+    # padding was filled with cladding oxide to its top edge: the electrostatic
+    # solve saw 40 um of permittivity 3.9 above a stack that declares 2 um of
+    # it and air beyond. On a gsg line with 60 um of signal the capacitance read
+    # 2.36 pF/cm against 1.90 with the air drawn, the microwave index 2.28
+    # against 2.05 and the impedance 32.3 ohm against 36.0; a full-wave solve
+    # of the same line in an independent solver read 2.12 to 2.14 and 35.3 to
+    # 35.7. The shape is drawn only where the window reaches above the declared
+    # cladding, so a cross-section whose window stops inside the cladding, the
+    # optical one, is unchanged to the bit.
+    clad_top = film_thickness_um + clad_thickness_um
+    if y_hi > clad_top + 1e-9:
+        xs.add(Shape.rect("Air", -xe, xe, clad_top, y_hi + 1.0, "air"))
     # The unetched slab, blanket or in strips around each guide.
     #
     # A blanket slab puts high-permittivity film under every conductor and
