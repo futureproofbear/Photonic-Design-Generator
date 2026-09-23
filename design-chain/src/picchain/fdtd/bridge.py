@@ -444,8 +444,17 @@ def _find_prior(name: str, key: str, work_dir: Path,
             if job_key(json.loads(jp.read_text(encoding="utf-8"))) != key:
                 continue
             prior = json.loads(rp.read_text(encoding="utf-8"))
+            digest = prior.get("runner_digest")
+            if digest is None:
+                # a detached solve whose waiter died before the result landed:
+                # the digest was recorded at launch instead
+                lp = d / f"meep_{name}_launch.json"
+                if lp.exists():
+                    launch = json.loads(lp.read_text(encoding="utf-8"))
+                    if launch.get("job_key") == key:
+                        digest = launch.get("runner_digest")
             if runner is not None:
-                if prior.get("runner_digest") != runner_digest(runner):
+                if digest != runner_digest(runner):
                     continue
             return prior, d.name
         except (OSError, ValueError):
@@ -545,6 +554,14 @@ def _run(runner: Path, name: str, job: dict, work_dir: Path,
         import time
         dcmd = detached_command(backend, cmd, log)
         log.write_text(f"$ {' '.join(str(c) for c in dcmd)}\n\n", encoding="utf-8")
+        # The result's provenance is written here, at launch, because the process
+        # that would otherwise write it into the result may be gone when the
+        # result lands. The first detached solve on this machine finished after
+        # its waiter's ceiling, its result carried no runner digest, and the next
+        # identical job declined to reuse it and began the seven hours again.
+        (work_dir / f"meep_{name}_launch.json").write_text(json.dumps(
+            {"job_key": key, "runner_digest": runner_digest(runner), "detached": True}, indent=2),
+            encoding="utf-8")
         if backend.kind == "wsl":
             started = subprocess.run(dcmd, capture_output=True, text=True, timeout=120)
             note = "started in its own session in the guest (setsid); wsl.exe returned " + str(started.returncode)
