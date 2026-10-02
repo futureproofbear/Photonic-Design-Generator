@@ -119,16 +119,25 @@ def solve_modes(
     polarisation: str = "TE",
     num_modes: int = 2,
     n_guess: float | None = None,
+    bend_scale: np.ndarray | None = None,
 ) -> list[ModeResult]:
     """Solve for the ``num_modes`` highest-n_eff guided modes.
 
     ``eps_xx``/``eps_yy`` are (nx, ny) arrays of *optical* relative permittivity
     in the device frame.
+
+    ``bend_scale`` is the factor g(x) of a bend mapped onto a straight guide
+    (see ``bend_scale``). It multiplies the permittivity term and the vertical
+    derivative operator, and leaves the lateral operator unscaled. A straight
+    guide is solved where it is omitted.
     """
     nx, ny = len(x), len(y)
     if eps_xx.shape != (nx, ny):
         raise ValueError(f"eps_xx shape {eps_xx.shape} != {(nx, ny)}")
     k0 = 2 * np.pi / wavelength_um
+    g = np.ones(nx) if bend_scale is None else np.asarray(bend_scale, dtype=float)
+    if g.shape != (nx,):
+        raise ValueError(f"bend_scale shape {g.shape} != {(nx,)}")
 
     eps_dom = eps_xx if polarisation.upper() == "TE" else eps_yy
     Ix, Iy = sp.identity(nx, format="csr"), sp.identity(ny, format="csr")
@@ -156,9 +165,11 @@ def solve_modes(
         Ly = Ly.tocsr()
         Lx = sp.kron(_second_derivative_matrix(x), Iy, format="csr")
 
-    A = (Lx + Ly + sp.diags(k0**2 * eps_dom.ravel(order="C"))).tocsc()
+    G = sp.diags(np.repeat(g, ny))  # unknowns ordered (i, j) -> i*ny + j
+    eps_g = eps_dom * g[:, None]
+    A = (Lx + G @ Ly + sp.diags(k0**2 * eps_g.ravel(order="C"))).tocsc()
 
-    n_max = float(np.sqrt(eps_dom.max()))
+    n_max = float(np.sqrt(eps_g.max()))
     sigma = (k0 * (n_guess if n_guess else n_max * 0.999)) ** 2
     k = min(num_modes + 2, nx * ny - 2)
     vals, vecs = spla.eigs(A, k=k, sigma=sigma, which="LM",
@@ -191,23 +202,51 @@ def solve_modes(
     return out
 
 
-def bend_permittivity(eps: np.ndarray, x: np.ndarray, radius_um: float) -> np.ndarray:
-    """Conformal transformation of a bend into an equivalent straight guide.
+def bend_scale(x: np.ndarray, radius_um: float) -> np.ndarray:
+    """The factor g(x) = exp(2x/R) of a bend mapped onto a straight guide.
 
-    A guide bent to radius R about a centre at ``x = -R`` is equivalent, for the
-    purpose of a scalar or semi-vectorial solve, to a straight guide whose index
-    is graded across the section:
+    A guide bent to radius R about a centre at ``x = -R`` is mapped by
+    x = R ln(r/R), with r the radius from the centre of curvature and x
+    positive toward the outside of the bend. Transformation optics gives the
+    straight guide an anisotropic medium in which only the components normal
+    to the plane of the bend are scaled, the permittivity and the permeability
+    each by g. The quasi-TE and quasi-TM operators then become
 
-        n_equivalent(x) = n(x) * exp(x / R)
+        d/dx[(1/eps) d(eps Ex)/dx] + g d2Ex/dy2 + k0^2 g eps Ex = beta^2 Ex
+        d2Ey/dx2 + g d/dy[(1/eps) d(eps Ey)/dy] + k0^2 g eps Ey = beta^2 Ey
 
-    with x measured from the guide axis and positive toward the outside of the
-    bend. The permittivity therefore carries a factor exp(2x/R). The grading is
-    what pushes the mode outward and, beyond the radius at which the equivalent
-    cladding index reaches the mode index, what allows it to radiate.
+    with beta referred to the radius R. ``solve_modes`` applies g to the
+    permittivity term and to the vertical operator.
+
+    The isotropic grading n(x) exp(x/R) was used until 2026-10-02. It left the
+    vertical operator unscaled and placed the graded permittivity inside the
+    lateral operator, which adds a spurious first-derivative term. That form
+    is exact only for a guide uniform in y.
+
+    The corrected form satisfies the invariance a bend must satisfy: the
+    angular propagation constant k0 n_eff R is unchanged when the reference
+    radius is moved by 1 um and the guide is not, to within the rasterisation
+    of the core (3e-5 to 3e-4). The isotropic form departed from it by 3e-2.
+
+    The operator remains semi-vectorial. The bend index shift it returns
+    exceeds that of the full-vectorial exact solve of ``femmode`` by a factor
+    that is constant with radius and depends on the cross-section. Measured
+    against that solve on 2026-10-02, the factor was:
+
+    * 1.02 to 1.04 on the 0.9 um tantalate rib of
+      ``examples/ltoi300_ring/design_cband.yaml``;
+    * 1.43 on a rectangular 0.9 um by 0.4 um core of index 2.2 in 1.45,
+      against 1.82 for the isotropic form;
+    * 3.68 on a 0.5 um by 0.22 um silicon strip in oxide, against 5.23.
+
+    The full-vectorial solve agrees with a cylindrical eigenmode solve of the
+    strip to 1 per cent (``tests/test_bend_exact.py``). The index shift from
+    this solver is to be read as an upper estimate wherever the finite-element
+    result is absent.
     """
     if radius_um <= 0:
         raise ValueError("bend radius must be positive")
-    return eps * np.exp(2.0 * np.asarray(x, dtype=float) / radius_um)[:, None]
+    return np.exp(2.0 * np.asarray(x, dtype=float) / radius_um)
 
 
 def bend_window_limit(x: np.ndarray, radius_um: float, n_core: float, n_clad: float) -> float:
@@ -285,11 +324,9 @@ def solve_bend_modes(
         )
     xc = x[keep]
     modes = solve_modes(
-        xc, y,
-        bend_permittivity(eps_xx[keep, :], xc, radius_um),
-        bend_permittivity(eps_yy[keep, :], xc, radius_um),
+        xc, y, eps_xx[keep, :], eps_yy[keep, :],
         wavelength_um, polarisation=polarisation, num_modes=num_modes,
-        n_guess=n_guess,
+        n_guess=n_guess, bend_scale=bend_scale(xc, radius_um),
     )
     # a genuine bend mode sits a little above the straight index; the outer-wall
     # artefact sits far above it. One per cent separates the two cleanly.

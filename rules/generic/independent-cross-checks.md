@@ -1,14 +1,26 @@
 # What makes two routes to one quantity independent
 
 *Tier: generic. Confidence: high, measured on two unrelated solvers and
-demonstrated by three separate failures of independence.*
+demonstrated by four separate failures of independence.*
 
 A quantity computed twice is worth more than a quantity computed once, and only
 where the two computations share nothing that could be wrong in the same way.
 Independence is a property to be established, and it is ordinarily asserted
 instead.
 
-## The four ways independence is lost
+## The five ways independence is lost
+
+**A shared physical model.** Two solvers that discretise a cross-section by
+different methods remain dependent where both are handed the same
+approximation. Both mode solvers of the chain bent a guide by grading an
+isotropic permittivity, which is exact only for a guide uniform normal to the
+plane of the bend. Their index shifts differed by a factor of 1.33, and the
+factor was attributed to the semi-vectorial operator. Against a cylindrical
+eigenmode solve, both were in error, by factors of 3.7 and 5.2 on a silicon
+strip. The comparison tested the discretisations and left the model untested.
+The anchor that settled it was an invariance of the physics: the angular
+propagation constant of a bend is unchanged when the reference radius is moved
+and the guide is not.
 
 **A shared convention.** Two expressions carrying one sign error agree exactly.
 A netlist cascade and a closed-form round trip agreed to a residual of zero for
@@ -82,4 +94,5 @@ quantity a semi-vectorial solver cannot report about itself), T006 (unit
 cancellation), T009 (a solver's natural boundary condition), T018 (a cross-check
 without a convergence guard), T025 (two code paths, one argument list), T042
 (two numbers for one quantity), T052 (a clamp that made a check agree with
-itself), and `design-chain/CLAUDE.md` rule 15.
+itself), T096 (two solvers sharing one bend approximation), and
+`design-chain/CLAUDE.md` rule 15.

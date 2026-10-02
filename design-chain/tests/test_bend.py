@@ -12,7 +12,7 @@ import numpy as np
 
 from picchain.solvers.fdmode import (
     bend_diagnostics,
-    bend_permittivity,
+    bend_scale,
     solve_bend_modes,
     solve_modes,
 )
@@ -30,7 +30,7 @@ def _ridge(nx=121, ny=101, n_core=2.2, n_clad=1.45, w=0.9, t=0.4):
 
 def test_transform_is_a_grading_that_vanishes_on_axis():
     x, _, eps = _ridge()
-    out = bend_permittivity(eps, x, radius_um=100.0)
+    out = eps * bend_scale(x, radius_um=100.0)[:, None]
     i0 = int(np.argmin(np.abs(x)))
     assert abs(out[i0, 0] / eps[i0, 0] - 1.0) < 1e-9        # unchanged on axis
     assert out[-1, 0] > eps[-1, 0]                          # raised outside
@@ -89,16 +89,42 @@ def test_the_outer_wall_artefact_is_not_returned_as_a_mode():
     unguarded solve returns a state bound to the window edge with n_eff far
     above the core index. The guard must exclude it."""
     from picchain.solvers.fdmode import bend_window_limit, solve_modes as _sm
-    from picchain.solvers.fdmode import bend_permittivity as _bp
+    from picchain.solvers.fdmode import bend_scale as _bs
 
     x, y, eps = _ridge()
     R = 6.0
     assert bend_window_limit(x, R, 2.2, 1.45) < x[-1]        # the artefact regime
 
-    unguarded = _sm(x, y, _bp(eps, x, R), _bp(eps, x, R), 1.55, num_modes=1)[0]
+    unguarded = _sm(x, y, eps, eps, 1.55, num_modes=1, bend_scale=_bs(x, R))[0]
     assert unguarded.n_eff > 2.2                              # above the core index
 
     # the guard refuses the case rather than returning the artefact
     import pytest
     with pytest.raises(RuntimeError, match="leaky"):
         solve_bend_modes(x, y, eps, eps, 1.55, radius_um=R, num_modes=1)
+
+
+def test_the_angular_propagation_constant_is_independent_of_the_reference_radius():
+    """k0 n_eff R belongs to the physical bend, so moving the reference radius
+    while the guide stays where it is must leave it unchanged.
+
+    The grid is uniform in the mapped coordinate u = R ln(r/R), so the core is
+    rasterised from its physical radius on each grid and the residual is the
+    rasterisation of its edges. The isotropic grading used until 2026-10-02
+    departed by 3e-2 on this cross-section."""
+    nc, ncl, w, t, lam, h, R0 = 3.473425, 1.444, 0.5, 0.22, 1.55, 0.01, 10.0
+    sub = 32
+    o = (np.arange(sub) + 0.5) / sub - 0.5
+    y = np.arange(-50, 73) * h
+    fy = np.mean(((y[:, None] + o * h) >= 0) & ((y[:, None] + o * h) <= t), axis=1)
+
+    def nu(r_ref):
+        u = np.arange(-225, 226) * h + (R0 - r_ref)
+        r = r_ref * np.exp((u[:, None] + o[None, :] * h) / r_ref)
+        fx = np.mean(np.abs(r - R0) <= w / 2, axis=1)
+        eps = ncl**2 + np.outer(fx, fy) * (nc**2 - ncl**2)
+        m = solve_modes(u, y, eps, eps, lam, num_modes=1, n_guess=2.49 * R0 / r_ref,
+                        bend_scale=bend_scale(u, r_ref))[0]
+        return 2 * np.pi / lam * m.n_eff * r_ref
+
+    assert abs(nu(9.0) / nu(R0) - 1.0) < 1.5e-3

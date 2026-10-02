@@ -3434,3 +3434,57 @@ something to confirm with the foundry rather than as a settled fact.
 
 A waiver is recorded in the manifest, so a reader sees what was set aside and
 why. **That is the difference between a waiver and a silence.**
+
+### T096 — Both mode solvers bent the guide by one isotropic approximation, and their disagreement was attributed to the semi-vectorial operator
+
+The bend stage maps a bend onto an equivalent straight guide. Both solvers did
+so by grading an isotropic permittivity. The finite-difference solver used
+exp(2x/R), and femwell, through its `radius` argument, uses (1 + x/R)^2. The
+exact straight equivalent of a bend is anisotropic. With s = r/R and
+propagation along s, transformation optics gives eps' = eps diag(s, s, 1/s) and
+mu' = diag(s, s, 1/s). The isotropic form is exact for a guide uniform in the
+direction normal to the plane of the bend. It over-weights the grading in a
+core confined in that direction.
+
+**The error was found against a cylindrical eigenmode solve.** On a 220 nm by
+500 nm silicon strip in oxide at 1550 nm, Ansys Lumerical MODE gave an index
+shift of 3.5e-4 at a radius of 10 um. The isotropic form in femwell gave
+1.31e-3, a factor of 3.7. The isotropic finite-difference form gave a factor of
+5.2. The minimum radius for a straight-to-bend-to-straight transmission of
+0.999 read 15.0 um against 8.2 um.
+
+**The overlap integral was cleared first.** The reciprocity overlap evaluated
+on the fields exported by the cylindrical solve reproduced that solver's own
+overlap to six figures. The remaining difference was therefore located in the
+bend mode itself.
+
+**The correction.** The finite-element wrapper solves a bend as its
+anisotropic equivalent and projects H with mu', so that the fields it carries
+are the physical fields on the junction plane. The index shift then agreed
+with the cylindrical solve to 1 per cent, and the junction mismatch to 0.1 per
+cent, at 3, 5 and 10 um. The finite-difference solver now scales the vertical
+operator as well as the permittivity term and leaves the lateral operator
+unscaled, which removes a spurious first-derivative term.
+
+**An invariance anchors the correction without an external solver.** The
+angular propagation constant k0 n_eff R belongs to the physical bend, and is
+to be unchanged when the reference radius is moved and the guide is not. The
+exact finite-element form held it to 1.8e-6 under a move of 1 um. The
+isotropic form in femwell departed by 6.4e-2, and the isotropic
+finite-difference form by 3.0e-2.
+
+**The semi-vectorial operator retains an error of its own.** With the
+corrected form, the finite-difference index shift exceeded the full-vectorial
+one by a factor constant with radius. The factor was 1.02 to 1.04 on a
+tantalate rib, 1.43 on a rectangular core of index 2.2 in 1.45, and 3.68 on the
+silicon strip. The finite-element figure is the one to be read.
+
+**The earlier disagreement had been recorded without adjudication.** On a
+tantalate ridge the two index shifts had differed by a factor of 1.33, and the
+factor was attributed to the semi-vectorial operator. Both solvers carried the
+same physical approximation, so the comparison could not bound it. Two
+discretisations of one model test the discretisation and leave the model
+untested.
+
+Enforced by `design-chain/tests/test_bend_exact.py` and by the invariance test
+in `design-chain/tests/test_bend.py`.

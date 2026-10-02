@@ -8,27 +8,44 @@ is otherwise an assumption like any other.
 
 Method
 ------
-The bend is mapped onto an equivalent straight guide by conformal
-transformation, which grades the index across the section as exp(x/R). The same
-mode solver then applies. Two quantities follow: the effective index of the bend
-mode, and the position of the radiation caustic, being the point at which the
-graded cladding index rises to meet the mode index. The fraction of the mode
-lying beyond that point rises as the bend tightens and is reported as an
-indicator, not as a loss.
+The bend is mapped onto an equivalent straight guide by the transformation
+x = R ln(r/R), under which the permittivity term and the vertical derivative
+operator each carry the factor exp(2x/R) (``fdmode.bend_scale``). The same
+semi-vectorial mode solver then applies. Two quantities follow: the effective
+index of the bend mode, and the position of the radiation caustic, being the
+point at which the graded cladding index rises to meet the mode index. The
+fraction of the mode lying beyond that point rises as the bend tightens and is
+reported as an indicator, not as a loss.
+
+The semi-vectorial index shift is an upper estimate. Against the full-vectorial
+solve described below it reads high by a factor that is constant with radius and
+depends on the cross-section: 1.02 to 1.04 on the tantalate rib of
+``examples/ltoi300_ring/design_cband.yaml``, and 3.68 on a silicon strip in
+oxide. The measurements are listed under ``fdmode.bend_scale``.
 
 The leaky solve, added 2026-09-23
 --------------------------------
 Where the finite-element solver is available, the same radii are solved a
 second time by finite elements on a window widened by several micrometres with
-an absorbing margin at its lateral edges, the bend entering through the
-(1 + x/R)^2 scaling of the permittivity. The imaginary part of the effective
-index gives the radiation loss in decibels per centimetre, which the conformal
-solve cannot, and the solve returns an answer at radii where the conformal one
-cannot, the leaky mode having a boundary to leak into. The two index shifts are
-reported side by side; on a 0.9 um tantalate ridge the conformal shift read
-1.33 times the finite-element one at every radius, which is the second-order
-signature of a semi-vectorial operator under the transformation and is
-recorded as such rather than adjudicated.
+an absorbing margin at its lateral edges. The bend enters as its exact
+anisotropic straight equivalent (``femmode._bent_modes``). The imaginary part
+of the effective index gives the radiation loss in decibels per centimetre,
+which the conformal solve cannot, and the solve returns an answer at radii
+where the conformal one cannot, the leaky mode having a boundary to leak into.
+The overlap of each bend mode with the straight mode gives the mode-mismatch
+loss of one straight-to-bend junction; a bend between two straight guides has
+two such junctions.
+
+The finite-element form is the one to read for the index shift and for the
+mismatch. On a 220 nm by 500 nm silicon strip it agrees with a cylindrical
+eigenmode solve to 1 per cent in both (``tests/test_bend_exact.py``).
+
+Until 2026-10-02 both solvers treated the bend as an isotropic grading of the
+permittivity. On a 0.9 um tantalate ridge the two index shifts then differed
+by a factor of 1.33, which was recorded without adjudication. Both forms were
+in error, by different amounts. With both corrected, the two agree to within 4
+per cent at radii of 60 to 400 um on the tantalate rib of
+``examples/ltoi300_ring/design_cband.yaml``.
 
 What this does not give
 -----------------------
@@ -92,14 +109,17 @@ def _leaky_solve(design: Design, ctx: RunContext, lib: MaterialLibrary, xs, lam:
             rows.append({"radius_um": float(R), "solved": False, "reason": str(ex)}); continue
         if md is None:
             rows.append({"radius_um": float(R), "solved": False, "reason": "no TE mode"}); continue
+        coupling = straight.power_coupling(md)
         rows.append({"radius_um": float(R), "solved": True, "n_eff": md.n_eff,
                      "dn_eff_from_straight": md.n_eff - straight.n_eff,
                      "loss_dB_per_cm": md.loss_dB_per_m(lam) / 100.0,
                      "loss_dB_per_quarter_turn": md.loss_dB_per_m(lam) * (math.pi / 2) * float(R) * 1e-6,
+                     "power_coupling_per_junction": coupling,
+                     "mismatch_dB_per_junction": -10.0 * math.log10(coupling) if coupling > 0 else None,
                      "te_fraction": md.te_fraction})
     return {"performed": True,
             "method": "finite elements on a window widened by %.1f um with a %.1f um absorbing margin, "
-                      "the bend as the (1 + x/R)^2 scaling of the permittivity" % (extra, absorber),
+                      "the bend as its exact anisotropic straight equivalent" % (extra, absorber),
             "window_um": list(wide.window), "straight_n_eff": straight.n_eff,
             "straight_loss_floor_dB_per_cm": straight.loss_dB_per_m(lam) / 100.0,
             "rows": rows}
@@ -163,10 +183,11 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             if q:
                 r["leaky_loss_dB_per_cm"] = q["loss_dB_per_cm"]
                 r["leaky_dn_eff_from_straight"] = q["dn_eff_from_straight"]
+                r["leaky_mismatch_dB_per_junction"] = q["mismatch_dB_per_junction"]
 
     payload: dict[str, Any] = {
         "enabled": True,
-        "method": "conformal transformation of the bend into a straight guide",
+        "method": "transformation x = R ln(r/R) of the bend into a straight guide, semi-vectorial",
         "n_eff_straight": float(straight.n_eff),
         "n_slab_floor": n_slab,
         "radii_um": [float(r) for r in sorted(cfg.radii_um, reverse=True)],

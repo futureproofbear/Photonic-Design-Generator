@@ -57,10 +57,29 @@ from ..geometry import CrossSection
 
 _IMPORT_ERROR: str | None = None
 try:  # pragma: no cover - exercised by the availability test
+    import scipy.constants as _const
+    import scipy.sparse.linalg as _spla
     import shapely.geometry as _sg
-    from femwell.maxwell.waveguide import compute_modes as _compute_modes
+    from femwell.maxwell.waveguide import (
+        Mode as _Mode,
+        calculate_overlap as _calculate_overlap,
+        compute_modes as _compute_modes,
+    )
     from femwell.mesh import mesh_from_OrderedDict as _mesh_from_OrderedDict
-    from skfem import Basis as _Basis, ElementTriP0 as _ElementTriP0, Functional as _Functional
+    from skfem import (
+        Basis as _Basis,
+        BilinearForm as _BilinearForm,
+        ElementTriN1 as _ElementTriN1,
+        ElementTriN2 as _ElementTriN2,
+        ElementTriP0 as _ElementTriP0,
+        ElementTriP1 as _ElementTriP1,
+        ElementTriP2 as _ElementTriP2,
+        Functional as _Functional,
+        condense as _condense,
+        solve as _solve,
+        solver_eigen_scipy as _solver_eigen_scipy,
+    )
+    from skfem.helpers import curl as _curl, dot as _dot, grad as _grad, inner as _inner
     from skfem.io.meshio import from_meshio as _from_meshio
 
     _AVAILABLE = True
@@ -112,6 +131,25 @@ class FemModeResult:
         """Power attenuation from the imaginary index: 20 log10(e) k0 Im(n)."""
         import math
         return 20.0 / math.log(10.0) * (2 * math.pi / (wavelength_um * 1e-6)) * abs(self.n_eff_imag)
+
+    def power_coupling(self, other: "FemModeResult") -> float:
+        """Fraction of the power of this mode coupled into ``other`` at a butt joint.
+
+            T = |<a|b>|^2 / (Re<a|a> Re<b|b>),   <a|b> = 1/2 Int(E_a* x H_b + E_b x H_a*) . z
+
+        This is the mode-mismatch transmission of a junction with no lateral
+        offset, such as a straight guide joined to a bend. The fields of a bend
+        solved by this module are the physical fields on the plane of the
+        junction, so the figure is that of the junction itself. Where the two
+        modes were solved on different meshes the second is interpolated.
+        """
+        a, b = self._mode, other._mode
+        if a is None or b is None:
+            return float("nan")
+        ab = _calculate_overlap(a.basis, a.E, a.H, b.basis, b.E, b.H)
+        aa = _calculate_overlap(a.basis, a.E, a.H, a.basis, a.E, a.H)
+        bb = _calculate_overlap(b.basis, b.E, b.H, b.basis, b.E, b.H)
+        return float(abs(ab) ** 2 / (np.real(aa) * np.real(bb)))
 
     def confinement(self, material: str) -> float:
         """Fraction of |E_t|^2 within the regions made of ``material``."""
@@ -282,6 +320,92 @@ def _build_mesh(
 
 
 # --------------------------------------------------------------------------
+# the bend
+# --------------------------------------------------------------------------
+def _bent_modes(basis_eps, eps, wavelength_um: float, radius_um: float, *,
+                num_modes: int, order: int, n_guess: float | None,
+                metallic_boundaries: bool) -> list:
+    """Modes of a guide bent to ``radius_um``, by its exact straight equivalent.
+
+    The bend (r, phi, y) is mapped onto a straight guide by x = r - R and
+    z = R phi, the centre of curvature lying at x = -R. Transformation optics
+    gives the straight guide an anisotropic medium, with s = r/R:
+
+        eps' = eps * diag(s, s, 1/s)     (x, y transverse; propagation along z)
+        mu'  =       diag(s, s, 1/s)
+
+    The transverse fields of the straight guide equal the physical fields on
+    the radial plane, so a mode solved here is overlapped directly with a
+    straight one. ``femwell.compute_modes`` instead scales an isotropic
+    permittivity by s^2 and keeps mu = 1. That form agrees with this one for a
+    guide uniform in y and departs from it for a core confined in y as well.
+    On a 220 nm by 500 nm silicon strip at R = 10 um it gave an index shift
+    3.7 times that of a cylindrical eigenmode solve, and this form agrees with
+    that solve to the precision quoted in ``tests/test_bend_exact.py``.
+
+    The variational form is that of ``femwell.compute_modes``, the transverse
+    and longitudinal tensor components entering separately. H is projected
+    from E with mu', so that the fields carried by each ``Mode`` are physical.
+    """
+    k0 = 2 * np.pi / wavelength_um
+    element = (_ElementTriN1() * _ElementTriP1() if order == 1
+               else _ElementTriN2() * _ElementTriP2())
+    basis = basis_eps.with_element(element)
+    basis_eps = basis.with_element(basis_eps.elem)
+    R = float(radius_um)
+
+    @_BilinearForm(dtype=complex)
+    def aform(e_t, e_z, v_t, v_z, w):
+        s = 1 + w.x[0] / R
+        eps_t, eps_z, inv_mu_t, inv_mu_z = w.epsilon * s, w.epsilon / s, 1 / s, s
+        return (inv_mu_z * _curl(e_t) * _curl(v_t) / k0 ** 2
+                - eps_t * _dot(e_t, v_t)
+                + inv_mu_t * _dot(_grad(e_z), v_t)
+                + eps_t * _inner(e_t, _grad(v_z))
+                - eps_z * e_z * v_z * k0 ** 2)
+
+    @_BilinearForm(dtype=complex)
+    def bform(e_t, e_z, v_t, v_z, w):
+        return -(1 / (1 + w.x[0] / R)) * _dot(e_t, v_t) / k0 ** 2
+
+    ev = basis_eps.interpolate(eps)
+    A = aform.assemble(basis, epsilon=ev)
+    B = bform.assemble(basis, epsilon=ev)
+    sigma = k0 ** 2 * (n_guess ** 2 if n_guess else 1.1 * float(np.max(np.real(eps))))
+    solver = _solver_eigen_scipy(k=num_modes, sigma=sigma)
+    if metallic_boundaries:
+        lams, xs = _solve(*_condense(-A, -B, D=basis.get_dofs(), x=basis.zeros(dtype=complex)),
+                          solver=solver)
+    else:
+        lams, xs = _solve(-A, -B, solver=solver)
+    xs[basis.split_indices()[1], :] /= 1j * np.sqrt(lams[np.newaxis, :] / k0 ** 4)
+
+    @_BilinearForm(dtype=complex)
+    def mass(e_t, e_z, v_t, v_z, w):
+        return _dot(e_t, v_t) + e_z * v_z
+
+    M = mass.assemble(basis)
+    omega = k0 * _const.speed_of_light
+    out = []
+    for i, lam in enumerate(lams):
+        beta = np.sqrt(lam)
+
+        @_BilinearForm(dtype=complex)
+        def curl_over_mu(e_t, e_z, v_t, v_z, w):
+            s = 1 + w.x[0] / R
+            return ((-1j * beta * e_t[1] + e_z.grad[1]) * v_t[0]
+                    + (1j * beta * e_t[0] - e_z.grad[0]) * v_t[1]) / s + e_t.curl * v_z * s
+
+        E = xs[:, i]
+        H = _spla.spsolve(M, curl_over_mu.assemble(basis) @ E) * -1j / _const.mu_0 / omega
+        power = _calculate_overlap(basis, E, H, basis, E, H)
+        out.append(_Mode(frequency=_const.speed_of_light / wavelength_um, k=beta,
+                         basis_epsilon_r=basis_eps, epsilon_r=eps, basis=basis,
+                         E=E / np.sqrt(power), H=H / np.sqrt(power)))
+    return out
+
+
+# --------------------------------------------------------------------------
 # the solve
 # --------------------------------------------------------------------------
 def solve_cross_section(
@@ -303,9 +427,11 @@ def solve_cross_section(
 ) -> FemSolveResult:
     """Solve ``xs`` by finite elements at a scalar permittivity per material.
 
-    ``radius_um`` bends the guide: femwell scales the permittivity by
-    (1 + x / R)^2, the bend axis lying at x = -R, so the outer wall is the +x
-    side. ``absorber_um`` gives the lateral margin of the window an imaginary
+    ``radius_um`` bends the guide about an axis at x = -R, so the outer wall is
+    the +x side. The bend is solved as its exact anisotropic straight
+    equivalent (see ``_bent_modes``).
+
+    ``absorber_um`` gives the lateral margin of the window an imaginary
     permittivity rising quadratically from zero at its inner edge to
     ``absorber_strength`` times the real part at the window edge. That margin
     is the absorbing boundary a leaky mode needs; without it a bend mode is
@@ -358,16 +484,20 @@ def solve_cross_section(
         ramp = np.minimum(1.0, d / absorber_um) ** 2
         eps = eps.astype(complex) * (1.0 + 1j * float(absorber_strength) * ramp)
 
-    modes = _compute_modes(
-        basis_eps,
-        eps,
-        wavelength=wavelength_um,
-        num_modes=num_modes,
-        order=element_order,
-        n_guess=n_guess,
-        metallic_boundaries=bool(metallic_boundaries),
-        radius=(float(radius_um) if radius_um else np.inf),
-    )
+    if radius_um:
+        modes = _bent_modes(basis_eps, eps, wavelength_um, float(radius_um),
+                            num_modes=num_modes, order=element_order, n_guess=n_guess,
+                            metallic_boundaries=bool(metallic_boundaries))
+    else:
+        modes = _compute_modes(
+            basis_eps,
+            eps,
+            wavelength=wavelength_um,
+            num_modes=num_modes,
+            order=element_order,
+            n_guess=n_guess,
+            metallic_boundaries=bool(metallic_boundaries),
+        )
 
     out: list[FemModeResult] = []
     for m in modes:

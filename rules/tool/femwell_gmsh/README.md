@@ -24,6 +24,22 @@ instrument.
 **A cross-check is anchored to a closed-form result before it is pointed at
 anything.**
 
+## The `radius` argument of `compute_modes` is an isotropic approximation
+
+`femwell.maxwell.waveguide.compute_modes(radius=R)` scales an isotropic
+permittivity by (1 + x/R)^2 and keeps mu = 1. The exact straight equivalent of
+a bend is anisotropic, with eps' = eps diag(s, s, 1/s) and mu' = diag(s, s, 1/s)
+for s = r/R. The two agree for a guide uniform normal to the plane of the bend.
+On a 220 nm by 500 nm silicon strip at R = 10 um the isotropic form gave 3.7
+times the index shift of a cylindrical eigenmode solve.
+
+**Solve a bend through `femmode.solve_cross_section(radius_um=...)`**, which
+applies the anisotropic tensors and projects H with mu'. Its fields are then
+physical on the plane of a straight-to-bend junction, so
+`FemModeResult.power_coupling` gives the mismatch of that junction directly.
+A bend mode from femwell's own `radius` argument carries an H computed with
+mu = 1, and an overlap formed from it is in error.
+
 ## What this solver adds that the finite-difference solver cannot report
 
 **Polarisation purity.** A semi-vectorial formulation carries one transverse
@@ -62,4 +78,4 @@ fixtures stagger the interface between nodes.
 
 ## Evidence
 
-`.claude/LESSONS.md` L012, L013, T005, T009, T018.
+`.claude/LESSONS.md` L012, L013, T005, T009, T018, T096.
