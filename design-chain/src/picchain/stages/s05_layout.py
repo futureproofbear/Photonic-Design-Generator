@@ -1301,14 +1301,21 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
         # of no width. Away from the guide the cut steps back from the coupler,
         # which lies wholly on the facet side of the slanted segment.
         _h = 20.0
+        # The cut is moved 50 nm toward the facet so that the band overlaps the
+        # strip's end. Placed on o2 itself, snapping left the output strip 1 nm
+        # from the band on 2026-10-06: a gap in the slab under the ridge that
+        # neither rule deck reads, there being no slab spacing rule in either.
+        _ov = 0.05
         left = [(bx0, pad_y), (bx0, -pad_y)]
         right = [(bx1, -pad_y), (bx1, pad_y)]
         if dl_in is not None:
-            ox, oy = dl_in["o2"][0], dl_in["o2"][1] - dl_in["dy"]
+            ox = dl_in["o2"][0] - _ov * dl_in["heading"][0]
+            oy = dl_in["o2"][1] - dl_in["dy"] - _ov * dl_in["heading"][1]
             t = dl_in["heading"][1] / dl_in["heading"][0]
             left = [(ox - _h * t, pad_y), (ox - _h * t, oy + _h), (ox + _h * t, oy - _h), (ox + _h * t, -pad_y)]
         if dl_out is not None:
-            ox, oy = z_end - dl_out["o2"][0], dl_out["o2"][1] - dl_out["dy"]
+            ox = z_end - dl_out["o2"][0] + _ov * dl_out["heading"][0]
+            oy = dl_out["o2"][1] - dl_out["dy"] - _ov * dl_out["heading"][1]
             t = dl_out["heading"][1] / dl_out["heading"][0]
             right = [(ox - _h * t, -pad_y), (ox - _h * t, oy - _h), (ox + _h * t, oy + _h), (ox + _h * t, pad_y)]
         band = left + right

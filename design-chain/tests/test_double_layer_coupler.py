@@ -110,3 +110,15 @@ def test_every_coupler_polygon_is_under_the_vertex_cap(tmp_path):
     polys, _ = _polys(tmp_path, _design())
     for layer in ("WG", "SLAB"):
         assert max(len(p) for p in polys[layer]) <= 200
+
+
+def test_each_strip_merges_with_the_slab_band(tmp_path):
+    """The strip and the band must be one piece of slab where the ridge hands
+    over; a cut placed on o2 itself left a 1 nm gap at the output on
+    2026-10-06, which no rule deck reads."""
+    import klayout.db as kdb
+    polys, _ = _polys(tmp_path, _design())
+    r = kdb.Region()
+    for p in polys["SLAB"]:
+        r.insert(kdb.DPolygon([kdb.DPoint(x, y) for x, y in p]).to_itype(0.001))
+    assert r.merged().count() == 1
