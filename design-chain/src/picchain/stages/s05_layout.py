@@ -111,6 +111,7 @@ def _double_layer_lead(angle_deg: float, radius_um: float, wg_width: float, dl,
     left = [at(a, w)[0] for a, w in zip(ss, ws)]
     right = [at(a, w)[1] for a, w in zip(ss, ws)]
     strip = left + right[::-1]
+    strip_pieces = _rail_pieces(left, right)
 
     # the ridge: the kit's taper on the strip, then the arc at the guide width
     su = list(s_end - Lu + Lu * np.linspace(0.0, 1.0, int(dl.npoints_upper) + 1))
@@ -128,6 +129,7 @@ def _double_layer_lead(angle_deg: float, radius_um: float, wg_width: float, dl,
     l2 = [(z + h * -ty, y + h * tz) for (z, y), (tz, ty), h in zip(cent, tang, halves)]
     r2 = [(z - h * -ty, y - h * tz) for (z, y), (tz, ty), h in zip(cent, tang, halves)]
     ridge = l2 + r2[::-1]
+    ridge_pieces = _rail_pieces(l2, r2)
 
     # the window on the slab-negative layer, over the whole strip
     wb = float(dl.slab_removal_width_um)
@@ -135,10 +137,28 @@ def _double_layer_lead(angle_deg: float, radius_um: float, wg_width: float, dl,
     window = [a0[0], a1[0], a1[1], a0[1]]
 
     dz, dy = cent[-1]
-    return {"ridge": ridge, "strip": strip, "window": window, "dz": dz, "dy": dy,
+    return {"ridge": ridge, "strip": strip, "ridge_pieces": ridge_pieces, "strip_pieces": strip_pieces,
+            "window": window, "dz": dz, "dy": dy,
             "path_um": s_end + radius_um * th, "o2": (s_end * c, s_end * sn), "heading": (c, sn),
             "strip_end_s_um": -ext / 2, "port_width_um": float(_kit_lower(0.0, **dl.lower)),
             "ridge_start_s_um": s_end - Lu}
+
+
+def _rail_pieces(left, right, max_vertices: int = 200):
+    """A guide given by two rails, cut into abutting pieces of at most
+    `max_vertices` vertices each. Consecutive pieces share one station, so they
+    meet edge to edge across the guide and merge into the drawn guide. A
+    polygon above the cap is legal to every width and space rule and does not
+    survive mask fracture intact. (added 2026-10-06)"""
+    n = len(left)
+    step = max(2, max_vertices // 2) - 1
+    pieces = []
+    i = 0
+    while i < n - 1:
+        j = min(n - 1, i + step)
+        pieces.append(left[i:j + 1] + right[i:j + 1][::-1])
+        i = j
+    return pieces
 
 
 def _clip_halfplane(poly, point, normal):
@@ -924,8 +944,10 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
         rad = lay.facet_bend_radius_um
         dl_in = _double_layer_lead(lay.input_facet_angle_deg, rad, wg_width, lay.double_layer, tip)
         sh = dl_in["dy"]
-        out["WG"].append([(pz, py - sh) for pz, py in dl_in["ridge"]])
-        out["SLAB"].append([(pz, py - sh) for pz, py in dl_in["strip"]])
+        for _pc in dl_in["ridge_pieces"]:
+            out["WG"].append([(pz, py - sh) for pz, py in _pc])
+        for _pc in dl_in["strip_pieces"]:
+            out["SLAB"].append([(pz, py - sh) for pz, py in _pc])
         if "SLAB_NEG" in out:
             out["SLAB_NEG"].append([(pz, py - sh) for pz, py in dl_in["window"]])
         lead_excursion = abs(sh)
@@ -1174,8 +1196,10 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
         # axis as the input does
         z_end = z_out + dz_out
         if dl_out is not None:
-            out["WG"].append([(z_end - pz, py - dy_out) for pz, py in dl_out["ridge"]])
-            out["SLAB"].append([(z_end - pz, py - dy_out) for pz, py in dl_out["strip"]])
+            for _pc in dl_out["ridge_pieces"]:
+                out["WG"].append([(z_end - pz, py - dy_out) for pz, py in _pc])
+            for _pc in dl_out["strip_pieces"]:
+                out["SLAB"].append([(z_end - pz, py - dy_out) for pz, py in _pc])
             if "SLAB_NEG" in out:
                 out["SLAB_NEG"].append([(z_end - pz, py - dy_out) for pz, py in dl_out["window"]])
         else:

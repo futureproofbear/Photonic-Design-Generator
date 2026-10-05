@@ -101,3 +101,12 @@ def test_the_reticle_places_the_facet_plane_on_the_outer_boundary():
     src = Path(s14_reticle.__file__).read_text(encoding="utf-8")
     assert "facet_x = die_x0 - lane + (0.0 if facet_outer else ez_x)" in src
     assert "dev_dx = facet_x - float(_planes[0])" in src
+
+
+def test_every_coupler_polygon_is_under_the_vertex_cap(tmp_path):
+    """The kit's profiles are sampled densely, and drawn as one polygon each the
+    ridge carried about 290 vertices and the strip 484, above the 200 the
+    geometry check holds a polygon to (2026-10-06)."""
+    polys, _ = _polys(tmp_path, _design())
+    for layer in ("WG", "SLAB"):
+        assert max(len(p) for p in polys[layer]) <= 200
