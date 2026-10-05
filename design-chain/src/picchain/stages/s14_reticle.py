@@ -322,6 +322,14 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     _edges = _lay.get("cell_edges_um")
     slab_ext = float(_lay.get("facet_slab_extension_um") or 0.0)
     dev_left = float(_edges[0]) if _edges else dev_box.left
+    # Under `facet_at: outer` each laser is placed by its facet plane, local
+    # x = 0, on the outer chip boundary, and the strip of its coupler reaches
+    # past it as the kit's does (added 2026-10-06).
+    _planes = _lay.get("facet_planes_um")
+    facet_outer = getattr(cfg, "facet_at", "contour") == "outer"
+    if facet_outer and not _planes:
+        raise RuntimeError("reticle.facet_at is outer and the layout reports no facet planes")
+    plane_span = (float(_planes[1]) - float(_planes[0])) if _planes else None
     dev_width = (float(_edges[1]) - float(_edges[0])) if _edges else dev_box.width()
 
     die = layout.create_cell(f"{design.layout.cell_name}_DIE")
@@ -368,7 +376,14 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     facet_spans_frame = bool(cfg.align_facet_to_edge and cfg.chip_frame.enabled
                              and cfg.die_width_um)
     longest = max(dev_width, split_w - 2 * slab_ext, comp_w - 2 * slab_ext)
-    if facet_spans_frame:
+    if facet_spans_frame and facet_outer:
+        usable_w = cfg.die_width_um
+        if plane_span > usable_w + 1e-6:
+            raise RuntimeError(
+                f"the device spans {plane_span:.1f} um between its facet planes and the outer "
+                f"boundary of a {cfg.die_width_um:.0f} um die admits {usable_w:.1f} um")
+        content_w = mon_width
+    elif facet_spans_frame:
         usable_w = cfg.die_width_um - 2 * cfg.chip_frame.exclusion_zone_um
         if longest > usable_w + 1e-6:
             raise RuntimeError(
@@ -448,8 +463,11 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # polish stops, so the port is exposed and the exclusion ring stays clear.
     lane = cfg.dicing_lane_um
     ez_x = cfg.chip_frame.exclusion_zone_um if cfg.chip_frame.enabled else 0.0
-    facet_x = die_x0 - lane + ez_x
-    dev_dx = (facet_x - dev_left) if cfg.align_facet_to_edge else -dev_box.left
+    facet_x = die_x0 - lane + (0.0 if facet_outer else ez_x)
+    if facet_outer:
+        dev_dx = facet_x - float(_planes[0])
+    else:
+        dev_dx = (facet_x - dev_left) if cfg.align_facet_to_edge else -dev_box.left
 
     if cfg.device_y == "centre":
         # The CONTENT is centred, not the device. The ladder copies and the
@@ -490,7 +508,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # premise were the tightest-spaced pair on it, and the ladder loop below
         # carried the same constant since it was written.
         dy = comp_top - k * comp_pitch - (comp_pitch - box.height()) - box.top
-        dx = (facet_x - (box.left + slab_ext)) if cfg.align_facet_to_edge else -box.left
+        dx = (facet_x if facet_outer else
+              ((facet_x - (box.left + slab_ext)) if cfg.align_facet_to_edge else -box.left))
         die.insert(db.DCellInstArray(
             cell.cell_index(), db.DTrans(db.DVector(dx, dy))))
         ports.append((dy + box.bottom - 10.0, dy + box.top + 10.0))
@@ -516,7 +535,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # micrometres inside the die with no optical port at all, which makes
         # the ladder undiagnosable: it would return a die carrying four
         # gratings of which only one could be interrogated.
-        dx = (facet_x - (box.left + slab_ext)) if cfg.align_facet_to_edge else -box.left
+        dx = (facet_x if facet_outer else
+              ((facet_x - (box.left + slab_ext)) if cfg.align_facet_to_edge else -box.left))
         die.insert(db.DCellInstArray(
             cell.cell_index(), db.DTrans(db.DVector(dx, dy))))
         ports.append((dy + box.bottom - 10.0, dy + box.top + 10.0))
@@ -613,8 +633,9 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         for row in m.get("rows", []):
             y = mon_dy + float(row.get("y_um", 0.0))
             x0 = mon_dx + x_local
-            if x0 > facet_x:
-                add("WG", [monitors._rect(facet_x, y - wg_half, x0 + 1.0, y + wg_half)])
+            _xm = facet_x + (ez_x if facet_outer else 0.0)
+            if x0 > _xm:
+                add("WG", [monitors._rect(_xm, y - wg_half, x0 + 1.0, y + wg_half)])
                 ports.append((y - 10.0, y + 10.0))
                 port_rows.append({"structure": m["structure"], "y_um": y})
     for m in mon_desc:
@@ -648,7 +669,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # facet on the right edge, so the ring is opened there as well; a ring
         # drawn through it placed metal across the output guide, and the
         # metal-to-guide rule reported it at fourteen places (2026-10-06).
-        spans_frame = bool(facet_spans_frame and abs(dev_width - usable_w) < 1e-3)
+        spans_frame = bool(facet_spans_frame and abs((plane_span if facet_outer else dev_width) - usable_w) < 1e-3)
         ring = monitors.seal_ring(x0=die_x0, y0=die_y0, x1=die_x1, y1=die_y1,
                                   width_um=sw, left_openings=openings,
                                   right_openings=(openings if spans_frame else None))

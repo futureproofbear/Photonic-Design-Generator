@@ -581,6 +581,9 @@ class FacetPortCfg(BaseModel):
     offset_y_um: float = 0.0
     tolerance_dB: float = 1.0
     facet_width_um: float | None = None
+    #: the guide at the facet: the ridge tip, or a strip of the slab layer
+    #: alone, which is the port of a double-layer coupler (added 2026-10-06)
+    port: Literal["ridge", "slab_strip"] = "ridge"
 
 
 class FacetCfg(BaseModel):
@@ -610,6 +613,9 @@ class FacetCfg(BaseModel):
     tolerance_dB: float = 1.0
     #: width of the guide at the facet; the taper tip is used when unset
     facet_width_um: float | None = None
+    #: the guide at the facet: the ridge tip, or a strip of the slab layer
+    #: alone, which is the port of a double-layer coupler (added 2026-10-06)
+    port: Literal["ridge", "slab_strip"] = "ridge"
     #: the output port, evaluated at `layout.output_facet_angle_deg` on the
     #: output taper's tip where one is declared (added 2026-10-06)
     output: FacetPortCfg | None = None
@@ -1041,6 +1047,13 @@ class ReticleCfg(BaseModel):
     #: a fibre at its edge sets this true. The default is retained so that
     #: existing masks are unchanged.
     align_facet_to_edge: bool = False
+    #: Where the singulated facet is formed: on the chip contour (CHIP_INNER,
+    #: 6/0) or on the outer chip boundary (CHIP_OUTER, 6/1). The LT-PRO kit
+    #: labels 6/1 the final chip boundary and draws its edge couplers across
+    #: the exclusion zone to it, the ridge confined to the contour and the slab
+    #: strip carrying the mode the rest of the way. Under `outer` each laser's
+    #: facet plane, local x = 0, is placed on 6/1. (added 2026-10-06)
+    facet_at: Literal["contour", "outer"] = "contour"
     #: Vertical placement of the device within the frame. `top` reproduces the
     #: original behaviour and puts the guide close to one long edge. `centre`
     #: places it on the die axis, which keeps it away from dicing damage and in
@@ -1197,6 +1210,33 @@ class MzmCfg(BaseModel):
     shield_strap_width_um: float = 20.0
 
 
+class DoubleLayerCouplerCfg(BaseModel):
+    """An inverse-taper edge coupler of two layers, as the LT-PRO kit draws it.
+
+    A strip of the slab layer runs from the facet, where it is narrow and the
+    mode is expanded, widening along `lower` to `total_length_um`; a ridge
+    taper rises on it over the last `upper_length_um` from `upper.yp_0` to the
+    guide width. The strip lies inside a window of `slab_removal_width_um` on
+    the slab-negative layer, which the kit uses to invert the slab's tone
+    around the coupler. Every default is the kit's C-band coupler
+    (`ltoi300/_builders/edge_couplers.py`, `build_cband_ltoi300_edge_coupler`,
+    with the profiles of `_utils/edge_couplers.py`). `input_ext_um` is the
+    straight strip before the taper; the kit places half of it beyond the
+    chip edge, so the facet plane lies `input_ext_um / 2` along the guide from
+    the strip's end. (added 2026-10-06)
+    """
+    total_length_um: float = 160.0
+    upper_length_um: float = 80.0
+    input_ext_um: float = 10.0
+    slab_removal_width_um: float = 20.0
+    lower: dict[str, float] = Field(default_factory=lambda: {
+        "xp_0": 0.0, "yp_0": 0.5, "xp_1": 0.0, "yp_1": 0.5, "xp_2": 0.5, "yp_2": 1.5,
+        "yoffs_exp": 0.418, "yp_max": 5.6, "exp_rate": 2.5})
+    upper: dict[str, float] = Field(default_factory=lambda: {"yp_0": 0.25, "yp_1": 0.9, "exp_rate": 2.5})
+    npoints_lower: int = 240
+    npoints_upper: int = 120
+
+
 class LayoutCfg(BaseModel):
     enabled: bool = True
     #: how many grating periods to draw. None draws the whole device, which is
@@ -1223,6 +1263,12 @@ class LayoutCfg(BaseModel):
     slab_min_width_um: float = 0.30
     input_facet_angle_deg: float = 8.0
     output_facet_angle_deg: float = 0.0
+    #: How each port reaches its facet under the angled route. `inverse_taper`
+    #: is the ridge narrowed to `taper_tip_width_um`; `double_layer` is the
+    #: kit's two-layer coupler of `double_layer`, whose slab strip crosses the
+    #: exclusion zone to a facet on the outer chip boundary. (added 2026-10-06)
+    edge_coupler: Literal["inverse_taper", "double_layer"] = "inverse_taper"
+    double_layer: DoubleLayerCouplerCfg = Field(default_factory=DoubleLayerCouplerCfg)
     #: The output taper, where it differs from the input one. Unset, the output
     #: taper is the input taper reversed, which is the only case the taper
     #: stage evaluates for adiabaticity.

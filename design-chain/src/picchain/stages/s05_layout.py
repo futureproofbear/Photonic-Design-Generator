@@ -51,6 +51,114 @@ def _facet_shear(angle_deg: float, width_um: float) -> float:
     return 0.5 * width_um * math.tan(math.radians(float(angle_deg)))
 
 
+def _kit_lower(x, xp_0=0.0, yp_0=0.35, xp_1=0.0, yp_1=0.35, xp_2=0.25, yp_2=0.5,
+               yoffs_exp=0.418, yp_max=5.6, exp_rate=2.5):
+    """The kit's linear-linear-exponential strip profile, `_lin_lin_exp` of
+    `lxt_pdk_gf/_utils/edge_couplers.py`, at fractional positions `x`."""
+    import numpy as np
+    x = np.asarray(x, dtype=float)
+    y = np.zeros_like(x)
+    if xp_1 > 0:
+        y = np.where(x < xp_1, (yp_0 + (yp_1 - yp_0) * (x - xp_0) / (xp_1 - xp_0)), 0)
+    if xp_2 > 0:
+        y = np.where((x >= xp_1) & (x < xp_2), (yp_1 + (yp_2 - yp_1) * (x - xp_1) / (xp_2 - xp_1)), y)
+    b = 1 / (1 - np.exp(-exp_rate)); a = 1 - b
+    y = np.where(x >= xp_2, yoffs_exp + (yp_2 - yoffs_exp) * (a + b * np.exp(exp_rate * x / xp_2 - exp_rate)), y)
+    return np.where(y >= yp_max, yp_max, y)
+
+
+def _kit_upper(x, yp_0=0.25, yp_1=0.7, exp_rate=2.5):
+    """The kit's exponential ridge profile, `_exp_growth`."""
+    import numpy as np
+    x = np.asarray(x, dtype=float)
+    b = 1 / (1 - np.exp(-exp_rate)); a = 1 - b
+    return yp_0 + (yp_1 - yp_0) * (a + b * np.exp(exp_rate * (x - 1)))
+
+
+def _double_layer_lead(angle_deg: float, radius_um: float, wg_width: float, dl,
+                       tip_width_um: float | None = None, n_seg: int = 24) -> dict:
+    """The kit's double-layer coupler on the angled route, from the facet plane
+    inward, and the arc that returns the guide to the die axis.
+
+    Local frame: the facet plane is z = 0 and the guide crosses it at y = 0,
+    heading at `angle_deg` into the die; positions along the guide are `s`
+    from the facet plane. The strip runs from s = -ext/2, its end beyond the
+    facet, to s = L + ext/2; the ridge taper occupies the last `upper_length_um`
+    of it; the arc follows. Returned in that frame: the ridge, strip and window
+    polygons, the extent (dz, dy) to the end of the arc, the optical path from
+    the facet plane to the end of the arc, and the hand-over point o2 with the
+    guide's heading there. Rails are offset perpendicular to the local heading
+    so each width is the width square to the guide.
+    """
+    import numpy as np
+    th = math.radians(float(angle_deg))
+    c, sn = math.cos(th), math.sin(th)
+    nrm = (-sn, c)
+    L, Lu, ext = float(dl.total_length_um), float(dl.upper_length_um), float(dl.input_ext_um)
+    s_end = L + ext / 2
+    up = dict(dl.upper)
+    if tip_width_um is not None:
+        up["yp_0"] = float(tip_width_um)
+    up["yp_1"] = float(wg_width)
+
+    def at(s_, w):
+        return ((s_ * c + nrm[0] * w / 2, s_ * sn + nrm[1] * w / 2),
+                (s_ * c - nrm[0] * w / 2, s_ * sn - nrm[1] * w / 2))
+
+    # the strip: constant at the port over the straight extension, then the kit's profile
+    ss = [-ext / 2, ext / 2] + list(ext / 2 + L * np.linspace(0.0, 1.0, int(dl.npoints_lower) + 1)[1:])
+    ws = [float(_kit_lower(0.0, **dl.lower))] * 2 + list(_kit_lower(np.linspace(0.0, 1.0, int(dl.npoints_lower) + 1)[1:], **dl.lower))
+    left = [at(a, w)[0] for a, w in zip(ss, ws)]
+    right = [at(a, w)[1] for a, w in zip(ss, ws)]
+    strip = left + right[::-1]
+
+    # the ridge: the kit's taper on the strip, then the arc at the guide width
+    su = list(s_end - Lu + Lu * np.linspace(0.0, 1.0, int(dl.npoints_upper) + 1))
+    wu = list(_kit_upper(np.linspace(0.0, 1.0, int(dl.npoints_upper) + 1), **up))
+    cent = [(a * c, a * sn) for a in su]
+    tang = [(c, sn)] * len(su)
+    halves = [w / 2 for w in wu]
+    z0, y0 = cent[-1]
+    cz, cy = z0 + radius_um * sn, y0 - radius_um * c
+    for k in range(1, n_seg + 1):
+        a = th * (1.0 - k / n_seg)
+        cent.append((cz - radius_um * math.sin(a), cy + radius_um * math.cos(a)))
+        tang.append((math.cos(a), math.sin(a)))
+        halves.append(wg_width / 2)
+    l2 = [(z + h * -ty, y + h * tz) for (z, y), (tz, ty), h in zip(cent, tang, halves)]
+    r2 = [(z - h * -ty, y - h * tz) for (z, y), (tz, ty), h in zip(cent, tang, halves)]
+    ridge = l2 + r2[::-1]
+
+    # the window on the slab-negative layer, over the whole strip
+    wb = float(dl.slab_removal_width_um)
+    a0, a1 = at(-ext / 2, wb), at(s_end, wb)
+    window = [a0[0], a1[0], a1[1], a0[1]]
+
+    dz, dy = cent[-1]
+    return {"ridge": ridge, "strip": strip, "window": window, "dz": dz, "dy": dy,
+            "path_um": s_end + radius_um * th, "o2": (s_end * c, s_end * sn), "heading": (c, sn),
+            "strip_end_s_um": -ext / 2, "port_width_um": float(_kit_lower(0.0, **dl.lower)),
+            "ridge_start_s_um": s_end - Lu}
+
+
+def _clip_halfplane(poly, point, normal):
+    """The part of a convex polygon on the side of the line through `point`
+    toward which `normal` points (Sutherland-Hodgman, one edge)."""
+    def side(q):
+        return (q[0] - point[0]) * normal[0] + (q[1] - point[1]) * normal[1]
+    out = []
+    n = len(poly)
+    for i in range(n):
+        a, b = poly[i], poly[(i + 1) % n]
+        sa, sb = side(a), side(b)
+        if sa >= 0:
+            out.append(a)
+        if (sa >= 0) != (sb >= 0):
+            t = sa / (sa - sb)
+            out.append((a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])))
+    return out
+
+
 def _tip_extension(a, b, outward, z_plane):
     """The taper tip carried, at its width, from its end face to the plane
     ``z_plane`` along ``outward``, a unit vector pointing out of the device.
@@ -807,7 +915,23 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     # length. Under the angled route the guide travels further than it advances,
     # so the two differ and the arc must be counted.
     lead_path = tl
-    if angled:
+    dl_in = None
+    if angled and lay.edge_coupler == "double_layer":
+        # The kit's double-layer coupler on the angled run (added 2026-10-06):
+        # the slab strip from beyond the facet plane, the ridge taper rising on
+        # it, then the arc to the die axis. Shifted so that the arc ends on the
+        # axis, as the inverse-taper route below is.
+        rad = lay.facet_bend_radius_um
+        dl_in = _double_layer_lead(lay.input_facet_angle_deg, rad, wg_width, lay.double_layer, tip)
+        sh = dl_in["dy"]
+        out["WG"].append([(pz, py - sh) for pz, py in dl_in["ridge"]])
+        out["SLAB"].append([(pz, py - sh) for pz, py in dl_in["strip"]])
+        if "SLAB_NEG" in out:
+            out["SLAB_NEG"].append([(pz, py - sh) for pz, py in dl_in["window"]])
+        lead_excursion = abs(sh)
+        lead_path = dl_in["path_um"]
+        z = dl_in["dz"]
+    elif angled:
         # The die edge is perpendicular and the guide is routed to meet it at the
         # declared angle: a straight run at that angle carrying the taper, then
         # an arc back to the die axis. The route is drawn from the die edge
@@ -1017,7 +1141,12 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     out_angle = float(lay.output_facet_angle_deg)
     angled_out = angled and abs(out_angle) > 0.0
     lead_out_excursion = 0.0
-    if angled_out:
+    dl_out = None
+    if angled_out and lay.edge_coupler == "double_layer":
+        dl_out = _double_layer_lead(out_angle, lay.facet_bend_radius_um, wg_width, lay.double_layer, tip_out)
+        dz_out, dy_out = dl_out["dz"], dl_out["dy"]
+        out_len = dz_out
+    elif angled_out:
         poly_out, dz_out, dy_out, _ = _angled_lead_in(
             out_angle, lay.facet_bend_radius_um, tl_out, wg_width, tip_out, profile=prof
         )
@@ -1044,9 +1173,15 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
         # perpendicular die edge at the declared angle, on the same side of the
         # axis as the input does
         z_end = z_out + dz_out
-        out["WG"].append([(z_end - pz, py - dy_out) for pz, py in poly_out])
+        if dl_out is not None:
+            out["WG"].append([(z_end - pz, py - dy_out) for pz, py in dl_out["ridge"]])
+            out["SLAB"].append([(z_end - pz, py - dy_out) for pz, py in dl_out["strip"]])
+            if "SLAB_NEG" in out:
+                out["SLAB_NEG"].append([(z_end - pz, py - dy_out) for pz, py in dl_out["window"]])
+        else:
+            out["WG"].append([(z_end - pz, py - dy_out) for pz, py in poly_out])
         lead_out_excursion = abs(dy_out)
-        if lay.draw_facets and lay.facet_tip_to_edge and lay.facet_recess_um > 0:
+        if dl_out is None and lay.draw_facets and lay.facet_tip_to_edge and lay.facet_recess_um > 0:
             th_out = math.radians(out_angle)
             out["WG"].append(_tip_extension(
                 (z_end - poly_out[0][0], poly_out[0][1] - dy_out),
@@ -1133,7 +1268,27 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     # added; this brings the same treatment to the topology beside it.
     slab_offset = design.platform.slab_offset_um
     if slab_offset is None:
-        out["SLAB"].append(_rect(edge_l - slab_ext, -pad_y, edge_r + slab_ext, pad_y))
+        bx0, bx1 = edge_l - slab_ext, edge_r + slab_ext
+        # Under the double-layer coupler the strip is the only slab between the
+        # facet and the hand-over point o2, as the kit draws it. The band is cut
+        # by the line through o2 square to the guide over +-20 um of it, and
+        # square to the band beyond, so that it meets the strip without a gap
+        # and carries no acute corner, which a width check reads as a feature
+        # of no width. Away from the guide the cut steps back from the coupler,
+        # which lies wholly on the facet side of the slanted segment.
+        _h = 20.0
+        left = [(bx0, pad_y), (bx0, -pad_y)]
+        right = [(bx1, -pad_y), (bx1, pad_y)]
+        if dl_in is not None:
+            ox, oy = dl_in["o2"][0], dl_in["o2"][1] - dl_in["dy"]
+            t = dl_in["heading"][1] / dl_in["heading"][0]
+            left = [(ox - _h * t, pad_y), (ox - _h * t, oy + _h), (ox + _h * t, oy - _h), (ox + _h * t, -pad_y)]
+        if dl_out is not None:
+            ox, oy = z_end - dl_out["o2"][0], dl_out["o2"][1] - dl_out["dy"]
+            t = dl_out["heading"][1] / dl_out["heading"][0]
+            right = [(ox - _h * t, -pad_y), (ox - _h * t, oy - _h), (ox + _h * t, oy + _h), (ox + _h * t, pad_y)]
+        band = left + right
+        out["SLAB"].append(band)
         ctx.warn(
             f"the slab is drawn as one band {2 * pad_y:.0f} um across the device "
             "rather than derived from the ridges. An unbroken slab guides, so it "
@@ -1224,6 +1379,15 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     ctx.put("layout.facet_tip_to_edge", bool(lay.draw_facets and lay.facet_tip_to_edge))
     ctx.put("layout.facet_slab_extension_um", slab_ext)
     ctx.put("layout.cell_edges_um", [edge_l, edge_r])
+    ctx.put("layout.facet_planes_um", [0.0, z_end])
+    ctx.put("layout.edge_coupler", lay.edge_coupler if angled else "inverse_taper")
+    if dl_in is not None:
+        ctx.put("layout.double_layer", {
+            "port_width_um": dl_in["port_width_um"], "strip_beyond_facet_um": -dl_in["strip_end_s_um"],
+            "ridge_start_from_facet_um": dl_in["ridge_start_s_um"],
+            "input_ridge_start_x_um": dl_in["ridge_start_s_um"] * math.cos(math.radians(lay.input_facet_angle_deg)),
+            "output_ridge_start_x_um": (z_end - dl_out["ridge_start_s_um"] * math.cos(math.radians(out_angle))) if dl_out else None,
+            "input_lead_path_um": dl_in["path_um"], "output_lead_path_um": dl_out["path_um"] if dl_out else None})
     # where each feature begins, so that a drawing of the mask can zoom on it
     # without re-deriving the floor plan
     ctx.put("layout.taper_length_um", tl)

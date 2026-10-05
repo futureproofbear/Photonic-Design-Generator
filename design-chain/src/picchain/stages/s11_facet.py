@@ -29,6 +29,24 @@ from ..config import Design
 from ..materials import MaterialLibrary
 
 
+def _strip_cross_section(design: Design, width_um: float, name: str):
+    """A strip of the slab layer alone, fully etched about it: the port of a
+    double-layer edge coupler. The mode is weakly guided and wide, so the
+    window is padded by 6 um. (added 2026-10-06)"""
+    from ..geometry import edbr_cross_section
+    from .. import process
+    p = design.platform
+    geom = process.geometry(design, design.process.simulate)
+    slab_t = p.film_thickness_um - geom.etch_depth_um
+    return edbr_cross_section(
+        film_material=p.film_material, film_thickness_um=slab_t, etch_depth_um=0.0,
+        wg_top_width_um=width_um, sidewall_deg=p.sidewall_deg,
+        box_thickness_um=p.box_thickness_um, clad_thickness_um=p.clad_thickness_um,
+        clad_material=p.clad_material, box_material=p.box_material,
+        substrate_material=p.substrate_material, slab_offset_um=0.0,
+        include_substrate=False, window_pad_x_um=6.0, window_pad_y_um=5.0, name=name)
+
+
 def _port(design: Design, ctx: RunContext, lib: MaterialLibrary, cfg, angle: float,
           width: float, label: str) -> dict[str, Any]:
     """Everything the stage establishes at one facet: the mode at the taper
@@ -45,8 +63,13 @@ def _port(design: Design, ctx: RunContext, lib: MaterialLibrary, cfg, angle: flo
 
     m, p_ = design.mesh, design.platform
     lam = design.waveguide.wavelength_um
-    xs = _cross_section(design, float(width), f"facet_{label}")
-    grid = build_grid(xs, m.d_fine_um, m.d_coarse_um, m.fine_margin_um)
+    strip = getattr(cfg, "port", "ridge") == "slab_strip"
+    if strip:
+        xs = _strip_cross_section(design, float(width), f"facet_{label}_strip")
+        grid = build_grid(xs, min(m.d_fine_um, 0.02), max(m.d_coarse_um, 0.15), m.fine_margin_um)
+    else:
+        xs = _cross_section(design, float(width), f"facet_{label}")
+        grid = build_grid(xs, m.d_fine_um, m.d_coarse_um, m.fine_margin_um)
     exx, eyy = _eps_maps(xs, grid, lib, lam, p_.cut, p_.use_index_override, m.subsample)
     tip = solve_modes(grid.x, grid.y, exx, eyy, lam,
                       polarisation=m.polarisation, num_modes=1)[0]
@@ -67,8 +90,10 @@ def _port(design: Design, ctx: RunContext, lib: MaterialLibrary, cfg, angle: flo
 
     # the partner, as an elliptical Gaussian of the declared mode-field radii,
     # displaced by whatever the walk-off leaves uncompensated
+    _I = np.abs(field) ** 2
+    _y_mode = float((_I * dA * y[None, :]).sum() / (_I * dA).sum()) if strip else 0.0
     partner = cp.gaussian_mode(x, y, cfg.partner_mfd_x_um / 2, cfg.partner_mfd_y_um / 2,
-                               x0=residual, y0=cfg.offset_y_um)
+                               x0=residual, y0=cfg.offset_y_um + _y_mode)
     eta_overlap = cp.power_overlap(field, partner, dA)
 
     t_fresnel = cp.fresnel_transmission(n_guide, cfg.partner_index,
@@ -97,7 +122,7 @@ def _port(design: Design, ctx: RunContext, lib: MaterialLibrary, cfg, angle: flo
         centred = cp.power_overlap(
             field,
             cp.gaussian_mode(x, y, cfg.partner_mfd_x_um / 2, cfg.partner_mfd_y_um / 2,
-                             x0=0.0, y0=cfg.offset_y_um),
+                             x0=0.0, y0=cfg.offset_y_um + _y_mode),
             dA)
         walk_penalty = eta_overlap / centred if centred > 0 else 0.0
     else:
@@ -127,6 +152,8 @@ def _port(design: Design, ctx: RunContext, lib: MaterialLibrary, cfg, angle: flo
     payload = {
         "enabled": True,
         "port": label,
+        "port_guide": "slab strip" if strip else "ridge tip",
+        "mode_height_centre_um": _y_mode,
         "facet_width_um": float(width),
         "n_eff_at_facet": n_guide,
         "n_eff_at_full_ridge": float((ctx.get("mode") or {}).get("n_eff_bare") or 0.0),
