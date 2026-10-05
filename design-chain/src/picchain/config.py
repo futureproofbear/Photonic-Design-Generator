@@ -407,8 +407,43 @@ class PhaseTrimmer(BaseModel):
     via_inset_um: float = 2.5
 
 
+class OutputFeedbackCfg(BaseModel):
+    """A reflection beyond the mirror, returned through it into the cavity.
+
+    The output facet of a laser whose output is taken past its distributed
+    mirror returns a fraction of the emitted power into the guide, and that
+    fraction re-enters the cavity through the mirror. Seen from the cavity the
+    mirror and the facet form one compound reflector,
+
+        r_eff = r_m + t^2 r_x e^{i psi} / (1 - r_m r_x e^{i psi}),
+        psi(f) = 2 pi f tau_x + psi_0,    tau_x = 2 n_g L_x / c,
+
+    which ripples in amplitude and phase with a period 1/tau_x in optical
+    frequency. The phase ripple pulls the lasing frequency, and the pull moves
+    as the chirp sweeps, so the chirp's linearity and the side-mode suppression
+    both depend on it. (added 2026-10-06)
+
+    The strength r_x is the facet stage's `output.reflection_into_guide` where
+    `reflection` is unset. The mirror's power transmission is taken as 1 - R,
+    which overstates it for a lossy grating and is the conservative choice.
+    The phase psi_0 is set by the external path modulo one wavelength, which
+    the process does not control; it is a parameter to be swept.
+    """
+    enabled: bool = True
+    #: the optical path from the mirror's effective reflection plane to the
+    #: reflecting facet, um: the grating beyond the penetration depth, the
+    #: output lead and the output route
+    path_um: float
+    #: the round-trip phase of the external path at zero frequency offset, degrees
+    phase_deg: float = 0.0
+    #: the power reflection returned into the guide; None takes the facet stage's
+    reflection: float | None = None
+
+
 class Cavity(BaseModel):
     enabled: bool = True
+    #: an external reflector beyond the mirror (see OutputFeedbackCfg)
+    output_feedback: OutputFeedbackCfg | None = None
     #: passive PIC length between the chip facet and the start of the grating
     feed_length_um: float = 1000.0
     rsoa: RSOA = Field(default_factory=RSOA)

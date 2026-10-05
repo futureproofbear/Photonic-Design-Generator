@@ -382,7 +382,7 @@ result is produced by it.
 | `stages/` | the nineteen chain stages | end to end against a published, measured device (see `examples/edbr_tfln_baseline/TOOLCHAIN_VALIDATION.md`) |
 
 ```bash
-./.venv/Scripts/python.exe -m pytest tests/ -q     # 717 tests
+./.venv/Scripts/python.exe -m pytest tests/ -q     # 719 tests
 ```
 
 ## Verification Beyond the Nominal Design
@@ -870,7 +870,7 @@ staircase deficit of any `taper` stage run and of any study using
 
 ## Annex: The Test Suite
 
-717 tests are distributed over 43 modules. The
+719 tests are distributed over 43 modules. The
 organising rule is that a test is
 anchored to a closed-form result, to a limit whose value is known without
 computation, or to a property measured back off the emitted artifact. No test
@@ -881,7 +881,7 @@ would attest to nothing.
 | module | count | what is held |
 |---|---|---|
 | [`test_resonator.py`](tests/test_resonator.py) | 160 | the ring closed forms, each reached by a second construction that shares no step with them |
-| [`test_laser.py`](tests/test_laser.py) | 72 | the rate equations against closed forms and limits |
+| [`test_laser.py`](tests/test_laser.py) | 74 | the rate equations against closed forms and limits |
 | [`test_fdtd_dimensions.py`](tests/test_fdtd_dimensions.py) | 45 | which dimensionality a runner builds, and what a payload may claim |
 | [`test_foundry.py`](tests/test_foundry.py) | 44 | that a declared quantity reaches a polygon |
 | [`test_search.py`](tests/test_search.py) | 37 | the parameter-search primitives against cases evaluable by hand |
@@ -925,7 +925,7 @@ would attest to nothing.
 | [`test_deck_monitor_field.py`](tests/test_deck_monitor_field.py) | 3 | that a foundry deck's markers inside the declared monitor field are set aside, and the release judges the count outside it |
 
 ```bash
-./.venv/Scripts/python.exe -m pytest tests/ -q     # 717 tests
+./.venv/Scripts/python.exe -m pytest tests/ -q     # 719 tests
 ```
 
 ### Solvers — 27

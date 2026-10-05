@@ -1127,3 +1127,30 @@ def test_chirp_linearity_is_reported_as_quadratic_phase_over_the_ramp():
     assert "quadratic_phase_error_peak_deg" in src
     assert "chirp_quadratic_phase_error_deg" in src
     assert "chirp_duration_us" in src
+
+
+def test_the_guide_between_the_phase_section_and_the_grating_is_cavity_delay():
+    """The layout draws `phase_section.separation_um` of guide between the
+    phase electrodes and the grating; the cavity stage omitted it from the
+    round trip until 2026-10-06 while the mask carried it."""
+    from pathlib import Path
+    from picchain.stages import s04_cavity
+    src = Path(s04_cavity.__file__).read_text(encoding="utf-8")
+    assert "tau_ext = tau_soa + tau_feed + tau_phase + tau_gap" in src
+    assert '"tau_phase_section_gap_ps"' in src
+
+
+def test_an_external_reflector_beyond_the_mirror_enters_the_cavity_phase():
+    """A laser whose output is taken past its mirror sees the output facet's
+    return through the mirror. The cavity stage folds it into the mirror as
+    r_eff = r_m + t^2 r_x e^{i psi} / (1 - r_m r_x e^{i psi}), so the tracked
+    mode, the chirp's linearity and the side-mode suppression all carry it
+    (2026-10-06). Declared absent, the cavity is unchanged."""
+    from pathlib import Path
+    from picchain.config import Cavity
+    from picchain.stages import s04_cavity
+    src = Path(s04_cavity.__file__).read_text(encoding="utf-8")
+    assert "return base + sgn * np.angle(_fb_corr(f, shift))" in src
+    assert "r *= float(abs(_fb_corr(f_m, shift)) ** 2)" in src
+    assert '"output_feedback": _fb_summary()' in src
+    assert Cavity().output_feedback is None

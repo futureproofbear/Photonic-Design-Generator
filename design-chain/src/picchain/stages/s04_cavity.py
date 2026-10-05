@@ -113,7 +113,15 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # what the section supplies without raising what it must supply.
     _ps = getattr(cav, "phase_section", None)
     tau_phase = (2 * n_g_wg * _ps.length_um * 1e-6 / C0) if (_ps and _ps.enabled) else 0.0
-    tau_ext = tau_soa + tau_feed + tau_phase
+    # The guide between the phase section's electrodes and the grating, which
+    # the layout draws so that the two electrode pairs stay separate nets. It
+    # lies inside the cavity and carries no electrode, so it is passive delay
+    # like the feed. It was absent from the delay until 2026-10-06 while the
+    # mask carried it: 50 um on a 17 mm cavity, 0.7 ps of 86.3, which moved the
+    # free spectral range by 0.8 per cent and the lever by the same.
+    tau_gap = ((2 * n_g_wg * float(getattr(_ps, "separation_um", 0.0)) * 1e-6 / C0)
+               if (_ps and _ps.enabled) else 0.0)
+    tau_ext = tau_soa + tau_feed + tau_phase + tau_gap
 
     # DBR group delay at the reflection peak; sign convention fixed here so
     # that the total round-trip delay is positive
@@ -172,6 +180,55 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     phi_of = _phase_interp(f_grid, phase)
     R_of = _phase_interp(f_grid, R_grid)
 
+    # ---- an external reflector beyond the mirror (added 2026-10-06) -------
+    # Folded into the mirror as a complex correction factor, so that every
+    # quantity built on the mirror's phase and reflectivity carries it: the
+    # tracked mode, the hop-free range, the chirp's linearity and the
+    # side-mode suppression. The correction is small in magnitude, so its
+    # angle stays on its principal branch and adds to the unwrapped mirror
+    # phase without a wrapping error.
+    _fb = getattr(cav, "output_feedback", None)
+    _fb_record: dict = {"enabled": False}
+    if _fb is not None and _fb.enabled:
+        _r_x2 = (_fb.reflection if _fb.reflection is not None
+                 else float(((ctx.get("facet") or {}).get("output") or {}).get("reflection_into_guide") or 0.0))
+        _r_x = math.sqrt(max(_r_x2, 0.0))
+        _tau_x = 2 * n_g_wg * _fb.path_um * 1e-6 / C0
+        _psi0 = math.radians(_fb.phase_deg)
+
+        def _fb_corr(f, shift):
+            r_abs = np.sqrt(np.clip(R_of(f - shift), 1e-12, 1.0))
+            t2 = np.clip(1.0 - r_abs ** 2, 0.0, 1.0)
+            e = np.exp(1j * (2 * np.pi * f * _tau_x + _psi0))
+            return 1.0 + t2 * _r_x * e / (r_abs * (1.0 - r_abs * _r_x * e))
+
+        _fb_record = {"enabled": True, "reflection": _r_x2, "path_um": float(_fb.path_um),
+                      "tau_x_ps": _tau_x * 1e12, "phase_deg": float(_fb.phase_deg),
+                      "ripple_period_GHz": 1e-9 / _tau_x if _tau_x > 0 else None,
+                      "feedback_strength_kappa": None}
+    else:
+        _fb_corr = None
+
+    def _fb_summary():
+        if not _fb_record.get("enabled"):
+            return _fb_record
+        R_pk = float(np.max(R_grid))
+        r_m = math.sqrt(R_pk)
+        kappa_fb = (1.0 - R_pk) * math.sqrt(_fb_record["reflection"]) / r_m
+        alpha_h = float(rs.linewidth_enhancement_alpha)
+        tau_rt_s = tau_ext + tau_dbr
+        C_fb = kappa_fb * (_fb_record["tau_x_ps"] * 1e-12 / tau_rt_s) * math.sqrt(1 + alpha_h ** 2)
+        out = dict(_fb_record)
+        out.update({
+            "feedback_strength_kappa": kappa_fb,
+            "feedback_parameter_C": C_fb,
+            "frequency_pull_peak_MHz": (C_fb / (2 * math.pi * _fb_record["tau_x_ps"] * 1e-12) / 1e6
+                                        if _fb_record["tau_x_ps"] else None),
+            "linewidth_factor_range": [1.0 / (1.0 + C_fb) ** 2, 1.0 / (1.0 - C_fb) ** 2] if C_fb < 1 else None,
+            "regime": "weak (C < 1): the pull is single-valued" if C_fb < 1 else "C >= 1: multiple external-cavity modes",
+        })
+        return out
+
     def Phi(f, shift, extra=0.0):
         """Round-trip phase.
 
@@ -179,7 +236,10 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         which is how an intracavity phase electrode enters. It is zero for a
         cavity whose only tunable element is the mirror.
         """
-        return 2 * np.pi * f * tau_ext + sgn * phi_of(f - shift) + extra
+        base = 2 * np.pi * f * tau_ext + sgn * phi_of(f - shift) + extra
+        if _fb_corr is None:
+            return base
+        return base + sgn * np.angle(_fb_corr(f, shift))
 
     f_lo, f_hi = f_grid[0] + 0.15 * (f_grid[-1] - f_grid[0]), f_grid[-1] - 0.15 * (f_grid[-1] - f_grid[0])
     f_scan = np.linspace(f_lo, f_hi, 20001)
@@ -217,6 +277,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         for k in range(k0, k1 + 1):
             for f_m in resonance_roots(f_scan, P, k):
                 r = float(R_of(f_m - shift))
+                if _fb_corr is not None:
+                    r *= float(abs(_fb_corr(f_m, shift)) ** 2)
                 if r >= lim:
                     out.append((k, f_m, r))
         return out
@@ -1205,6 +1267,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "laser_tuning_fitted_over_lever": eta_ratio,
         "mode_hops_in_sweep_analytic": hops_in_sweep,
         "tau_phase_section_ps": tau_phase * 1e12,
+        "tau_phase_section_gap_ps": tau_gap * 1e12,
+        "output_feedback": _fb_summary(),
         "phase_section": phase_payload,
         # With a sufficient phase section the comb is driven in step with the
         # mirror, so no hand-over occurs and the whole swept excursion is
