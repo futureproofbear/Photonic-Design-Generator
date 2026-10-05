@@ -234,9 +234,16 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         payload["deck"] = deck_result
         ctx.put("drc", payload)
         ctx.write_stage("drc", payload)
-        if deck_result.get("violations_total"):
+        if deck_result.get("violations_total") and deck_result.get("clean_outside_monitor_field"):
             ctx.warn(
-                f"the foundry deck reports {deck_result['violations_total']} violations "
+                f"the foundry deck reports {deck_result['violations_total']} violations and every one "
+                "lies inside the declared monitor field, where the monitors draw features below the "
+                "rules on purpose; the device and the frame are clean under the deck",
+                key="drc.deck_violations_in_monitor_field_only")
+        if deck_result.get("violations_total") and not deck_result.get("clean_outside_monitor_field"):
+            ctx.warn(
+                f"the foundry deck reports {deck_result['violations_outside_monitor_field_total']} violations "
+                f"outside the declared monitor field, {deck_result['violations_total']} in all, "
                 f"across {len(deck_result['violations_by_category'])} categories; the "
                 "in-process rules are a smoke test and do not replace it"
             )
@@ -285,6 +292,31 @@ def parse_report(path) -> dict[str, int]:
         cat = (item.findtext("category") or "").strip().strip("'\"")
         counts[cat] = counts.get(cat, 0) + 1
     return counts
+
+
+def parse_report_markers(path) -> list[tuple[str, float, float]]:
+    """Every marker of a report database with the first vertex it is drawn at.
+
+    A marker's value is a shape in the layout's coordinates, written as
+    ``edge-pair: (x,y;x,y)|(x,y;x,y)``, ``polygon: (x,y;x,y;...)`` or
+    ``edge: (x,y;x,y)``; the first coordinate pair places it well enough to
+    say which region of the die it lies in. (added 2026-10-06)
+    """
+    import re
+    import xml.etree.ElementTree as ET
+
+    out: list[tuple[str, float, float]] = []
+    root = ET.parse(str(path)).getroot()
+    for item in root.iter("item"):
+        cat = (item.findtext("category") or "").strip().strip("'\"")
+        for v in item.iter("value"):
+            m = re.search(r"\((-?[\d.]+),(-?[\d.]+)", v.text or "")
+            if m:
+                out.append((cat, float(m.group(1)), float(m.group(2))))
+                break
+        else:
+            out.append((cat, float("nan"), float("nan")))
+    return out
 
 
 def bind_deck_io(text: str) -> tuple[str, list[str]]:
@@ -480,6 +512,19 @@ def run_deck(design, ctx, gds_path) -> dict:
         raise RuntimeError(f"the runset produced no report database\n{tail}")
 
     counts = parse_report(report)
+    # The markers inside the declared monitor field are set aside, as the
+    # in-process check sets its own aside: a critical-dimension vernier draws
+    # rungs below the minimum width on purpose, and a deck that reads them as
+    # violations is right about the rungs and says nothing about the device.
+    # Both counts are reported; the release judges the one outside the field.
+    box = (ctx.get("reticle") or {}).get("monitor_field_box_um")
+    in_field: dict[str, int] = {}
+    if box:
+        x0, y0, x1, y1 = [float(b) for b in box]
+        for cat, mx, my in parse_report_markers(report):
+            if mx == mx and x0 <= mx <= x1 and y0 <= my <= y1:
+                in_field[cat] = in_field.get(cat, 0) + 1
+    outside = {k: v - in_field.get(k, 0) for k, v in counts.items() if v - in_field.get(k, 0) > 0}
 
     # A clean report is worth only as much as the geometry the deck could see.
     # Every layer the runset names is checked against the mask, and any that
@@ -531,5 +576,11 @@ def run_deck(design, ctx, gds_path) -> dict:
         "violations_by_category": counts,
         "violations_total": int(sum(counts.values())),
         "clean": bool(sum(counts.values()) == 0),
+        "violations_in_monitor_field": in_field,
+        "violations_in_monitor_field_total": int(sum(in_field.values())),
+        "violations_outside_monitor_field": outside,
+        "violations_outside_monitor_field_total": int(sum(outside.values())),
+        "clean_outside_monitor_field": bool(sum(outside.values()) == 0),
+        "monitor_field_box_um": list(box) if box else None,
         **cov,
     }

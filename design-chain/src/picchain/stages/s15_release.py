@@ -122,9 +122,15 @@ def _readiness(design: Design, ctx: RunContext) -> list[dict[str, Any]]:
                    f"{drc.get('checked')}" if drc.get("enabled") else "not run",
          "field": "drc.enabled"},
         {"condition": "a foundry rule deck was executed",
-         "met": bool((drc.get("deck") or {}).get("violations_total") == 0),
+         # judged outside the declared monitor field, where the monitors draw
+         # below the rules on purpose; the in-process check is judged the same
+         # way (2026-10-06). A deck result without the field classification is
+         # judged on its total.
+         "met": bool(_deck_outside(drc) == 0),
          "detail": "no deck declared" if not design.drc.deck
-                   else f"{(drc.get('deck') or {}).get('violations_total')} violations",
+                   else (f"{(drc.get('deck') or {}).get('violations_total')} violations, "
+                         f"{(drc.get('deck') or {}).get('violations_in_monitor_field_total', 0)} of them "
+                         "in the declared monitor field"),
          "field": "drc.deck"},
         {"condition": "the acceptance targets are met",
          "met": ver.get("verdict") == "PASS",
@@ -186,6 +192,17 @@ def _readiness(design: Design, ctx: RunContext) -> list[dict[str, Any]]:
          "field": "drc.margin_fraction"},
     ]
     return rows
+
+
+def _deck_outside(drc: dict) -> int | None:
+    """The deck's violations outside the declared monitor field, or its total
+    where the result carries no classification, or None where it did not run."""
+    d = drc.get("deck") or {}
+    if "violations_outside_monitor_field_total" in d:
+        return int(d["violations_outside_monitor_field_total"])
+    if "violations_total" in d:
+        return int(d["violations_total"])
+    return None
 
 
 def _margin_met(drc: dict) -> bool:
