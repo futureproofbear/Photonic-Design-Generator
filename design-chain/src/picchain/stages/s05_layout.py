@@ -1581,12 +1581,6 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         payload["mzm"] = mzm_record
         payload["device"] = "mach_zehnder"
         payload["device_length_um"] = mzm_record.get("device_length_um")
-        # The names the layout gives its devices, matched later against the labels
-        # written into the mask. The interferometer path names its modulators; a
-        # laser carries the cell's name, which the die label writes, so that a
-        # station measuring by label can reach it (added 2026-10-05).
-        if not payload.get("labels"):
-            payload["labels"] = [str(design.layout.cell_name)]
         ctx.put("layout", payload)
         ctx.write_stage("layout", payload)
         return payload
@@ -1607,6 +1601,13 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     payload = _payload(design, ctx, polys, snap, derived, gds, oasis, gds_gf,
                        gf_ok, xor, geometry, fidelity, complete, counts)
     payload["device"] = "edbr"
+    # The names the layout gives its devices, matched later against the labels
+    # written into the mask. The interferometer path names its modulators; a
+    # laser carries the cell's name, which the die label writes, so that a
+    # station measuring by label can reach it (added 2026-10-05; first placed
+    # in the interferometer branch by mistake, where it changed nothing).
+    if not payload.get("labels"):
+        payload["labels"] = [str(design.layout.cell_name)]
     ctx.put("layout", {**(ctx.get("layout") or {}), **payload})
     ctx.write_stage("layout", payload)
 
