@@ -980,6 +980,12 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     # the electrodes alone would leave the lead-in outside the etch-clear region.
     pad_y = (geom.electrode_gap_um / 2 + geom.electrode_width_um + 30.0) if e.enabled else 30.0
     pad_y = max(pad_y, lead_excursion + 30.0)
+    # The device's own name, as a text on the label layer inside its floor plan
+    # (added 2026-10-05). The pre-submission review matches the names the layout
+    # declares against the texts the mask carries; the die label is drawn as
+    # polygons and is invisible to that inventory, and a cell placed on a shared
+    # reticle by someone else is to say whose it is without the die around it.
+    texts.append((str(design.layout.cell_name), 100.0, pad_y - 10.0))
     # The bond pads reach `layout.bond_pad_um` beyond the outer electrode edge,
     # and the figure above allowed only 30. The floor plan therefore stopped at
     # 58.8 um while the pads ran past it, and the foundry runset reported the
