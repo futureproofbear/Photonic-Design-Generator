@@ -1334,7 +1334,17 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
                 "platform.slab_offset_um is declared and the ridges yielded no "
                 "slab; the guide layer carries no polygon at this point")
         out["SLAB"] += derived
-    out["FLOORPLAN"].append(_rect(edge_l, -pad_y - 5.0, edge_r, pad_y + 5.0))
+    # The floor plan encloses everything the cell draws. A double-layer
+    # coupler's window, rotated with the guide, reaches 7 to 9 um past the facet
+    # plane where the strip reaches 5 along the guide, and a floor plan stopped
+    # at the recess left it outside the cell's own declared extent (found by
+    # audit, 2026-10-06).
+    fl_l, fl_r = edge_l, edge_r
+    for _lay in ("SLAB_NEG", "SLAB", "WG"):
+        for _p in out.get(_lay, []):
+            _xs = [x for x, _ in _p]
+            fl_l, fl_r = min(fl_l, min(_xs)), max(fl_r, max(_xs))
+    out["FLOORPLAN"].append(_rect(fl_l, -pad_y - 5.0, fl_r, pad_y + 5.0))
 
     # --- the facet planes and the band the cleave or polish removes -------
     if lay.draw_facets:

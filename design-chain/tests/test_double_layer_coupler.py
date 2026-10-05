@@ -122,3 +122,14 @@ def test_each_strip_merges_with_the_slab_band(tmp_path):
     for p in polys["SLAB"]:
         r.insert(kdb.DPolygon([kdb.DPoint(x, y) for x, y in p]).to_itype(0.001))
     assert r.merged().count() == 1
+
+
+def test_the_floor_plan_encloses_the_rotated_windows(tmp_path):
+    """The rotated window reached past a floor plan stopped at the recess."""
+    polys, _ = _polys(tmp_path, _design())
+    fp = polys["FLOORPLAN"][0]
+    fx = [x for x, _ in fp]
+    for layer in ("SLAB_NEG", "SLAB", "WG"):
+        for p in polys[layer]:
+            assert min(x for x, _ in p) >= min(fx) - 1e-9
+            assert max(x for x, _ in p) <= max(fx) + 1e-9
