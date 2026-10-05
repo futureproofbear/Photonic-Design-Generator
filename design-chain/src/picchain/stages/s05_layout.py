@@ -1585,7 +1585,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # written into the mask. The interferometer path names its modulators; a
         # laser carries the cell's name, which the die label writes, so that a
         # station measuring by label can reach it (added 2026-10-05).
-        payload.setdefault("labels", [str(design.layout.cell_name)])
+        if not payload.get("labels"):
+            payload["labels"] = [str(design.layout.cell_name)]
         ctx.put("layout", payload)
         ctx.write_stage("layout", payload)
         return payload
