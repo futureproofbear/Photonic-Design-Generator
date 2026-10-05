@@ -51,6 +51,64 @@ def _facet_shear(angle_deg: float, width_um: float) -> float:
     return 0.5 * width_um * math.tan(math.radians(float(angle_deg)))
 
 
+def _tip_extension(a, b, outward, z_plane):
+    """The taper tip carried, at its width, from its end face to the plane
+    ``z_plane`` along ``outward``, a unit vector pointing out of the device.
+
+    ``a`` and ``b`` are the two rail points of the tip. Each is advanced along
+    the outward direction until it reaches the plane, so the extension keeps
+    the guide's width and ends square to the die edge whatever the angle the
+    guide meets it at.
+    """
+    oz, oy = outward
+    la = (z_plane - a[0]) / oz
+    lb = (z_plane - b[0]) / oz
+    return [a, b, (b[0] + oz * lb, b[1] + oy * lb), (a[0] + oz * la, a[1] + oy * la)]
+
+
+def _heater_terminals(out, pt, x0: float, x1: float, hw: float) -> dict:
+    """The landings at the two ends of a heater wire running from x0 to x1.
+
+    Returns a record of where they were drawn. See `PhaseTrimmerCfg` for the
+    two constructions.
+    """
+    pad = float(getattr(pt, "pad_um", 60.0))
+    clear = getattr(pt, "pad_clearance_um", None)
+    if clear is None:
+        pads = []
+        for xc in (x0, x1):
+            out["HEATER"].append(_rect(xc - pad / 2, hw, xc + pad / 2, hw + pad))
+            pads.append({"x_um": xc, "y_um": hw + pad / 2, "size_um": pad})
+        return {"scheme": "landings on the wire ends, heater layer only",
+                "pads": pads, "y_top_um": hw + pad, "m2_and_via": False}
+    lw = float(getattr(pt, "lead_width_um", 4.5))
+    la = float(getattr(pt, "lead_along_um", 25.0))
+    yc = float(clear)
+    ins = float(getattr(pt, "via_inset_um", 2.5))
+    with_m2 = "M2" in out and "VIA_M2_HRL" in out
+    pads = []
+    for xc, sgn in ((x0, -1.0), (x1, +1.0)):
+        xr = xc + sgn * la
+        lo, hi = sorted((xc, xr))
+        # the wire continues along the axis at its own width, so that nothing
+        # wider than the wire lies beside the electrode's end
+        out["HEATER"].append(_rect(lo, -hw, hi, hw))
+        out["HEATER"].append(_rect(xr - lw / 2, -hw, xr + lw / 2, yc))
+        out["HEATER"].append(_rect(xr - pad / 2, yc, xr + pad / 2, yc + pad))
+        if with_m2:
+            out["M2"].append(_rect(xr - pad / 2, yc, xr + pad / 2, yc + pad))
+            out["VIA_M2_HRL"].append(_rect(xr - pad / 2 + ins, yc + ins,
+                                           xr + pad / 2 - ins, yc + pad - ins))
+        pads.append({"x_um": xr, "y_um": yc + pad / 2, "size_um": pad})
+    return {"scheme": ("landings off the guide, reached by a lead along the axis and a "
+                       "riser; M2 pad with a VIA_M2_HRL opening on each" if with_m2 else
+                       "landings off the guide, reached by a lead along the axis and a "
+                       "riser; heater layer only, the layer map naming no M2 or via"),
+            "pads": pads, "y_top_um": yc + pad, "m2_and_via": with_m2,
+            "lead_along_um": la, "lead_width_um": lw, "pad_clearance_um": yc,
+            "lead_squares_each_end": la / (2 * hw) + (yc - hw) / lw}
+
+
 def _angled_lead_in(angle_deg: float, radius_um: float, straight_um: float,
                     width_um: float, tip_width_um: float | None = None,
                     profile: str = "linear",
@@ -763,6 +821,11 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
         lead_excursion = abs(dy_lead)
         lead_path = tl + rad * math.radians(abs(lay.input_facet_angle_deg))
         z = dz_lead
+        if lay.draw_facets and lay.facet_tip_to_edge and lay.facet_recess_um > 0:
+            th_in = math.radians(float(lay.input_facet_angle_deg))
+            out["WG"].append(_tip_extension(
+                (poly[0][0], poly[0][1] - dy_lead), (poly[-1][0], poly[-1][1] - dy_lead),
+                (-math.cos(th_in), -math.sin(th_in)), -lay.facet_recess_um))
     else:
         shear_in = _facet_shear(lay.input_facet_angle_deg, tip) if lay.draw_facets else 0.0
         # Drawn on the profile the taper stage evaluates. It was a four-point
@@ -780,6 +843,9 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
             poly[0] = (poly[0][0] + shear_in, poly[0][1])
             poly[-1] = (poly[-1][0] - shear_in, poly[-1][1])
         out["WG"].append(poly)
+        if lay.draw_facets and lay.facet_tip_to_edge and lay.facet_recess_um > 0:
+            rec_in = lay.facet_recess_um
+            out["WG"].append([(-rec_in, -tip / 2), (-rec_in, tip / 2), poly[-1], poly[0]])
         z += tl
     # --- feed waveguide ---
     # `cavity.feed_length_um` is the facet-to-grating distance the round-trip
@@ -845,6 +911,7 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     # unpowered, and the feed carries no electrode to clear.
     pt = getattr(cav, "phase_trimmer", None)
     _trim_over_feed = pt is not None and getattr(pt, "over", "feed") == "feed"
+    heater_terminals: dict | None = None
     if (pt is not None and pt.enabled and pt.length_um > 0
             and "HEATER" in out and _trim_over_feed):
         h_len = min(float(pt.length_um), feed)
@@ -853,9 +920,7 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
         out["HEATER"].append(_rect(h_start, -hw, h_start + h_len, hw))
         # a landing at each end, wider than the wire so a probe or a bond has
         # something to reach; they sit clear of the guide in y
-        pad = float(getattr(pt, "pad_um", 60.0))
-        for xc in (h_start, h_start + h_len):
-            out["HEATER"].append(_rect(xc - pad / 2, hw, xc + pad / 2, hw + pad))
+        heater_terminals = _heater_terminals(out, pt, h_start, h_start + h_len, hw)
         heater_record = {
             "drawn": True,
             "length_um": h_len,
@@ -890,9 +955,7 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
             h_len = min(float(pt.length_um), float(ps.length_um))
             hw = float(pt.width_um) / 2.0
             out["HEATER"].append(_rect(p0, -hw, p0 + h_len, hw))
-            pad = float(getattr(pt, "pad_um", 60.0))
-            for xc in (p0, p0 + h_len):
-                out["HEATER"].append(_rect(xc - pad / 2, hw, xc + pad / 2, hw + pad))
+            heater_terminals = _heater_terminals(out, pt, p0, p0 + h_len, hw)
             heater_record = {
                 "drawn": True, "over": "phase_section",
                 "length_um": h_len, "declared_length_um": float(pt.length_um),
@@ -944,13 +1007,70 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
             )
     z = g0 + drawn_length
 
-    # --- output taper, likewise terminated on its facet ------------------
-    shear_out = _facet_shear(lay.output_facet_angle_deg, tip) if lay.draw_facets else 0.0
-    out["WG"].append(
-        [(z, wg_width / 2), (z, -wg_width / 2),
-         (z + tl - shear_out, -tip / 2), (z + tl + shear_out, tip / 2)]
-    )
-    z_end = z + tl
+    # --- the output: a lead to the declared device length, then the taper to
+    # its own facet (reworked 2026-10-06; until then the output taper was a
+    # four-point trapezoid whatever profile the taper stage evaluated, it
+    # followed the grating immediately, and under the angled route a non-zero
+    # output angle sheared its end face against a perpendicular die edge).
+    tl_out = float(lay.output_taper_length_um) if lay.output_taper_length_um is not None else tl
+    tip_out = float(lay.output_taper_tip_width_um) if lay.output_taper_tip_width_um is not None else tip
+    out_angle = float(lay.output_facet_angle_deg)
+    angled_out = angled and abs(out_angle) > 0.0
+    lead_out_excursion = 0.0
+    if angled_out:
+        poly_out, dz_out, dy_out, _ = _angled_lead_in(
+            out_angle, lay.facet_bend_radius_um, tl_out, wg_width, tip_out, profile=prof
+        )
+        out_len = dz_out
+    else:
+        out_len = tl_out
+    lead_out = float(lay.output_lead_um)
+    if lay.device_length_um is not None:
+        lead_out = float(lay.device_length_um) - (z + out_len)
+        if lead_out < -1e-6:
+            raise RuntimeError(
+                f"layout.device_length_um is {lay.device_length_um:.1f} um and the device "
+                f"already reaches {z + out_len:.1f} um at the end of its output taper; the "
+                "declared length describes no geometry. Lengthen the die or shorten the cavity"
+            )
+        lead_out = max(0.0, lead_out)
+    if lead_out > 0:
+        out["WG"].append(_rect(z, -wg_width / 2, z + lead_out, wg_width / 2))
+        z += lead_out
+    z_out = z
+    if angled_out:
+        # the lead-in mirrored about the output facet plane and displaced so
+        # that it leaves the axis where the lead ends; the guide meets the
+        # perpendicular die edge at the declared angle, on the same side of the
+        # axis as the input does
+        z_end = z_out + dz_out
+        out["WG"].append([(z_end - pz, py - dy_out) for pz, py in poly_out])
+        lead_out_excursion = abs(dy_out)
+        if lay.draw_facets and lay.facet_tip_to_edge and lay.facet_recess_um > 0:
+            th_out = math.radians(out_angle)
+            out["WG"].append(_tip_extension(
+                (z_end - poly_out[0][0], poly_out[0][1] - dy_out),
+                (z_end - poly_out[-1][0], poly_out[-1][1] - dy_out),
+                (math.cos(th_out), -math.sin(th_out)), z_end + lay.facet_recess_um))
+    else:
+        shear_out = _facet_shear(out_angle, tip_out) if lay.draw_facets else 0.0
+        poly_o = list(taper_profile.outline(tip_out, wg_width, tl_out, prof,
+                                            segments=lay.taper_segments, x0=z_out, reverse=True))
+        if shear_out:
+            poly_o[0] = (poly_o[0][0] - shear_out, poly_o[0][1])
+            poly_o[-1] = (poly_o[-1][0] + shear_out, poly_o[-1][1])
+        out["WG"].append(poly_o)
+        z_end = z_out + tl_out
+        if lay.draw_facets and lay.facet_tip_to_edge and lay.facet_recess_um > 0:
+            rec_out = lay.facet_recess_um
+            out["WG"].append([poly_o[0], poly_o[-1],
+                              (z_end + rec_out, tip_out / 2), (z_end + rec_out, -tip_out / 2)])
+    if (tl_out != tl or tip_out != tip):
+        ctx.warn(
+            f"the output taper is {tl_out:g} um to a {tip_out:g} um tip and the input taper "
+            f"{tl:g} um to {tip:g} um; the taper stage evaluates the input taper only, so the "
+            "output taper's adiabaticity is unexamined",
+            key="layout.output_taper_unevaluated")
 
     # --- electrodes flanking the grating ---
     if e.enabled:
@@ -979,7 +1099,7 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     # the slab and the floor plan must reach past that excursion. Sizing them off
     # the electrodes alone would leave the lead-in outside the etch-clear region.
     pad_y = (geom.electrode_gap_um / 2 + geom.electrode_width_um + 30.0) if e.enabled else 30.0
-    pad_y = max(pad_y, lead_excursion + 30.0)
+    pad_y = max(pad_y, lead_excursion + 30.0, lead_out_excursion + 30.0)
     # The device's own name, as a text on the label layer inside its floor plan
     # (added 2026-10-05). The pre-submission review matches the names the layout
     # declares against the texts the mask carries; the die label is drawn as
@@ -994,6 +1114,14 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     if e.enabled:
         pad_y = max(pad_y, geom.electrode_gap_um / 2 + geom.electrode_width_um
                     + lay.bond_pad_um + 20.0)
+    if heater_terminals:
+        pad_y = max(pad_y, float(heater_terminals["y_top_um"]) + 10.0)
+    # the cell's edges along the guide: the contour the die aligns, which the
+    # recess and the floor-plan margin both reach
+    rec_edge = lay.facet_recess_um if lay.draw_facets else 0.0
+    edge_l = -max(5.0, rec_edge)
+    edge_r = z_end + max(5.0, rec_edge)
+    slab_ext = float(lay.facet_slab_extension_um) if lay.draw_facets else 0.0
 
     # The slab is derived from the ridges where the platform states how far it
     # reaches beside one, and drawn as a band across the device band where it
@@ -1005,7 +1133,7 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     # added; this brings the same treatment to the topology beside it.
     slab_offset = design.platform.slab_offset_um
     if slab_offset is None:
-        out["SLAB"].append(_rect(-5.0, -pad_y, z_end + 5.0, pad_y))
+        out["SLAB"].append(_rect(edge_l - slab_ext, -pad_y, edge_r + slab_ext, pad_y))
         ctx.warn(
             f"the slab is drawn as one band {2 * pad_y:.0f} um across the device "
             "rather than derived from the ridges. An unbroken slab guides, so it "
@@ -1020,7 +1148,7 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
                 "platform.slab_offset_um is declared and the ridges yielded no "
                 "slab; the guide layer carries no polygon at this point")
         out["SLAB"] += derived
-    out["FLOORPLAN"].append(_rect(-5.0, -pad_y - 5.0, z_end + 5.0, pad_y + 5.0))
+    out["FLOORPLAN"].append(_rect(edge_l, -pad_y - 5.0, edge_r, pad_y + 5.0))
 
     # --- the facet planes and the band the cleave or polish removes -------
     if lay.draw_facets:
@@ -1031,7 +1159,7 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
             # Under the angled route the angle is carried by the guide and not by
             # the end face, so the die edge is perpendicular and the band is
             # square. Shearing it here as well would apply the angle twice.
-            face_angle = 0.0 if (angled and z_face == 0.0) else angle
+            face_angle = 0.0 if angled else angle
             # the facet plane itself, drawn at its angle across the keep-out
             dz = _facet_shear(face_angle, 2 * ko)
             out["FACET"].append([
@@ -1087,12 +1215,23 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
     ctx.put("layout.periods_total", int(round(g.length_um / period)))
     ctx.put("layout.drawn_grating_length_um", drawn_length)
     ctx.put("layout.device_length_um", z_end)
+    ctx.put("layout.output_lead_um", lead_out)
+    ctx.put("layout.output_taper_length_um", tl_out)
+    ctx.put("layout.output_taper_tip_width_um", tip_out)
+    ctx.put("layout.output_facet_angle_deg", out_angle)
+    ctx.put("layout.output_route", "angled" if angled_out else ("sheared" if out_angle else "square"))
+    ctx.put("layout.facet_lead_out_excursion_um", lead_out_excursion)
+    ctx.put("layout.facet_tip_to_edge", bool(lay.draw_facets and lay.facet_tip_to_edge))
+    ctx.put("layout.facet_slab_extension_um", slab_ext)
+    ctx.put("layout.cell_edges_um", [edge_l, edge_r])
     # where each feature begins, so that a drawing of the mask can zoom on it
     # without re-deriving the floor plan
     ctx.put("layout.taper_length_um", tl)
     ctx.put("layout.grating_start_um", g0)
     # what the trimmer actually got drawn as, so that a claim about the cavity
     # phase being settable rests on a polygon rather than on a declaration
+    if heater_record.get("drawn") and heater_terminals:
+        heater_record["terminals"] = heater_terminals
     ctx.put("layout.phase_trimmer", heater_record)
     # The cavity stage runs before this one, so it can check the trimmer's range
     # but not whether a polygon carries it. That check belongs here, and a

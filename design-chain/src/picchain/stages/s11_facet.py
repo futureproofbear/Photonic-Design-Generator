@@ -29,12 +29,12 @@ from ..config import Design
 from ..materials import MaterialLibrary
 
 
-def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]:
-    cfg = design.facet
-    if not cfg.enabled:
-        ctx.put("facet", {"enabled": False})
-        return {"enabled": False}
-
+def _port(design: Design, ctx: RunContext, lib: MaterialLibrary, cfg, angle: float,
+          width: float, label: str) -> dict[str, Any]:
+    """Everything the stage establishes at one facet: the mode at the taper
+    tip, its overlap with the declared partner, the Fresnel and angle terms,
+    the alignment the assembly must hold, and the reflection the facet returns
+    into the guide."""
     # The facet is at the *tip* of the taper, not at the full ridge. Solving the
     # ridge mode instead would compare the wrong two profiles: the tip is
     # narrowed precisely so that the mode expands to meet the partner.
@@ -45,8 +45,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 
     m, p_ = design.mesh, design.platform
     lam = design.waveguide.wavelength_um
-    width = cfg.facet_width_um or design.layout.taper_tip_width_um
-    xs = _cross_section(design, float(width), "facet")
+    xs = _cross_section(design, float(width), f"facet_{label}")
     grid = build_grid(xs, m.d_fine_um, m.d_coarse_um, m.fine_margin_um)
     exx, eyy = _eps_maps(xs, grid, lib, lam, p_.cut, p_.use_index_override, m.subsample)
     tip = solve_modes(grid.x, grid.y, exx, eyy, lam,
@@ -55,8 +54,6 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     x, y, field = grid.x, grid.y, tip.field
     dA = np.outer(np.gradient(x), np.gradient(y))
     n_guide = float(tip.n_eff)
-
-    angle = design.layout.input_facet_angle_deg
 
     # --- where the beam actually lands ----------------------------------
     # Snell conserves the transverse wavevector, so the angle *inside* the
@@ -106,8 +103,30 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     else:
         walk_penalty = 1.0
 
+    # --- what the facet returns into the guide (added 2026-10-06) ---------
+    # A facet cut at an angle to the guide reflects the mode into a beam
+    # tilted by twice that angle. The fraction of it that re-enters the guided
+    # mode is the overlap of the mode with itself under a transverse phase
+    # ramp k0 n_eff sin(2 theta) across the in-plane coordinate, which is
+    # evaluated on the solved field rather than on a Gaussian of it; a shallow
+    # ridge's tip mode is not Gaussian. The reflectivity of the face itself is
+    # the coating's figure where one is declared and the bare Fresnel step
+    # otherwise. Both are reported, since a coating is a specification and the
+    # geometry is on the mask.
+    inten = np.abs(field) ** 2
+    q = 2 * np.pi / lam * n_guide * np.sin(np.radians(2 * angle))
+    ramp = np.exp(1j * q * x)[:, None]
+    num = float(abs(np.sum(inten * ramp * dA)) ** 2)
+    den = float(np.sum(inten * dA)) ** 2
+    eta_tilt = num / den if den > 0 else 0.0
+    r_bare = ((n_guide - cfg.partner_index) / (n_guide + cfg.partner_index)) ** 2
+    r_face = cfg.ar_reflectivity if cfg.ar_reflectivity is not None else r_bare
+    refl_into_guide = r_face * eta_tilt
+    refl_bare = r_bare * eta_tilt
+
     payload = {
         "enabled": True,
+        "port": label,
         "facet_width_um": float(width),
         "n_eff_at_facet": n_guide,
         "n_eff_at_full_ridge": float((ctx.get("mode") or {}).get("n_eff_bare") or 0.0),
@@ -136,20 +155,45 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "alignment_tolerance_x_um": tol_x,
         "alignment_tolerance_y_um": tol_y,
         "tolerance_criterion_dB": cfg.tolerance_dB,
-        "assumed_loss_dB_in_design": design.cavity.rsoa.coupling_loss_dB_per_facet,
+        # the reflection
+        "face_reflectivity": float(r_face),
+        "face_reflectivity_bare": float(r_bare),
+        "face_reflectivity_source": ("declared coating" if cfg.ar_reflectivity is not None
+                                     else "bare Fresnel step at the tip mode's index"),
+        "tilt_overlap": float(eta_tilt),
+        "tilt_suppression_dB": to_dB(eta_tilt) if eta_tilt > 0 else float("inf"),
+        "reflection_into_guide": float(refl_into_guide),
+        "reflection_into_guide_dB": to_dB(refl_into_guide) if refl_into_guide > 0 else float("inf"),
+        "reflection_into_guide_uncoated": float(refl_bare),
+        "reflection_into_guide_uncoated_dB": to_dB(refl_bare) if refl_bare > 0 else float("inf"),
     }
-    ctx.put("facet", payload)
-    ctx.write_stage("facet", payload)
 
     if cfg.gap_um > 0 and abs(residual) > 0.1 * tol_x:
         ctx.warn(
-            f"the beam crosses the {cfg.gap_um:g} um coupling gap at "
+            f"at the {label} facet the beam crosses the {cfg.gap_um:g} um coupling gap at "
             f"{payload['angle_in_gap_deg']:.1f} deg and arrives {walk:.3f} um to one "
             f"side. {abs(residual):.3f} um of that is uncompensated, against an alignment "
             f"tolerance of {tol_x:.3f} um, so {100 * abs(residual) / tol_x:.0f} % of the "
             "budget is spent before the assembly begins. Offset the partner by the "
             "walk-off in facet.offset_x_um"
         )
+    if tol_x < 0.3 or tol_y < 0.3:
+        ctx.warn(
+            f"a {cfg.tolerance_dB:.1f} dB alignment tolerance of {min(tol_x, tol_y):.2f} um "
+            f"is demanded of the assembly at the {label} facet, which is tight for passive placement"
+        )
+    return payload
+
+
+def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]:
+    cfg = design.facet
+    if not cfg.enabled:
+        ctx.put("facet", {"enabled": False})
+        return {"enabled": False}
+
+    width = cfg.facet_width_um or design.layout.taper_tip_width_um
+    payload = _port(design, ctx, lib, cfg, design.layout.input_facet_angle_deg, width, "input")
+    payload["assumed_loss_dB_in_design"] = design.cavity.rsoa.coupling_loss_dB_per_facet
 
     # `coupling_loss_dB_per_facet` belongs to the reflective gain chip of a laser
     # cavity. On a design that declares no cavity it is a schema default, and
@@ -195,9 +239,30 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             "this cross-section and was not inherited from another"
         )
 
-    if tol_x < 0.3 or tol_y < 0.3:
-        ctx.warn(
-            f"a {cfg.tolerance_dB:.1f} dB alignment tolerance of {min(tol_x, tol_y):.2f} um "
-            "is demanded of the assembly, which is tight for passive placement"
-        )
+    # --- the output port, where the design declares a partner there --------
+    # The laser's output facet faces a fibre and the cavity's loss budget does
+    # not contain it; what matters there is the coupling to the fibre and the
+    # fraction the facet returns toward the mirror, which reaches the laser as
+    # external feedback.
+    if cfg.output is not None:
+        o = cfg.output
+        lay = design.layout
+        w_out = (o.facet_width_um or lay.output_taper_tip_width_um
+                 or lay.taper_tip_width_um)
+        payload["output"] = _port(design, ctx, lib, o, lay.output_facet_angle_deg,
+                                  float(w_out), "output")
+        if payload["output"]["reflection_into_guide"] > 1.0e-3:
+            ctx.warn(
+                f"the output facet returns {payload['output']['reflection_into_guide']:.2e} of the "
+                f"emitted power into the guide ({payload['output']['reflection_into_guide_dB']:.1f} dB), "
+                f"the face reflecting {payload['output']['face_reflectivity']:.2e} "
+                f"({payload['output']['face_reflectivity_source']}) and the "
+                f"{lay.output_facet_angle_deg:g} degree angle suppressing "
+                f"{payload['output']['tilt_suppression_dB']:.1f} dB of it. That return reaches "
+                "the mirror as external feedback, which no cavity row grades; angle the "
+                "facet further, coat it, or bound it in a target",
+                key="facet.output_feedback")
+
+    ctx.put("facet", payload)
+    ctx.write_stage("facet", payload)
     return payload

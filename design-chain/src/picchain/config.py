@@ -390,6 +390,21 @@ class PhaseTrimmer(BaseModel):
     over: Literal["feed", "phase_section"] = "feed"
     #: the landing at each end of the wire, um square
     pad_um: float = 60.0
+    #: Where set, the landings are moved off the guide and clear of the
+    #: electrodes: the wire continues along the guide axis for `lead_along_um`
+    #: beyond each end of the heated section, a riser of `lead_width_um` then
+    #: leaves the axis, and the landing begins at this height above it, um.
+    #: Unset, the landings abut the wire ends, which on a section flanked by
+    #: electrodes places them on the electrode metal; the LT-PRO runset holds
+    #: the heater layer 1.0 um from M1, and a landing on M1 is a short where the
+    #: two are at one level. Where the layer map names `M2` and `VIA_M2_HRL`,
+    #: each landing is also drawn on M2 with a contact opening inset by
+    #: `via_inset_um`, which is the construction the process's own heater cell
+    #: uses to reach the heater layer. (added 2026-10-06)
+    pad_clearance_um: float | None = None
+    lead_along_um: float = 25.0
+    lead_width_um: float = 4.5
+    via_inset_um: float = 2.5
 
 
 class Cavity(BaseModel):
@@ -513,6 +528,26 @@ class ResonatorCfg(BaseModel):
     loss_sweep_dB_per_cm: list[float] = Field(default_factory=list)
 
 
+class FacetPortCfg(BaseModel):
+    """The partner at one further port, described as `FacetCfg` describes the
+    first: a lensed fibre at the laser's output, for instance. The mode at the
+    port is solved at the output taper's tip; the partner is declared."""
+    partner_mfd_x_um: float = 2.5
+    partner_mfd_y_um: float = 2.5
+    #: the medium the mode arrives from: 1.0 where a lensed fibre focuses
+    #: through air onto the facet
+    partner_index: float = 1.0
+    #: the facet's own coating, where one is applied; None is the bare facet
+    ar_reflectivity: float | None = None
+    partner_tilted: bool = True
+    gap_um: float = 0.0
+    gap_index: float = 1.0
+    offset_x_um: float = 0.0
+    offset_y_um: float = 0.0
+    tolerance_dB: float = 1.0
+    facet_width_um: float | None = None
+
+
 class FacetCfg(BaseModel):
     """Coupling across the facet to a gain chip or a fibre.
 
@@ -540,6 +575,9 @@ class FacetCfg(BaseModel):
     tolerance_dB: float = 1.0
     #: width of the guide at the facet; the taper tip is used when unset
     facet_width_um: float | None = None
+    #: the output port, evaluated at `layout.output_facet_angle_deg` on the
+    #: output taper's tip where one is declared (added 2026-10-06)
+    output: FacetPortCfg | None = None
 
 
 class FDTDCfg(BaseModel):
@@ -1150,6 +1188,33 @@ class LayoutCfg(BaseModel):
     slab_min_width_um: float = 0.30
     input_facet_angle_deg: float = 8.0
     output_facet_angle_deg: float = 0.0
+    #: The output taper, where it differs from the input one. Unset, the output
+    #: taper is the input taper reversed, which is the only case the taper
+    #: stage evaluates for adiabaticity.
+    output_taper_length_um: float | None = None
+    output_taper_tip_width_um: float | None = None
+    #: A straight run of guide between the end of the grating and the output
+    #: taper, um. It lies outside the cavity and changes no delay. Set directly,
+    #: or sized by `device_length_um`.
+    output_lead_um: float = 0.0
+    #: The distance from the input facet plane to the output facet plane, um.
+    #: Where set, the output lead is sized so that the device reaches it, which
+    #: is how a device is made to span a die from polish line to polish line.
+    #: Refused where the device is already longer. (added 2026-10-06)
+    device_length_um: float | None = None
+    #: Carry the taper tip, at its tip width, through the facet recess to the
+    #: cell's edge. The recess is the material the singulation removes, and the
+    #: Luxtelligence layout guidance places an edge coupler's port at the chip
+    #: contour; a tip that stops short of the contour couples through whatever
+    #: lies between it and wherever the facet is actually formed. Opt-in, so
+    #: that no existing mask changes on its next run. (added 2026-10-06)
+    facet_tip_to_edge: bool = False
+    #: Extend the slab band beyond each cell edge into the exclusion zone by
+    #: this much, um. The LT-PRO runset confines the ridge, the metals and the
+    #: heater to the chip contour and leaves the slab free, so the slab is the
+    #: one layer that can follow the guide toward a facet formed outside the
+    #: contour. Applies to the slab drawn as a band. (added 2026-10-06)
+    facet_slab_extension_um: float = 0.0
     #: Side of the square bond pad on each electrode, in micrometres. This was a
     #: literal 80.0 in the layout stage until 2026-08-12, repeated in two places.
     #: 80 um accepts a probe or a wedge bond and is tight for a ball bond with

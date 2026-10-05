@@ -60,3 +60,23 @@ def test_the_report_scales_to_a_stated_drive():
     assert rep["power_W_per_m"] == 50.0e-3 / 1000.0e-6
     assert math.isclose(rep["rise_at_guide_K"], rep["K_per_mW"] * 50.0, rel_tol=1e-9)
     assert 0.0 < rep["probes_fraction_of_guide"]["40"] < 1.0
+
+
+def test_a_conducting_inclusion_beside_the_heater_lowers_the_rise_at_the_guide():
+    """Two gold strips either side of the wire, set into the cladding, carry
+    heat away laterally; the rise under the heater must fall, and must fall by
+    more as the strips approach. The layered solve had no way to say so, and a
+    trimmer's power budget was computed without the electrodes that flank it
+    (2026-10-06)."""
+    layers = [th.Layer("Si", 60.0, th.K_SI), th.Layer("ox", 4.0, th.K_SIO2),
+              th.Layer("film", 0.3, th.K_LITAO3), th.Layer("clad", 2.0, th.K_SIO2)]
+    z0 = 60.0 + 4.0 + 0.12
+    def rise(inner):
+        strips = [(inner, inner + 20.0, z0, z0 + 0.9, th.K_AU),
+                  (-inner - 20.0, -inner, z0, z0 + 0.9, th.K_AU)] if inner is not None else []
+        stack = th.HeaterStack(layers=layers, half_width_um=300.0, heater_width_um=1.5,
+                               inclusions=strips)
+        return th.solve(stack, 1.0, dx_min_um=0.25, dz_min_um=0.1)["rise_at_guide_K"]
+    bare, near, far = rise(None), rise(2.4), rise(12.0)
+    assert near < far < bare
+    assert near < 0.8 * bare

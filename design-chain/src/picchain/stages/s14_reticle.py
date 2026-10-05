@@ -314,6 +314,15 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     device_cell = layout.create_cell(src_top.name)
     device_cell.copy_tree(src_top)
     dev_box = device_cell.dbbox()
+    # The cell's edges along the guide, as the layout stage declared them. The
+    # bounding box reaches further where the slab is extended past the contour
+    # into the exclusion zone, and the die is to align the contour, so the
+    # extension is excluded from the content and from the placement.
+    _lay = ctx.get("layout") or {}
+    _edges = _lay.get("cell_edges_um")
+    slab_ext = float(_lay.get("facet_slab_extension_um") or 0.0)
+    dev_left = float(_edges[0]) if _edges else dev_box.left
+    dev_width = (float(_edges[1]) - float(_edges[0])) if _edges else dev_box.width()
 
     die = layout.create_cell(f"{design.layout.cell_name}_DIE")
 
@@ -350,7 +359,27 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 
     # --- floor plan ------------------------------------------------------
     m = cfg.margin_um
-    content_w = max(dev_box.width(), mon_width, split_w, comp_w)
+    # A device whose facets are aligned to the chip contour spans the usable
+    # area the process defines, the die less its exclusion zone, and that is
+    # the width it is checked against: the frame's own bands lie within the
+    # exclusion zone at the two facet edges. Checked against the content
+    # region until 2026-10-06, a device drawn from polish line to polish line
+    # was refused as 300 um too long for a die it fitted exactly.
+    facet_spans_frame = bool(cfg.align_facet_to_edge and cfg.chip_frame.enabled
+                             and cfg.die_width_um)
+    longest = max(dev_width, split_w - 2 * slab_ext, comp_w - 2 * slab_ext)
+    if facet_spans_frame:
+        usable_w = cfg.die_width_um - 2 * cfg.chip_frame.exclusion_zone_um
+        if longest > usable_w + 1e-6:
+            raise RuntimeError(
+                f"the device spans {longest:.1f} um from cell edge to cell edge and the chip "
+                f"contour of a {cfg.die_width_um:.0f} um die with a "
+                f"{cfg.chip_frame.exclusion_zone_um:.0f} um exclusion zone admits {usable_w:.1f} um. "
+                "Shorten the device or declare the next footprint"
+            )
+        content_w = mon_width
+    else:
+        content_w = max(longest, mon_width)
     monitor_gap = 150.0 if mon_desc else 0.0
     content_h = dev_box.height() + comp_h + split_h + monitor_gap + mon_height
 
@@ -372,7 +401,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     bands = m + cfg.seal_ring.clearance_um + seal_width + cfg.dicing_lane_um
     inner_w = cfg.die_width_um - 2 * bands if cfg.die_width_um else content_w
     inner_h = cfg.die_height_um - 2 * bands if cfg.die_height_um else content_h
-    if inner_w < content_w or inner_h < content_h:
+    if inner_w + 1e-6 < content_w or inner_h < content_h:
         raise RuntimeError(
             f"the declared die of {cfg.die_width_um} x {cfg.die_height_um} um leaves "
             f"{inner_w:.0f} x {inner_h:.0f} um inside the frame, against content of "
@@ -420,7 +449,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     lane = cfg.dicing_lane_um
     ez_x = cfg.chip_frame.exclusion_zone_um if cfg.chip_frame.enabled else 0.0
     facet_x = die_x0 - lane + ez_x
-    dev_dx = (facet_x - dev_box.left) if cfg.align_facet_to_edge else -dev_box.left
+    dev_dx = (facet_x - dev_left) if cfg.align_facet_to_edge else -dev_box.left
 
     if cfg.device_y == "centre":
         # The CONTENT is centred, not the device. The ladder copies and the
@@ -461,7 +490,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # premise were the tightest-spaced pair on it, and the ladder loop below
         # carried the same constant since it was written.
         dy = comp_top - k * comp_pitch - (comp_pitch - box.height()) - box.top
-        dx = (facet_x - box.left) if cfg.align_facet_to_edge else -box.left
+        dx = (facet_x - (box.left + slab_ext)) if cfg.align_facet_to_edge else -box.left
         die.insert(db.DCellInstArray(
             cell.cell_index(), db.DTrans(db.DVector(dx, dy))))
         ports.append((dy + box.bottom - 10.0, dy + box.top + 10.0))
@@ -487,7 +516,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # micrometres inside the die with no optical port at all, which makes
         # the ladder undiagnosable: it would return a die carrying four
         # gratings of which only one could be interrogated.
-        dx = (facet_x - box.left) if cfg.align_facet_to_edge else -box.left
+        dx = (facet_x - (box.left + slab_ext)) if cfg.align_facet_to_edge else -box.left
         die.insert(db.DCellInstArray(
             cell.cell_index(), db.DTrans(db.DVector(dx, dy))))
         ports.append((dy + box.bottom - 10.0, dy + box.top + 10.0))
@@ -615,8 +644,14 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # left ring metal beside the guide and the metal-to-guide rule failed
         # at 30 places.
         openings = ports if cfg.align_facet_to_edge else None
+        # A device drawn from polish line to polish line carries an output
+        # facet on the right edge, so the ring is opened there as well; a ring
+        # drawn through it placed metal across the output guide, and the
+        # metal-to-guide rule reported it at fourteen places (2026-10-06).
+        spans_frame = bool(facet_spans_frame and abs(dev_width - usable_w) < 1e-3)
         ring = monitors.seal_ring(x0=die_x0, y0=die_y0, x1=die_x1, y1=die_y1,
-                                  width_um=sw, left_openings=openings)
+                                  width_um=sw, left_openings=openings,
+                                  right_openings=(openings if spans_frame else None))
         for layer in cfg.seal_ring.layers:
             add(layer, ring)
 

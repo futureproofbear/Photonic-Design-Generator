@@ -50,10 +50,18 @@ class HeaterStack:
     heater_width_um: float = 1.5
     #: x positions at which the temperature is wanted, um, e.g. a neighbour
     probes_um: list[float] = field(default_factory=list)
+    #: Bodies of another conductivity set into the layers: (x0, x1, z0, z1, k),
+    #: um and W/(m K), z measured from the cooler upward. A pair of gold
+    #: electrodes beside a heater is a lateral heat path that a layered model
+    #: cannot represent, and it was the reason this field was added
+    #: (2026-10-06): the trimmer's figure of merit had been computed with the
+    #: electrodes absent.
+    inclusions: list[tuple[float, float, float, float, float]] = field(default_factory=list)
 
 
 # thermal conductivities at room temperature, W/(m K)
 K_SI = 148.0
+K_AU = 315.0
 K_SIO2 = 1.4
 K_LITAO3 = 4.6      # bulk, c-axis and a-axis within ~10 % of one another
 K_LINBO3 = 5.6
@@ -70,6 +78,12 @@ def _grid(stack: HeaterStack, dx_min_um: float, dz_min_um: float):
         if xs[-1] > 5 * stack.heater_width_um:
             dx = min(dx * 1.08, 25.0)
     x_half = np.array(xs)
+    # an inclusion's edges become grid lines, so a body is neither smeared
+    # over a coarse cell nor missed between two
+    for (ix0, ix1, _z0, _z1, _k) in stack.inclusions:
+        for e in (abs(ix0), abs(ix1)):
+            if 0 < e < W and np.min(np.abs(x_half - e)) > 1e-9:
+                x_half = np.sort(np.append(x_half, e))
     x = np.concatenate([-x_half[::-1][:-1], x_half])
     # vertical: every interface is a node; thin layers get dz_min, thick ones grow
     z_nodes = [0.0]
@@ -114,6 +128,12 @@ def solve(stack: HeaterStack, power_W_per_m: float = 1.0,
                 kz[j] = k
                 break
     k_cell = np.tile(kz[None, :], (nx - 1, 1))             # (nx-1, nz-1), uniform in x
+    if stack.inclusions:
+        xc = 0.5 * (x[:-1] + x[1:])
+        for (ix0, ix1, iz0, iz1, ik) in stack.inclusions:
+            sel_x = (xc >= min(ix0, ix1)) & (xc <= max(ix0, ix1))
+            sel_z = (zc >= min(iz0, iz1)) & (zc <= max(iz0, iz1))
+            k_cell[np.ix_(sel_x, sel_z)] = ik
 
     # finite volumes on the tensor grid; unknowns at nodes
     N = nx * nz

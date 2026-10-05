@@ -341,8 +341,11 @@ def alignment_mark(
 def seal_ring(
     *, x0: float, y0: float, x1: float, y1: float, width_um: float,
     left_openings: list[tuple[float, float]] | None = None,
+    right_openings: list[tuple[float, float]] | None = None,
 ) -> list[list[tuple[float, float]]]:
-    """A ring, as overlapping bars, optionally opened on the left edge.
+    """A ring, as overlapping bars, optionally opened on the left edge and,
+    where a device carries an output facet on the opposite polish line, on
+    the right edge as well (right openings added 2026-10-06).
 
     It is expressed as bars rather than as a polygon with a hole, every mask
     format handling the former and not every one the latter.
@@ -358,29 +361,33 @@ def seal_ring(
     bars = [
         _rect(x0, y0, x1, y0 + w),
         _rect(x0, y1 - w, x1, y1),
-        _rect(x1 - w, y0, x1, y1),
     ]
-    if not left_openings:
-        bars.append(_rect(x0, y0, x0 + w, y1))
-        return bars
 
-    # Every optical port needs its own gap. A reticle carrying a ladder has one
-    # per copy, so the bar is cut into the segments between them.
-    spans = sorted((max(min(a, b), y0), min(max(a, b), y1))
-                   for a, b in left_openings)
-    merged: list[list[float]] = []
-    for lo, hi in spans:
-        if hi <= lo:
-            continue
-        if merged and lo <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], hi)
-        else:
-            merged.append([lo, hi])
-    cursor = y0
-    for lo, hi in merged:
-        if lo > cursor:
-            bars.append(_rect(x0, cursor, x0 + w, lo))
-        cursor = max(cursor, hi)
-    if cursor < y1:
-        bars.append(_rect(x0, cursor, x0 + w, y1))
+    def _bar(bx0, bx1, openings):
+        # Every optical port needs its own gap. A reticle carrying a ladder has
+        # one per copy, so the bar is cut into the segments between them.
+        if not openings:
+            return [_rect(bx0, y0, bx1, y1)]
+        spans = sorted((max(min(a, b), y0), min(max(a, b), y1))
+                       for a, b in openings)
+        merged: list[list[float]] = []
+        for lo, hi in spans:
+            if hi <= lo:
+                continue
+            if merged and lo <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], hi)
+            else:
+                merged.append([lo, hi])
+        segs = []
+        cursor = y0
+        for lo, hi in merged:
+            if lo > cursor:
+                segs.append(_rect(bx0, cursor, bx1, lo))
+            cursor = max(cursor, hi)
+        if cursor < y1:
+            segs.append(_rect(bx0, cursor, bx1, y1))
+        return segs
+
+    bars += _bar(x1 - w, x1, right_openings)
+    bars += _bar(x0, x0 + w, left_openings)
     return bars
