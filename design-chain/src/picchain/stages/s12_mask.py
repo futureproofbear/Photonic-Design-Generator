@@ -323,6 +323,58 @@ def _compare_schematic(netlist: dict, schematic) -> dict[str, Any]:
     }
 
 
+def _label_inventory(layout, top) -> dict[str, Any]:
+    """Every text object in the written file, and whether the set is usable.
+
+    A chip measured by an automated station is identified by matching a label to
+    a fibre position, so a duplicated label points the station at two devices and
+    an absent one hides a device from it entirely. Both cost the measurement
+    rather than the mask, so neither a rule deck nor a connectivity check reports
+    them.
+
+    The texts are read back from the written file and not from the builder that
+    placed them, in keeping with rule 11: what is checked is what was written.
+
+    **An empty inventory is reported as unusable rather than as unique.** A
+    design carrying no label satisfies "every label is unique" vacuously, and a
+    condition that passes because there was nothing to compare is the failure
+    `rules/tool/klayout/README.md` names.
+    """
+    import klayout.db as db
+
+    texts: list[dict[str, Any]] = []
+    for li in layout.layer_indexes():
+        info = layout.get_info(li)
+        it = top.begin_shapes_rec(li)
+        while not it.at_end():
+            sh = it.shape()
+            if sh.is_text():
+                t = sh.text.transformed(it.trans())
+                texts.append({
+                    "text": t.string,
+                    "layer": f"{info.layer}/{info.datatype}",
+                    "x_um": round(t.x * layout.dbu, 4),
+                    "y_um": round(t.y * layout.dbu, 4),
+                })
+            it.next()
+
+    seen: dict[str, int] = {}
+    for t in texts:
+        seen[t["text"]] = seen.get(t["text"], 0) + 1
+    duplicated = sorted(k for k, n in seen.items() if n > 1)
+    return {
+        "performed": True,
+        "count": len(texts),
+        "distinct": len(seen),
+        "duplicated": duplicated,
+        "unique": bool(texts) and not duplicated,
+        "texts": sorted(seen),
+        "placements": texts[:200],
+        "note": ("no text object was found, so uniqueness is vacuous and is "
+                 "reported as unmet" if not texts else ""),
+    }
+
+
 def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]:
     cfg = design.mask
     if not cfg.enabled:
@@ -354,6 +406,9 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             "connected_regions": int(merged.count()),
             "area_um2": float(merged.area()) * dbu * dbu,
         }
+
+    # ---- labels -------------------------------------------------------
+    labels = _label_inventory(layout, top)
 
     # ---- isolation ----------------------------------------------------
     shorts = {}
@@ -400,12 +455,16 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     payload = {
         "enabled": True,
         "gds": str(gds_path),
+        # the name the file actually carries, so that the release gate can set
+        # it against the name the design declares
+        "top_cell": top.name,
         "filled_gds": filled_gds,
         "fill": fill,
         "lvs": lvs,
         "checked": checked,
         "extent_um": [bbox.width(), bbox.height()],
         "connectivity": connectivity,
+        "labels": labels,
         "netlist": netlist,
         "net_count": netlist.get("net_count"),
         "isolation": shorts,

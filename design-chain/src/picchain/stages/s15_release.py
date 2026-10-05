@@ -69,6 +69,7 @@ def _readiness(design: Design, ctx: RunContext) -> list[dict[str, Any]]:
     mask = ctx.get("mask") or {}
     ver = ctx.get("verify") or {}
     ret = ctx.get("reticle") or {}
+    labels = (mask.get("labels") or {}) if isinstance(mask, dict) else {}
     geom = lay.get("geometry") or {}
     grid = lay.get("grid") or {}
     env = environment_fingerprint()
@@ -158,8 +159,123 @@ def _readiness(design: Design, ctx: RunContext) -> list[dict[str, Any]]:
          "detail": "seal ring, dicing lane, marks, label" if ret.get("enabled")
                    else "the device cell alone was emitted",
          "field": "reticle.enabled"},
+
+        # The four below answer a pre-submission review rather than a solver.
+        # Each costs the measurement or the submission rather than the wafer,
+        # which is why neither a rule deck nor a connectivity check reports one.
+        # `rules/generic/design-review.md` carries the list they come from.
+        {"condition": "every text label is unique",
+         "met": bool(labels.get("unique")),
+         "detail": (f"{labels.get('count')} labels, {labels.get('distinct')} distinct"
+                    + (f", duplicated: {', '.join(labels['duplicated'][:5])}"
+                       if labels.get("duplicated") else "")
+                    if labels.get("performed") and labels.get("count")
+                    else "no text object was written, so uniqueness is vacuous"),
+         "field": "mask.labels"},
+        {"condition": "the mask carries a label for every device the layout names",
+         "met": bool(_devices_labelled(lay, labels)[0]),
+         "detail": _devices_labelled(lay, labels)[1],
+         "field": "layout.labels"},
+        {"condition": "the emitted files and the top cell carry the design's name",
+         "met": _naming(design, ctx)[0],
+         "detail": _naming(design, ctx)[1],
+         "field": "meta.name"},
+        {"condition": "no feature sits within the rule margin",
+         "met": _margin_met(drc),
+         "detail": _margin_detail(drc),
+         "field": "drc.margin_fraction"},
     ]
     return rows
+
+
+def _margin_met(drc: dict) -> bool:
+    """Whether the mask carries no feature in the band above the rule.
+
+    A margin that was never evaluated is reported as unmet. `drc.at_the_limit`
+    is `None` where `drc.margin_fraction` is zero or the stage did not run, and
+    reading that as a clean margin would be a condition passing because nothing
+    was measured.
+    """
+    at_limit = drc.get("at_the_limit")
+    return at_limit == 0 if at_limit is not None else False
+
+
+def _margin_detail(drc: dict) -> str:
+    at_limit = drc.get("at_the_limit")
+    if at_limit is None:
+        return "no margin was evaluated"
+    pct = (drc.get("margin_fraction") or 0) * 100
+    return (f"{at_limit} features clear every rule and fail it widened by "
+            f"{pct:.0f} per cent")
+
+def _devices_labelled(lay: dict, labels: dict) -> tuple[bool, str]:
+    """Whether every device name the layout declares appears in a written label.
+
+    The layout stage records the names it gave the devices it placed. A station
+    that measures by label can reach only the devices whose names were written
+    into the mask, so a name declared and never written is a device nobody
+    measures.
+    """
+    declared = [str(n) for n in (lay.get("labels") or []) if str(n).strip()]
+    if not declared:
+        return False, ("the layout declares no device name, so nothing can be matched. "
+                       "Name the devices in the block that places them, and draw the "
+                       "names with reticle.split.label_each or "
+                       "reticle.companions.label_each")
+    if not labels.get("performed"):
+        return False, "no label inventory was taken"
+    written = chr(10).join(labels.get("texts") or [])
+    missing = [n for n in declared if n not in written]
+    if missing:
+        return False, (f"{len(declared) - len(missing)} of {len(declared)} device names "
+                       f"appear in a label; missing: {', '.join(missing[:5])}")
+    return True, f"all {len(declared)} device names appear in a written label"
+
+
+def _naming(design: Design, ctx: RunContext) -> tuple[bool, str]:
+    """Whether the top cell and the emitted files carry the declared name.
+
+    A submission is identified by its file and its cell, and the two drift apart
+    silently. In one flow examined for this check the published verification
+    named a file that no longer existed, the layout program having been changed
+    to write a differently named top cell; every number in the report described
+    a mask nobody had.
+    """
+    name = design.meta.name
+    pattern = design.release.name_pattern
+    problems = []
+
+    # The comparison is case-insensitive. A die cell is conventionally the
+    # design name uppercased with a suffix, and a case-sensitive test called
+    # that a mismatch on the first design it ran against: `meta.name` of
+    # `ltoi300_mzm_testchip` against a top cell `LTOI300_MZM_TESTCHIP_DIE`,
+    # which carries the name exactly.
+    lowered = name.lower()
+
+    mask = ctx.get("mask") or {}
+    top = mask.get("top_cell")
+    if top and lowered not in str(top).lower():
+        problems.append(f"top cell {top!r} does not carry {name!r}")
+
+    emitted = [p.name for p in sorted(ctx.run_dir.iterdir())
+               if p.is_file() and any(p.name.endswith(x) for x in SUBMITTABLE)
+               and "drc_markers" not in p.name]
+    stray = [f for f in emitted if lowered not in f.lower()]
+    if stray:
+        problems.append(f"{len(stray)} emitted file(s) do not carry the name: "
+                        + ", ".join(stray[:3]))
+    if pattern:
+        import re
+        bad = [f for f in emitted if not re.fullmatch(pattern, f)]
+        if bad:
+            problems.append(f"{len(bad)} file(s) do not match {pattern!r}: "
+                            + ", ".join(bad[:3]))
+    if not emitted:
+        return False, "no submittable file was emitted"
+    if problems:
+        return False, "; ".join(problems)
+    return True, (f"{len(emitted)} file(s) and the top cell carry {name!r}"
+                  + (f", matching {pattern!r}" if pattern else ""))
 
 
 def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]:

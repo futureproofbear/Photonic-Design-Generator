@@ -1047,11 +1047,33 @@ PROVENANCE: list[tuple[str, str, Any, list[tuple[str, str]]]] = [
     ("taper", "does the taper carry the light without disturbing it",
      "eigenmode expansion over the local modes of a staircase of slices",
      [("transmission", "conversion"), ("adiabaticity_margin_min", "worst adiabaticity margin")]),
+    # One stage, five structures, and each produces a different set. A row naming
+    # only the grating's quantities renders an empty cell for the other four, and
+    # an empty cell reads as a stage that produced nothing rather than as a
+    # description written for a different structure. The renderer skips a field
+    # the payload does not carry, so every structure's quantities are named here
+    # and each run shows its own.
     ("fdtd", "what does a solver that assumes less say", _tool_fdtd,
-     [("kappa_per_cm", "kappa"), ("kappa_ratio_mpb_over_chain", "ratio to coupled mode")]),
+     [("kappa_per_cm", "kappa"), ("kappa_ratio_mpb_over_chain", "ratio to coupled mode"),
+      ("kappa2", "power coupling"), ("unitarity", "power accounted for"),
+      ("unitarity_residual_over_kappa2", "residual over the coupling"),
+      ("critical_coupling_loss_dB_cm", "loss at which that gap is critical"),
+      ("transmission", "transmission"), ("radiated", "radiated"),
+      ("imbalance_dB", "imbalance")]),
     ("bend", "at what radius does a routing bend stop being a guide",
      "conformal transformation of the bend into a graded straight guide, solved by the same mode solver",
-     [("min_safe_radius_um", "smallest bound radius")]),
+     # `min_safe_radius_um` is produced by no stage and rendered an empty cell on
+     # every design that has ever run this one. The two quantities the stage does
+     # return are the tightest radius it solved and the radius at which the
+     # caustic enters the window.
+     [("tightest_radius_solved_um", "tightest radius solved"),
+      ("caustic_enters_window_at_um", "caustic enters the window at")]),
+    ("resonator", "how narrow is a resonance, how deep, and how far apart",
+     "the all-pass transfer function of one loop and one lossless point coupler, "
+     "inverted exactly for the width rather than expanded about the resonance",
+     [("fsr_nm", "free spectral range"), ("q_loaded", "loaded Q"),
+      ("extinction_dB", "extinction"),
+      ("loss_dB_per_cm_for_critical_coupling", "loss at which the drawn gap is critical")]),
     ("facet", "what is lost coupling into the chip",
      "overlap integral of the solved guide mode against a declared elliptical Gaussian, with Fresnel and Snell",
      [("mode_overlap", "mode overlap"), ("total_loss_dB", "total loss")]),

@@ -191,15 +191,26 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         xs_bare, grid, lib, lam, design.platform.cut, design.platform.use_index_override,
         mesh.subsample,
     )
-    i_edge = int(np.argmin(np.abs(grid.x - 0.85 * grid.x[0])))
-    n_slab = solve_slab(grid.y, exx_bare[i_edge, :], lam, 2)
-    n_slab0 = float(n_slab[0]) if n_slab else 0.0
-    guided = [n for n in m_bare.n_eff_all if n > n_slab0 + 1e-4]
-    n_guided = int(len(guided))
     n_clad = float(np.sqrt(max(
         lib[design.platform.clad_material].eps_optical_device(lam)[0],
         lib[design.platform.box_material].eps_optical_device(lam)[0],
     )))
+    i_edge = int(np.argmin(np.abs(grid.x - 0.85 * grid.x[0])))
+    n_slab = solve_slab(grid.y, exx_bare[i_edge, :], lam, 2)
+    # Where the film is fully etched there is no slab beside the ridge, so the
+    # column solves to nothing and the floor is the cladding: a strip mode is
+    # laterally bound while it exceeds the medium around it.
+    #
+    # The floor stood at zero in that case until 2026-09-14, and a floor of
+    # zero admits every eigenvalue the solver returns. The solver returns
+    # `mesh.num_modes + 2` of them, so on a design declaring four a fully etched
+    # guide carrying one mode would have been reported as carrying six, and a
+    # `must` row on single-mode operation would have failed for a reason that is
+    # not in the device.
+    floor_is_the_slab = bool(n_slab)
+    n_slab0 = float(n_slab[0]) if floor_is_the_slab else n_clad
+    guided = [n for n in m_bare.n_eff_all if n > n_slab0 + 1e-4]
+    n_guided = int(len(guided))
 
     payload = {
         "wavelength_um": lam,
@@ -223,6 +234,9 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "n_eff_spectrum": [float(v) for v in m_bare.n_eff_all[:6]],
         "n_clad_max": n_clad,
         "n_slab_floor": n_slab0,
+        "guidance_floor_is": (
+            "the unetched slab beside the ridge" if floor_is_the_slab
+            else "the cladding, the film being fully etched"),
         "single_mode": bool(n_guided <= 1),
     }
 

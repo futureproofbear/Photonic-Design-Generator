@@ -42,3 +42,4 @@ cross-section, says so.
 | folder | stack |
 |---|---|
 | [thin_film_pockels/](thin_film_pockels/) | X-cut thin-film lithium niobate and lithium tantalate on insulator, shallow-etched ridge |
+| [soi_strip_220/](soi_strip_220/) | silicon-on-insulator, 220 nm strip, single full etch, electron-beam written |

@@ -394,14 +394,37 @@ def solve_slab(
     mode is laterally guided only while n_eff exceeds it.  Counting modes above
     the *cladding* index instead would flag every discretised slab continuum
     state as a guided mode.
+
+    A column carrying no index above the medium bounding it guides nothing, and
+    the empty list is the answer. The caller is then holding a cross-section
+    whose guidance floor is the cladding, which is the case of a fully etched
+    film: there is no slab beside the ridge for a mode to spread into.
+
+    That case reached the eigensolver until 2026-09-14 and crashed inside it.
+    The shift is placed at the largest index in the column, and on a uniform
+    column that shift sits exactly on an eigenvalue, so the shifted matrix is
+    singular and the factorisation fails. The first design to declare an etch
+    depth equal to its film thickness received `RuntimeError: Factor is exactly
+    singular` from three frames inside ARPACK, which names neither the film nor
+    the etch.
     """
     k0 = 2 * np.pi / wavelength_um
+    # the medium bounding the column, being the lesser of its two ends: the
+    # cladding above and the buried oxide or the handle below
+    n_bound = float(np.sqrt(min(eps_line[0], eps_line[-1])))
+    n_peak = float(np.sqrt(eps_line.max()))
+    if n_peak <= n_bound * (1.0 + 1e-12):
+        return []
     A = (_second_derivative_matrix(y) + sp.diags(k0**2 * eps_line)).tocsc()
     k = min(num_modes + 2, len(y) - 2)
-    vals, _ = spla.eigs(A, k=k, sigma=(k0 * float(np.sqrt(eps_line.max()))) ** 2,
+    vals, _ = spla.eigs(A, k=k, sigma=(k0 * n_peak) ** 2,
                         which="LM", v0=_start_vector(A.shape[0]))
     b2 = np.sort(np.real(vals))[::-1]
-    return [float(np.sqrt(v) / k0) for v in b2 if v > 0][:num_modes]
+    # a bound mode lies above the bounding medium. Admitting everything with a
+    # real propagation constant admits the discretised continuum with it, and
+    # this solve returned the oxide index itself as its second mode.
+    return [n for n in (float(np.sqrt(v) / k0) for v in b2 if v > 0)
+            if n > n_bound * (1.0 + 1e-9)][:num_modes]
 
 
 def solve_lateral_modes(

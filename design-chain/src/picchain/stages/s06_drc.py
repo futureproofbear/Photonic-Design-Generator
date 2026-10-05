@@ -37,6 +37,34 @@ class DeckPlatformMismatch(RuntimeError):
     """
 
 
+def _margin_count(a, b, kind, value_um, ang, fraction, db, _split):
+    """How many features clear the rule and fail it widened by `fraction`.
+
+    A rule check reports violations and not margins, so a feature sitting
+    exactly on a limit raises nothing. That is L053: a vendor cell placed its
+    metal 1.50 um from a ridge against a rule requiring 1.5, and any bias
+    widening either feature would have put the cell in violation of its own
+    deck. It surfaced only because a neighbouring rung failed loudly.
+
+    The band is evaluated by running the same check at `value * (1 + fraction)`
+    and subtracting what already fails at the rule. What remains is the set of
+    features that are legal now and illegal after a small excursion.
+    """
+    d = int(round(value_um * (1.0 + fraction) / 0.001))
+    if kind == "min_width":
+        edges = a.width_check(d, False, db.Metrics.Euclidian, ang, None, None)
+    elif kind == "min_space":
+        edges = a.space_check(d, False, db.Metrics.Euclidian, ang, None, None)
+    elif kind == "min_separation":
+        edges = a.separation_check(b, d, False, db.Metrics.Euclidian, ang, None, None)
+    elif kind == "min_enclosure":
+        edges = a.enclosing_check(b, d, False, db.Metrics.Euclidian, ang, None, None)
+    else:
+        return None
+    _, at_margin = _split(edges.polygons(1))
+    return at_margin
+
+
 def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]:
     cfg = design.drc
     if not cfg.enabled or (not cfg.rules and not cfg.deck):
@@ -88,6 +116,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     results = []
     total_err = 0
     total_declared = 0
+    total_margin = 0
     for rule in cfg.rules:
         a = regions.get(rule.layer)
         if a is None:
@@ -137,13 +166,32 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
 
         polys = edges.polygons(1)
         dec, real = _split(polys)
-        results.append({
+        row = {
             "name": rule.name, "kind": rule.kind, "layer": rule.layer,
             "other_layer": rule.other_layer, "value_um": rule.value_um,
             "severity": rule.severity, "violations": real,
             "declared_in_monitor_field": dec,
             "status": "fail" if real else "pass",
-        })
+        }
+        if cfg.margin_fraction > 0:
+            try:
+                at_margin = _margin_count(
+                    a, regions.get(rule.other_layer or ""), rule.kind, rule.value_um,
+                    ang, cfg.margin_fraction, db, _split)
+            except Exception as exc:  # pragma: no cover
+                row["margin"] = {"evaluated": False, "reason": str(exc)}
+            else:
+                if at_margin is None:
+                    row["margin"] = {"evaluated": False, "reason": "kind carries no margin"}
+                else:
+                    row["margin"] = {
+                        "evaluated": True,
+                        "fraction": cfg.margin_fraction,
+                        "value_um": round(rule.value_um * (1.0 + cfg.margin_fraction), 6),
+                        "at_the_limit": max(0, at_margin - real),
+                    }
+                    total_margin += max(0, at_margin - real)
+        results.append(row)
         total_declared += dec
         if real and rule.severity == "error":
             total_err += real
@@ -161,6 +209,10 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "markers_gds": str(marked),
         "rules_checked": len(cfg.rules),
         "error_violations": total_err,
+        # features that clear every rule and fail it widened by the declared
+        # fraction: legal now, illegal after a small process excursion
+        "margin_fraction": cfg.margin_fraction,
+        "at_the_limit": total_margin if cfg.margin_fraction > 0 else None,
         "declared_in_monitor_field": total_declared,
         "declared_region_um": (list((ctx.get("reticle") or {}).get(
             "monitor_field_box_um") or []) if declared_box is not None else None),

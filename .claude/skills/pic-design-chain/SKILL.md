@@ -830,3 +830,221 @@ previous numerical output pins the previous defect with equal fidelity.
     widening structure is settled by one more straight guide at the output
     width. That measurement gives 0.109 per cent against 0.015 over the same
     span, so the mechanism is worth 0.093 per cent and no more.
+
+71. **A ring is two numbers, and the one that is unknown is the loss.** The
+    `resonator` stage assembles an all-pass microring from the round-trip
+    amplitude `a` and the coupler transmission `t`. Everything the device is
+    specified by follows:
+
+        T_min   = (a-t)^2 / (1-a t)^2        extinction, zero when t = a
+        FSR     = lambda^2 / (n_g L)
+        cos(phi_half) = 2 a t / (1 + (a t)^2)    the width, exactly
+        Q_int   = 2 pi n_g / (lambda alpha_p)
+
+    **Read `resonator.loss_dB_per_cm_for_critical_coupling` and not the
+    extinction.** A coupler is drawn once and is critically coupled at one
+    propagation loss and at no other, so an extinction figure is a statement
+    about the loss that was assumed. On a stack whose loss is not measured, the
+    extinction is not monotone across the plausible range: one nitride ring
+    read 2.5, 5.2, 11.4, 14.8 and 6.3 dB at 0.05, 0.1, 0.2, 0.5 and 1.0 dB/cm,
+    crossing critical coupling at 0.35. Declare `resonator.loss_sweep_dB_per_cm`
+    and quote the row, never the point.
+
+    **The width is inverted exactly and the literature form is reported beside
+    it.** The small-angle expansion usually printed with the transfer function
+    overstates the width once the finesse falls: it agrees to 2e-3 at a finesse
+    of 100 and is 13 per cent out at a finesse of 4. The stage raises a finding
+    where the two part.
+
+    **One spectrum does not resolve the coupling regime.** The transfer function
+    is symmetric under exchange of `a` and `t`, so a measured extinction admits
+    an undercoupled and an overcoupled solution. `resonator.
+    t_giving_the_same_extinction` is the partner, and separating the two needs a
+    second gap or a deliberate change of loss.
+
+72. **Ask what a metric returns when the device is comfortable, before writing a
+    target on it.** A metric that returns nothing in that case is measuring the
+    instrument's reach. The power beyond a bend's radiation caustic is the
+    example: the bend solve integrates the field outside the caustic and has
+    nothing to integrate wherever the caustic falls outside the solved window,
+    which is every comfortable bend. A ceiling on it passes because the
+    instrument cannot see the quantity and begins to fail only once the caustic
+    has come inside, by which point the device is radiating. Grade the distance
+    to the caustic in lateral decay lengths, `gamma x` with
+    `gamma = k0 sqrt(n_eff^2 - n_floor^2)`, which is defined on both sides.
+
+73. **A fully etched film removes the slab that every partially etched design
+    supplied, and three stages read it.** It is the guidance floor the mode count
+    is taken against, the background of the two-dimensional effective-index
+    reduction, and the index the bend caustic is graded against. On the first
+    such design the slab solve failed inside ARPACK on a uniform column, the
+    mode stage substituted a floor of zero and would have reported a single-mode
+    strip as carrying six modes, the solver returning two more than the design
+    asks for, and the time-domain stage refused with a
+    message naming neither the film nor the etch. Where the film is fully etched
+    the medium beside the guide is the cladding, and `mode.guidance_floor_is`
+    now records which of the two was used. **Read it on any design whose etch
+    depth equals its film thickness.**
+
+74. **Where a requirement reads a difference or a derivative, bound that quantity
+    directly.** Two mode solvers agreeing to 8e-5 on a strongly confining ridge
+    disagreed by 1.2e-3 on a fully etched 200 nm film in silica, the mode there
+    lying 31 per cent in the film at a transversality of 0.954 against 0.9996.
+    The acceptance target read the group index, which the cross-check does not
+    return, so the requirement had no bound at all. Three runs of each solver
+    across the band closed it: the effective indices differ by 0.115 per cent
+    and the group indices by 0.016, **seven times better**, the systematic part
+    cancelling in the difference. The free spectral range moves by 0.0003 nm
+    across the two solvers.
+
+75. **A stage that reads another optionally is ordered by nothing but where it
+    was registered.** A dependency declares both that an input must exist and
+    which stage runs first, and a stage reading an expensive solve where it has
+    run cannot declare one without forcing the solve. The topological sort then
+    breaks the tie by registration order alone. A resonator registered beside
+    the cheap stages it resembles ran before the time-domain solve it takes its
+    coupling from, reported the declared value, and failed nothing: every number
+    was consistent and one provenance field carried the whole trace. Register
+    such a stage after the ones it reads, comment the position as load-bearing,
+    and keep the registration order consistent with the dependency map, since an
+    inconsistency there decides every unrelated tie against the waiting stage.
+
+76. **An extinction requirement on a resonator is a tolerance on the loss, and
+    the tolerance is fixed by the extinction alone.** A coupler is drawn once
+    and is critically coupled at one propagation loss, so a required depth
+    admits a band about it. With `r = 10^(-E/20)` the round-trip loss may lie
+    between `(1-r)/(1+r)` and `(1+r)/(1-r)` times the critical loss: a factor
+    of 3.71 at 10 dB, 1.49 at 20 dB, 1.13 at 30 dB. Nothing about the platform,
+    the radius or the coupling enters. `resonator.
+    loss_window_for_the_declared_extinction_dB_per_cm` computes the band from
+    the design's own target, so the two cannot drift. **Quote the band and not
+    the extinction**, which is a property of the assumed loss and is not
+    monotone in it.
+
+77. **Judge a conservation residual against the quantity measured, not against
+    the input.** A point-coupler solve removes a few parts in a thousand by
+    design, so an absolute guard on the input recedes exactly as the coupling
+    weakens and the measurement gets harder. On one ring the residual fell by a
+    factor of 460 across four gaps and held between 21 and 35 per cent of the
+    coupling throughout, and a one-per-cent absolute guard reported only the gap
+    whose coupling was two orders too strong to use. Read
+    `fdtd.unitarity_residual_over_kappa2`. **A residual holding at a fixed
+    fraction of the measurand across three orders is a systematic**, and the
+    quantity is then established to no better than that fraction whatever the
+    mesh guard says.
+
+78. **A mask is cleared by three checks and the chain performs one and a half of
+    them.** The deck is dimensional. A functional check reads connectivity at the
+    level of component ports, which `mask` does not: it merges touching polygons
+    into nets, so a guide landing a hundred nanometres off a port still merges
+    and still passes. A submission script reads the cells and reports how many
+    black boxes remain unreplaced, which nothing here counts. **Where the kit
+    ships either check, run it and record the count; where it does not, say so in
+    the report rather than letting the net count stand for it.**
+
+79. **Solve the netlist the mask produces, not the one the stage asserts.** The
+    `circuit` stage writes its netlist in code, so a drawn length the router
+    altered reaches no result. Until the chain reads a netlist from the geometry,
+    the standing substitute is to measure the written file and compare:
+    `tools/measure_layout.py <file.gds> --cut x=<station>` returns the intervals
+    the material occupies along a cut, and that is set against the declared
+    dimension term by term. **No stage calls it.** Two example scripts do, and a
+    design that does not run it carries its drawn dimensions as assertions. **Where a specification is a difference between two paths,
+    draw everything but the difference identically** — equal bend counts in both
+    arms leave the difference in straight waveguide, where it is exact and
+    checkable by subtraction.
+
+80. **Run the simulation through the laboratory's extraction, not past it.** A
+    design characterised by an extraction carries two models, and the second is
+    the procedure. A group index from an interferometer is the case: the mode
+    solver returns it directly, and the measurement locates spectral minima,
+    refines each by a parabolic fit, takes consecutive spacings and divides. Run
+    the simulated spectrum through that procedure **on the instrument's own
+    sampling step** and quote what comes out. The step is not a detail: on one
+    study the depth of a null moved by 13 decibels across 1, 5 and 20.4 pm grids,
+    and the laboratory's was the coarsest of the three.
+    Where the procedure cannot run on the simulated observable, the device cannot
+    be characterised, and that is found before fabrication rather than after.
+
+81. **Ask whether the target is observable at the corner, and not only whether it
+    is met.** The structure that admits light has its own band and its own
+    process window. On a 220 nm silicon process the fibre coupler's peak moved by
+    at least 97.9 nm across the declared thickness and width excursions, against a
+    back-to-back pair leaving 74.1 nm within 10 dB of its own peak: **the peak
+    moves further than the window is wide.** The first figure is a lower bound,
+    the sweep having been narrower than the excursion, and every bandwidth
+    measured about a peak on the sweep boundary is a bound too. Place the device's feature near the
+    centre of that band, read the loss and the band of the pair rather than of
+    one, and carry the fringe count inside the instrument's sweep in the table of
+    variants.
+
+82. **Take the process window from the foundry's monitor history where one is
+    published.** Directive 18c says an unsourced window that alone determines a
+    verdict is the finding; this is the answer to it, and it needs three
+    questions asked of the history first. **Which structure is it?** On one such
+    report the monitor row's own simulated group index sat 0.034 from the
+    design's, a gap the size of that design's whole width lever, so the monitor
+    is not the guide. **What is the distribution?** Thirteen of sixteen entries
+    lay inside a band 0.20 wide; the three outliers that set the extremes came
+    from one year and two carried uncertainties of order half the quantity.
+    **Within a run or across runs?** State which, since the two differ by more
+    than most design margins. What survives is the direction: even the central
+    cluster is about thirty times the 0.007 a one-sigma film excursion produces,
+    so **the declared tolerances account for a fraction of what the process
+    does.** Name the row a component figure came from: on that report the spiral
+    guide's loss range sat about a factor of two above the straight guide's.
+
+83. **A direct-write tool snaps every drawn dimension to its shot grid.** This is
+    not the process bias `process.bias_um` carries, which is continuous; it is a
+    quantisation applied before anything is written. At a 6 nm shot pitch a
+    500 nm guide is written as 498 or 504, which interpolating that stack's width
+    sensitivity puts between 4.173 and 4.184 in group index, while 480 nm is
+    exactly eighty shots. **Choose
+    dimensions on the grid where a quantity depends on them**, and where the
+    dimension is fixed, bound the quantity by the two neighbouring grid points. A
+    rule deck passes 500 nm against a 60 nm minimum without remarking that the
+    writer cannot produce it.
+
+84. **Put one device down twice, unchanged.** A variant answers a question the
+    designer posed; a duplicate answers one they did not, being how much of the
+    spread between two measurements belongs to fabrication and measurement rather
+    than to the parameter under study. Without it a variation of that size reads
+    as an effect. The same reticle also carries a calibration path of two
+    coupling structures and nothing else, without which every insertion loss on
+    the chip is quoted against an unknown.
+
+85. **The chain's dispersion is first order, so its group index does not vary
+    across the band.** The `circuit` stage builds `n_eff(lam)` from two scalars,
+    `mode.n_eff_bare` and `mode.n_g`, which makes the group index constant by
+    construction. On a 220 nm silicon strip the true group index moves by 0.0094
+    between 1.50 and 1.60 um, a quarter of a per cent, and a figure extracted
+    from fringe spacing across such a sweep is an average over that movement.
+    **Where a design is read across more than a few tens of nanometres, fit
+    `n_eff(lam)` over the band with a second-order term and report the residual**,
+    rather than taking two numbers at a point. The docstring of `straight` in
+    `s16_circuit.py` states that holding the circuit and the cavity to one
+    dispersion model is deliberate, so that a disagreement between them is about
+    the assembly. That reasoning holds for the assembly comparison and not for a
+    wideband extraction.
+
+86. **Read the review checklist before a mask is sent, and have somebody else
+    read it too.** [`rules/generic/design-review.md`](../../../rules/generic/design-review.md)
+    holds fifteen rows and names the instrument that answers each, including the
+    five that nothing answers. Four of them are release conditions the gate now
+    evaluates: `every text label is unique`, `the mask carries a label for every
+    device the layout names`, `the emitted files and the top cell carry the
+    design's name`, and `no feature sits within the rule margin`. All four cost
+    the measurement or the submission rather than the wafer, which is why no
+    rule deck reports one.
+
+    **`drc.margin_fraction` is the one that finds what a deck cannot.** Each
+    dimensional rule is evaluated a second time at `value * (1 + fraction)` and
+    `drc.at_the_limit` counts the features that clear the rule and fail the
+    widened one. On the first mask it ran against, ten features sat in that band
+    while the deck reported them all legal. A rule check reports violations and
+    not margins.
+
+    **An empty inventory is unmet and not unique.** A mask with no text passes
+    "every label is unique" vacuously, so the condition reports zero labels as
+    unmet. The same reasoning governs the margin condition where no margin was
+    evaluated.

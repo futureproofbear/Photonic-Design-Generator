@@ -141,6 +141,48 @@ Reviewing before baselining is the point. A requirement set held as draft can be
 corrected; one that has been baselined and flowed into a design file is
 corrected in four places.
 
+## 9. A process constraint is a requirement, and it is traced in one table
+
+The constraints a process imposes arrive from three documents and are read at
+three different times: the kit's design manual, the monitor history of past runs,
+and the test rules of the particular run being submitted to. Read separately they
+are a checklist. **Read as a table they are a requirement set, and one row of it
+is usually unmet.**
+
+The form is three columns, one row per constraint.
+
+| Constraint | Source | How the design meets it |
+|---|---|---|
+
+The third column holds evidence and not intent: a solve, a count, a drawn
+dimension, or a verification result. On one submission the table carried eight
+rows and each resolved to something checkable, including a minimum feature met by
+a rule check reporting zero, a fibre-array convention met by a functional check
+reporting zero, and a loss budget met by arithmetic over a published monitor
+range.
+
+**Two rows of that table are the ones most often absent.**
+
+**A constraint that no instrument in the flow can check.** On that submission the
+writer's shot grid was such a row: the pattern generator quantises every drawn
+dimension, no rule deck remarks on it, and the response was to state which
+dimensions fall on the grid, which do not, and what the two neighbouring grid
+points do to the quantity the design reads.
+
+**A constraint met by a measurement that will only exist after fabrication.**
+Where the response to a row is "this is confirmed by the fabricated chip", the
+design is to carry the structure that confirms it. On that submission the
+shot-grid row was answered that way, by placing two requests for an image of a
+specific drawn feature so that the printed width could be compared against the
+drawn one.
+
+**The table is a trace and it is to be checked mechanically where it can be.**
+This framework already binds a concept of operation to its acceptance targets by
+a table a tool reads, described at directive 46 of the operating manual and
+implemented in `design-chain/tools/check_concept_trace.py`. A process-constraint
+table admits the same treatment, and until it gets it the table is prose and
+drifts like prose.
+
 ## What baselining requires
 
 | condition | why |
@@ -158,3 +200,7 @@ L029 (an architecture row contradicted by its own datasheet), L024 (the scope of
 a platform limit belongs beside its value), L025 (a specification tighter than
 its own justifying analysis), and `design-chain/CLAUDE.md` rule 16, which states
 the re-derivation obligation of part 6 and supplies no mechanism for it.
+
+Part 9 is from L063 (a writer snaps every drawn dimension to its shot grid) and
+L064 (a process window published by the foundry's monitor history), with the
+constraint table itself taken from one submission to a multi-project run.

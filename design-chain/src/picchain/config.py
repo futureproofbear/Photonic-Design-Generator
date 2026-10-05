@@ -482,6 +482,37 @@ class BendCfg(BaseModel):
     radii_um: list[float] = Field(default_factory=lambda: [500.0, 200.0, 100.0, 50.0])
 
 
+class ResonatorCfg(BaseModel):
+    """An all-pass ring on a bus, from the loop loss and the point coupling.
+
+    Disabled by default. The stage costs microseconds, being closed form
+    throughout, and it is off because a design that draws no resonator has no
+    radius to give it.
+
+    The power coupling is deliberately left without a default. A ring assembled
+    from a coupling that nobody measured and nobody wrote down reports a
+    quality factor and an extinction that describe the schema, and both read
+    exactly like results. The stage refuses instead.
+    """
+    enabled: bool = False
+    #: radius of the loop, um. The round trip is 2 pi R: a racetrack is a
+    #: different device and is not drawn here.
+    radius_um: float = 100.0
+    #: power coupling of the point coupler. Left unset it is taken from the
+    #: `fdtd` stage where that stage solved a coupler, and where neither is
+    #: present the stage refuses.
+    kappa_squared: float | None = None
+    #: a power loss taken once per turn for whatever the distributed figure
+    #: does not carry, being the bend and the coupler. It is an assumption on
+    #: every platform this chain models, no stage computing a bend loss.
+    excess_loss_dB_per_turn: float = 0.0
+    #: propagation losses to report the device across, dB/cm. On a stack whose
+    #: loss is not measured the extinction is a function of an assumption, and
+    #: a single figure conceals that. `platform.propagation_loss_dB_per_cm` is
+    #: the operating point and is always included.
+    loss_sweep_dB_per_cm: list[float] = Field(default_factory=list)
+
+
 class FacetCfg(BaseModel):
     """Coupling across the facet to a gain chip or a fibre.
 
@@ -1010,6 +1041,12 @@ class ReleaseCfg(BaseModel):
     #: raise rather than warn where a condition blocks. A release step that only
     #: warns is a release step that will be ignored
     strict: bool = True
+    #: a regular expression every submittable file name must match in full.
+    #: Left unset, the weaker invariant still holds: the top cell and every
+    #: emitted file carry `meta.name`. A submission is identified by its file
+    #: and its cell, and the two drift apart in silence.
+    name_pattern: str | None = None
+
 
 
 class MzmCfg(BaseModel):
@@ -1333,6 +1370,14 @@ class DRCCfg(BaseModel):
     #: A frame that is drawn and never checked is a frame that is assumed
     target: Literal["device", "die"] = "device"
     rules: list[DRCRule] = Field(default_factory=list)
+    #: each dimensional rule is evaluated a second time at `value * (1 + this)`,
+    #: and `drc.at_the_limit` counts the features that clear the rule and fail
+    #: the widened one. A rule check reports violations and not margins, so a
+    #: feature sitting exactly on a limit raises nothing: one vendor cell placed
+    #: its metal 1.50 um from a ridge against a rule requiring 1.5, and any bias
+    #: widening either feature would have put the cell in violation of its own
+    #: deck. Zero disables the second evaluation.
+    margin_fraction: float = 0.10
     #: path to a foundry `.lydrc` runset, relative to the design file
     deck: str | None = None
     #: the KLayout application. The Python module cannot run a runset; the
@@ -1474,6 +1519,7 @@ class Design(BaseModel):
     taper: TaperCfg = Field(default_factory=TaperCfg)
     fdtd: FDTDCfg = Field(default_factory=FDTDCfg)
     bend: BendCfg = Field(default_factory=BendCfg)
+    resonator: ResonatorCfg = Field(default_factory=ResonatorCfg)
     facet: FacetCfg = Field(default_factory=FacetCfg)
     fem: FemCfg = Field(default_factory=FemCfg)
     circuit: CircuitCfg = Field(default_factory=CircuitCfg)

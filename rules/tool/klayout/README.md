@@ -124,7 +124,59 @@ The figures must nest: an outer annulus on the first level, a smaller figure
 inside it on the second, separated by more than the layer-to-layer rule. The
 registration error is then the difference between opposite gaps.
 
+## A deck is one of three checks the application can run, and the only dimensional one
+
+Everything above concerns a rule deck. The same application, driven through its
+Python interface with a process design kit installed, runs two further checks
+that read what a deck cannot.
+
+**A functional check reads connectivity.** It walks the components, matches each
+pin against the waveguide meeting it, finds overlapping cells, and applies the
+run's design-for-test rules. A device routed to nothing passes every rule in a
+deck and fails here.
+
+**The kit's own submission script reads the cells.** It reports how many
+black-box cells the layout references and how many remain unreplaced. A black box
+is a correct outline with no geometry inside it, so it satisfies every
+dimensional rule and every connectivity rule, and the fabricated chip has nothing
+there.
+
+Run all three, and run the submission script itself rather than a port of its
+rules, since it is the one that changes when the recipient changes what it
+accepts. [`../../generic/layout-verification.md`](../../generic/layout-verification.md)
+carries the separation and what each check is worth.
+
+## A netlist is extractable from the drawn layout, and that is the circuit to solve
+
+The application's kit interface exports a netlist from the geometry: the
+components, their connectivity, and the drawn length and width of every
+waveguide. Solving that netlist rather than a hand-assembled one is the
+layout-versus-schematic comparison performed by simulation, and it catches a
+mis-wiring and an altered length in the same pass.
+
+Two cautions, both met on one kit.
+
+**A look-up-table reader may ignore the parameters it is given.** On one kit's
+circuit-model package the reader returned the last entry of its table whatever
+was requested, so every waveguide in every circuit was modelled at one width,
+one thickness and one group index. **The symptom to look for is agreement that
+is too good**, circuits drawn at different widths returning identical dispersion.
+That symptom is an inference from the defect rather than an observation: only the
+patched run survives in the files it was found in, so no circuit was recorded
+returning the wrong dispersion.
+
+**A reader may write.** The same package cached its results back into the kit's
+own look-up tables, rewriting the data that the vendor's circuit simulator reads
+from the same files. A reader that modifies the kit is to be replaced with one
+that only reads, and the replacement is to be recorded as a deviation from the
+kit.
+
+Both are the general vendor-kit failure described in
+[`../../generic/vendor-kits.md`](../../generic/vendor-kits.md): a kit is audited before a
+design is built on it.
+
 ## Evidence
 
-`.claude/LESSONS.md` T011, T014, T015, T021, T022, T024, T044, L016, and
-`design-chain/CLAUDE.md` rules 6, 9 and 12.
+`.claude/LESSONS.md` T011, T014, T015, T021, T022, T024, T044, L016 on the rule
+deck; L059 and L060 on the functional check, the submission script and the
+extracted netlist; and `design-chain/CLAUDE.md` rules 6, 9 and 12.

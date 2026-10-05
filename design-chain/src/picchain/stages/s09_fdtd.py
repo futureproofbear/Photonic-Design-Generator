@@ -57,9 +57,24 @@ def _effective_indices(design: Design, lib: MaterialLibrary) -> tuple[float, flo
     i_edge = int(np.argmin(np.abs(grid.x - 0.85 * grid.x[0])))
     core = solve_slab(grid.y, exx[i_mid, :], lam, 2)
     clad = solve_slab(grid.y, exx[i_edge, :], lam, 2)
-    if not core or not clad:
-        raise RuntimeError("the effective-index reduction found no slab mode")
-    return float(core[0]), float(clad[0])
+    if not core:
+        raise RuntimeError(
+            "the effective-index reduction found no slab mode through the ridge, so "
+            "the guide does not confine vertically and the two-dimensional reduction "
+            "describes nothing"
+        )
+    if clad:
+        return float(core[0]), float(clad[0])
+    # A fully etched film has no slab beside the ridge, and the background of
+    # the reduction is then the cladding. That is a different reduction from
+    # the one the runner's docstring describes and it is the correct one for a
+    # strip: the evanescent field decays against the cladding index rather than
+    # against a slab index, so the decay is faster and a gap couples less.
+    n_clad = float(np.sqrt(max(
+        lib[p.clad_material].eps_optical_device(lam)[0],
+        lib[p.box_material].eps_optical_device(lam)[0],
+    )))
+    return float(core[0]), n_clad
 
 
 #: Which runners build a three-dimensional cell. `meep_taper.py` reads the layer
@@ -638,6 +653,15 @@ def _run_coupler(design, ctx, cfg, backend, status, n_core, n_clad):
         "kappa2": kappa2,
         "t2": float(result["t2_at_design"]),
         "unitarity": unitarity,
+        # The residual judged against the quantity measured rather than against
+        # unity. A point coupler removes a small fraction of the input, so a
+        # shortfall that is negligible on the input can be a large part of what
+        # crossed. Measured across four gaps on one ring the residual held at
+        # 21 to 35 per cent of the coupling while falling by a factor of 460 in
+        # absolute terms, which is the signature of a systematic rather than of
+        # numerical noise.
+        "unitarity_residual_over_kappa2": (
+            float(abs(1.0 - unitarity) / kappa2) if kappa2 > 0 else None),
         "kappa2_spectrum": result["kappa2"],
         "kappa2_by_band": result.get("kappa2_by_band_at_design"),
         "wavelength_um": result["wavelength_um"],
@@ -654,13 +678,32 @@ def _run_coupler(design, ctx, cfg, backend, status, n_core, n_clad):
     ctx.put("fdtd", payload)
     ctx.write_stage("fdtd", payload)
 
-    if abs(unitarity - 1.0) > 0.01:
+    residual = abs(1.0 - unitarity)
+    if residual > 0.01:
         ctx.warn(
             f"the coupler solve accounts for {unitarity:.4f} of its input across the "
             "two ports. A point coupler carries no radiation channel, so the shortfall "
             "is numerical: widen fdtd.coupler_port_width_um or fdtd.coupler_margin_um, "
             "or raise fdtd.resolution",
             key="fdtd.coupler_unitarity",
+        )
+    # The absolute check above passes on every weak coupling, the shortfall
+    # falling with the coupling. What decides whether a coupling is measured is
+    # the shortfall as a fraction of that coupling: a solve missing a quarter of
+    # what crossed has measured the coupling to a quarter, whatever it accounts
+    # for on the input. One ring's four gaps returned residuals of 6.19e-2 down
+    # to 1.35e-4, all but the first inside the absolute guard, and 26.5, 26.5,
+    # 21.4 and 34.8 per cent of the coupling throughout.
+    if kappa2 > 0 and residual / kappa2 > 0.05:
+        ctx.warn(
+            f"the coupler solve leaves {residual:.2e} of its input unaccounted for, "
+            f"which is {residual / kappa2:.0%} of the {kappa2:.3e} it reports as "
+            "crossing. The coupling is therefore established to no better than that, "
+            "and a residual holding at a fixed fraction across several gaps is a "
+            "systematic rather than noise. The likeliest cause is the crossed power "
+            "reaching the ring monitor displaced and tilted, the ring curving away "
+            "from the plane the mode is projected onto",
+            key="fdtd.coupler_residual_against_the_coupling",
         )
     if guard and abs(guard.get("shift_fraction") or 0.0) >= 0.10:
         ctx.warn(
