@@ -94,14 +94,20 @@ def joint_correction(r_e, e_f, r_f):
     joint, divided by the reflection of the external cavity alone.
 
     `r_e` is the external cavity's complex round-trip reflection referred to the
-    joint, `r_f` the reflector's amplitude and `e_f` its phase factor. The
-    reflector is crossed with transmission 1 - r_f^2 and the Stokes relation
-    gives it the opposite sign seen from the external side, so the multiple
-    reflections sum to the Airy form
+    joint, `r_f` the reflector's amplitude and `e_f` its phase factor as seen
+    from the gain section. The reflector is crossed with transmission
+    1 - r_f^2, and for the two-port to be lossless its reflection seen from the
+    external side is -conj(e_f) r_f, so the multiple reflections sum to
 
-        r_total = e_f r_f + (1 - r_f^2) r_e / (1 + e_f r_f r_e).
+        r_total = e_f r_f + (1 - r_f^2) r_e / (1 + conj(e_f) r_f r_e).
+
+    CORRECTED after the second final review of 2026-10-06. The external-side
+    reflection was written -e_f r_f, which is lossless only where e_f is real:
+    at a phase of 90 degrees the two-port departed from unitarity by 0.025 at
+    r_f = 0.0126, and the phase ripple it imposed varied by a factor of three
+    over the phase where the physical ripple is constant.
     """
-    return (1.0 - r_f ** 2) / (1.0 + e_f * r_f * r_e) + e_f * r_f / r_e
+    return (1.0 - r_f ** 2) / (1.0 + np.conj(e_f) * r_f * r_e) + e_f * r_f / r_e
 
 
 def apply_reflector_correction(base, c, alpha):
@@ -1321,7 +1327,17 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             # inside that window is a failure of the chirp and is counted.
             _B = float(design.chirp.bandwidth_GHz) * 1e9
             _T = float(design.chirp.chirp_duration_us) * 1e-6
+            # THE OPERATING POINT. Where a beat pair is found, the laser runs at
+            # that pair's trimmer setting and the chirp is read there; otherwise
+            # at the centre of the joint window. Grading the chirp at one setting
+            # and the beat at another described two operating points.
             _set_deg = _jn.get("setting_phase_deg")
+            _set_src = "centre of the joint window"
+            for _b in (_beat or {}).values():
+                _ph = ((_b or {}).get("setting") or {}).get("primary_phase_deg")
+                if _ph is not None:
+                    _set_deg, _set_src = float(_ph), "the beat setting"
+                    break
             _theta = math.radians(float(_set_deg)) if _set_deg is not None else 0.0
             _eta_c = float(eta_sync_Hz_per_V) if eta_sync_Hz_per_V == eta_sync_Hz_per_V else S_Hz_per_V
             _half = 0.5 * _B / max(_eta_c, 1.0)
@@ -1356,6 +1372,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                 _chirp_phase = {
                     "evaluated_at": "trimmer setting, synchronous drive, one bandwidth centred on the ramp centre",
                     "trimmer_setting_deg": float(_set_deg) if _set_deg is not None else None,
+                    "trimmer_setting_source": _set_src,
                     "window_V": [float(Vw[0]), float(Vw[-1])],
                     "bandwidth_spanned_GHz": float(abs(fw[-1] - fw[0])) / 1e9,
                     "hops_in_window": int(_hops0),

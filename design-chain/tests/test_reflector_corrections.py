@@ -16,16 +16,43 @@ from picchain.stages.s04_cavity import (_extra_at, apply_reflector_correction,
                                         joint_correction, resonance_roots)
 
 
+def _two_port(e_f, r_f):
+    """The reflector as a scattering matrix, built from its reflection seen from
+    the gain section and the requirement that it be lossless with a real
+    transmission, independently of the formula under test."""
+    t = np.sqrt(1.0 - r_f ** 2)
+    s11 = e_f * r_f
+    s22 = -np.conj(s11) * t / np.conj(t)        # from S^H S = I
+    return np.array([[s11, t], [t, s22]])
+
+
 def _series(r_e, e_f, r_f, terms=400):
-    """The reflection seen from the gain section, summed bounce by bounce. The
-    reflector returns e_f r_f directly; light crossing it with amplitude
-    transmission t each way meets the external cavity, and each further pass
-    is reflected back by the reflector with the Stokes sign, -e_f r_f."""
-    t2 = 1.0 - r_f ** 2
-    total = e_f * r_f
+    """The reflection seen from the gain section, summed bounce by bounce from
+    the scattering matrix: S11 directly, then S21 r_e (S22 r_e)^n S12."""
+    S = _two_port(e_f, r_f)
+    total = S[0, 0]
     for n in range(terms):
-        total += t2 * r_e * (-e_f * r_f * r_e) ** n
+        total += S[1, 0] * r_e * (S[1, 1] * r_e) ** n * S[0, 1]
     return total
+
+
+def test_the_reflector_is_lossless_at_every_phase():
+    for ph in np.linspace(0, 2 * np.pi, 13):
+        S = _two_port(np.exp(1j * ph), 0.0126)
+        assert np.allclose(S.conj().T @ S, np.eye(2), atol=1e-14)
+
+
+def test_the_ripple_is_the_same_at_every_reflector_phase():
+    """A weak lossless reflector pulls the phase by the same amplitude whatever
+    its own phase; the formula as first written varied it by a factor of three."""
+    r_f, r_e0 = 0.0126, np.sqrt(0.697) * 0.855
+    amp = []
+    for ph in np.linspace(0, 2 * np.pi, 24, endpoint=False):
+        e_f = np.exp(1j * ph)
+        psi = np.linspace(0, 2 * np.pi, 721)
+        c = joint_correction(r_e0 * np.exp(1j * psi), e_f, r_f)
+        amp.append(np.ptp(np.angle(c)))
+    assert max(amp) / min(amp) < 1.01
 
 
 def test_joint_correction_equals_the_sum_of_reflections():

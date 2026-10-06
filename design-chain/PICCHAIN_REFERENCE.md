@@ -382,7 +382,7 @@ result is produced by it.
 | `stages/` | the nineteen chain stages | end to end against a published, measured device (see `examples/edbr_tfln_baseline/TOOLCHAIN_VALIDATION.md`) |
 
 ```bash
-./.venv/Scripts/python.exe -m pytest tests/ -q     # 740 tests
+./.venv/Scripts/python.exe -m pytest tests/ -q     # 742 tests
 ```
 
 ## Verification Beyond the Nominal Design
@@ -870,7 +870,7 @@ staircase deficit of any `taper` stage run and of any study using
 
 ## Annex: The Test Suite
 
-740 tests are distributed over 47 modules. The
+742 tests are distributed over 47 modules. The
 organising rule is that a test is
 anchored to a closed-form result, to a limit whose value is known without
 computation, or to a property measured back off the emitted artifact. No test
@@ -926,10 +926,10 @@ would attest to nothing.
 | [`test_double_layer_coupler.py`](tests/test_double_layer_coupler.py) | 9 | the kit's double-layer edge coupler on the angled route, its profiles against the kit's own, its slab-strip port, and the facet placed on the outer chip boundary |
 | [`test_corners_workers.py`](tests/test_corners_workers.py) | 2 | that corners run side by side in a pool of worker processes |
 | [`test_corner_judgement.py`](tests/test_corner_judgement.py) | 4 | that a corner is judged on every target row its metric carries, so a `must` band is applied when an `info` row on the same metric follows it |
-| [`test_reflector_corrections.py`](tests/test_reflector_corrections.py) | 5 | the joint reflector's compound reflection against an explicit sum of reflections, and the sense of the weak-feedback pull against the Lang-Kobayashi result |
+| [`test_reflector_corrections.py`](tests/test_reflector_corrections.py) | 7 | the joint reflector as a lossless two-port, its compound reflection against the bounce-by-bounce sum built from that two-port, a ripple independent of the reflector's own phase, and the sense of the weak-feedback pull against the Lang-Kobayashi result |
 
 ```bash
-./.venv/Scripts/python.exe -m pytest tests/ -q     # 740 tests
+./.venv/Scripts/python.exe -m pytest tests/ -q     # 742 tests
 ```
 
 ### Solvers — 27
