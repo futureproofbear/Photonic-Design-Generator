@@ -133,6 +133,9 @@ def test_the_floor_plan_encloses_the_rotated_windows(tmp_path):
         for p in polys[layer]:
             assert min(x for x, _ in p) >= min(fx) - 1e-9
             assert max(x for x, _ in p) <= max(fx) + 1e-9
+    fy = [y for _, y in fp]
+    for p in polys["ORIENT"]:
+        assert min(y for _, y in p) >= min(fy) - 1e-9 and max(y for _, y in p) <= max(fy) + 1e-9
 
 
 def test_the_strip_port_is_solved_on_a_converged_window_and_reports_its_margin():

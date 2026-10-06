@@ -1398,6 +1398,18 @@ def build_polygons(design: Design, ctx: RunContext) -> dict[str, list[list[tuple
         out["ORIENT"].append(_rect(a0, arrow_y - 2.0, a1 - 20.0, arrow_y + 2.0))
         out["ORIENT"].append([(a1 - 20.0, arrow_y - 8.0), (a1, arrow_y),
                               (a1 - 20.0, arrow_y + 8.0)])
+    # The floor plan encloses the orientation key as well, which is drawn
+    # above the slab band and stood 28 um outside the floor plan until
+    # 2026-10-06. The floor plan is the cell's declared extent, and a reticle
+    # that abuts cells on it is to find nothing beyond it.
+    if out.get("FLOORPLAN") and out.get("ORIENT"):
+        _fp = out["FLOORPLAN"][-1]
+        _x0 = min(x for x, _ in _fp); _x1 = max(x for x, _ in _fp)
+        _y0 = min(y for _, y in _fp); _y1 = max(y for _, y in _fp)
+        for _p in out["ORIENT"]:
+            _y0 = min(_y0, min(y for _, y in _p)); _y1 = max(_y1, max(y for _, y in _p))
+            _x0 = min(_x0, min(x for x, _ in _p)); _x1 = max(_x1, max(x for x, _ in _p))
+        out["FLOORPLAN"][-1] = _rect(_x0, _y0, _x1, _y1)
     return_orientation = {
         "cut": design.platform.cut,
         "eo_coefficient": e.eo_coefficient,
