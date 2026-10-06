@@ -581,6 +581,7 @@ def corners(
     stages: str = typer.Option("", "--stages", "-s", help="subset; default = design.stages"),
     mode: str = typer.Option("", "--mode", help="onefactor or factorial; default = design.corners.mode"),
     tag: str = typer.Option("corners", "--tag"),
+    workers: int = typer.Option(1, "--workers", help="corners run side by side in this many processes"),
 ):
     """Re-run the chain at the edges of the process window.
 
@@ -730,84 +731,32 @@ def corners(
                f"{len(chosen)} stages each", err=True)
 
     rows: list[dict[str, Any]] = []
-    for n, combo in enumerate(combos):
-        dc = d.model_copy(deep=True)
-        label_parts = []
-        for name, sign in zip(names, combo):
-            delta = cfg.parameters[name] * sign
-            nominal = _read_dotted(dc, name)
-            _apply_override(dc, name, str(nominal + delta))
-            label_parts.append(f"{name}{'+' if sign > 0 else ''}{sign}")
-        label = "nominal" if all(s == 0 for s in combo) else ",".join(
-            p for p, s in zip(label_parts, combo) if s != 0)
-
-        ctx = RunContext(design_dir=design.parent,
-                         run_id=new_run_id(f"{tag}-{n:03d}")).ensure()
-        # A corner resolves a DIFFERENT design from the one on disk, and it must
-        # record which. Without this the hash cannot be taken and a reader cannot
-        # tell a stage last run on the design from one last run on a deliberate
-        # perturbation of it. The dashboard reported the two alike.
-        dump_json(ctx.run_dir / "design.resolved.json", json.loads(dc.model_dump_json()))
-        dump_json(ctx.run_dir / "run.plan.json",
-                  {"stages": chosen, "corner": label, "combo": list(combo)})
-        status = "ok"
-        for s in chosen:
-            try:
-                ctx.current_stage = s
-                ctx.stages_run.append(s)
-                STAGES[s](dc, ctx, _library(dc))
-            except Exception as exc:
-                status = f"failed:{s}"
-                ctx.warn(f"stage {s} raised: {exc}")
-                break
-        ctx.finalise(status)
-
-        # A corner is judged on the metrics it declares, and not on the whole
-        # verify verdict.
-        #
-        # The sweep runs only the stages producing those metrics, so the targets
-        # naming anything else have no value to be compared against and would
-        # report as missing. Reading the full verdict then failed every corner
-        # for reasons that had nothing to do with the corner, and reading it
-        # from a stage that was not run reported None, which is worse: it looks
-        # like an answer.
-        ver = ctx.get("verify") or {}
-        by_metric = {tg.metric: tg for tg in design_targets}
-        # Severity decides the verdict here exactly as it does in `verify`, and
-        # it did not until 2026-08-12. Every unmet row was counted, so a target
-        # carried at `info` failed the corner. `info` exists to be reported
-        # without blocking, and a sweep that blocks on it reports a process
-        # window narrower than the design has. The corner that exposed this was
-        # judged on the mode-hop-free range from zero bias, which is set by
-        # where the mode comb happens to sit and is placed by thermal tuning at
-        # commissioning; it is carried at `info` for that reason.
-        #
-        # Each metric is judged once. The list was built by iterating the
-        # declared metrics without deduplicating them, so a metric named twice
-        # in `corners.metrics` appeared twice in the failure list.
-        outside_must, outside_should, judged = [], [], 0
-        for m in dict.fromkeys(metrics):
-            tg = by_metric.get(m)
-            if tg is None:
-                continue
-            judged += 1
-            if _evaluate_target(tg, ctx.get(m))["status"] == "pass":
-                continue
-            if tg.severity == "must":
-                outside_must.append(m)
-            elif tg.severity == "should":
-                outside_should.append(m)
-        outside = outside_must + outside_should
-        verdict = ver.get("verdict") or (
-            None if not judged else ("PASS" if not outside_must else "FAIL"))
-        row = {"corner": label, "combo": list(combo), "status": status,
-               "run_id": ctx.run_id, "verdict": verdict,
-               "metrics_judged": judged, "metrics_outside": outside,
-               "must_failures": ver.get("must_failures") or outside_must,
-               "should_failures": outside_should,
-               "metrics": {m: ctx.get(m) for m in metrics}}
-        rows.append(row)
-        typer.echo(f"  [{n + 1}/{len(combos)}] {label:38s} {row['verdict']}", err=True)
+    if workers > 1:
+        # Each worker runs its corner's solvers on a share of the machine; the
+        # numerical libraries are held to a few threads each so that the pool,
+        # and not one corner's linear algebra, takes the cores.
+        import concurrent.futures as _cf
+        import os as _os
+        _threads = str(max(1, (_os.cpu_count() or workers) // workers))
+        for _v in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS"):
+            _os.environ[_v] = _threads
+        with _cf.ProcessPoolExecutor(max_workers=workers) as _pool:
+            _futs = {_pool.submit(_corner_job, str(design), chosen, names, dict(cfg.parameters),
+                                  tuple(combo), n, tag, list(metrics)): n
+                     for n, combo in enumerate(combos)}
+            _done = 0
+            for _f in _cf.as_completed(_futs):
+                row = _f.result()
+                rows.append(row)
+                _done += 1
+                typer.echo(f"  [{_done}/{len(combos)}] {row['corner']:38s} {row['verdict']}", err=True)
+        rows.sort(key=lambda r: r["run_id"].rsplit("-", 1)[-1])
+    else:
+        for n, combo in enumerate(combos):
+            row = _corner_job(str(design), chosen, names, dict(cfg.parameters), tuple(combo), n, tag,
+                              list(metrics))
+            rows.append(row)
+            typer.echo(f"  [{n + 1}/{len(combos)}] {row['corner']:38s} {row['verdict']}", err=True)
 
     summary = {}
     for m in metrics:
@@ -848,6 +797,97 @@ def corners(
         typer.echo(f"  {m:46s} {s['min']:.6g} .. {s['max']:.6g}  ({pct})")
     typer.echo(f"written {out_dir / 'corners.md'}")
     raise typer.Exit(EXIT_OK if passed == len(rows) else EXIT_VERIFY_FAIL)
+
+
+
+def _corner_job(design_path: str, chosen: list, names: list, params: dict, combo: tuple,
+                n: int, tag: str, metrics: list) -> dict:
+    """One corner of a sweep: the design displaced by `combo`, its stages run,
+    and the row the sweep records. A top-level function, so that a pool of
+    worker processes can run corners side by side (added 2026-10-06; one
+    corner of a laser design with a converged edge-coupler port and a
+    calibrated chirp took about six minutes, and 81 of them run serially took
+    the better part of a working day)."""
+    from .stages.s07_verify import _evaluate as _evaluate_target
+    design = Path(design_path)
+    d, _lib = _load(design)
+    design_targets = list(d.targets)
+    dc = d.model_copy(deep=True)
+    label_parts = []
+    for name, sign in zip(names, combo):
+        delta = params[name] * sign
+        nominal = _read_dotted(dc, name)
+        _apply_override(dc, name, str(nominal + delta))
+        label_parts.append(f"{name}{'+' if sign > 0 else ''}{sign}")
+    label = "nominal" if all(s == 0 for s in combo) else ",".join(
+        p for p, s in zip(label_parts, combo) if s != 0)
+
+    ctx = RunContext(design_dir=design.parent,
+                     run_id=new_run_id(f"{tag}-{n:03d}")).ensure()
+    # A corner resolves a DIFFERENT design from the one on disk, and it must
+    # record which. Without this the hash cannot be taken and a reader cannot
+    # tell a stage last run on the design from one last run on a deliberate
+    # perturbation of it. The dashboard reported the two alike.
+    dump_json(ctx.run_dir / "design.resolved.json", json.loads(dc.model_dump_json()))
+    dump_json(ctx.run_dir / "run.plan.json",
+              {"stages": chosen, "corner": label, "combo": list(combo)})
+    status = "ok"
+    for s in chosen:
+        try:
+            ctx.current_stage = s
+            ctx.stages_run.append(s)
+            STAGES[s](dc, ctx, _library(dc))
+        except Exception as exc:
+            status = f"failed:{s}"
+            ctx.warn(f"stage {s} raised: {exc}")
+            break
+    ctx.finalise(status)
+
+    # A corner is judged on the metrics it declares, and not on the whole
+    # verify verdict.
+    #
+    # The sweep runs only the stages producing those metrics, so the targets
+    # naming anything else have no value to be compared against and would
+    # report as missing. Reading the full verdict then failed every corner
+    # for reasons that had nothing to do with the corner, and reading it
+    # from a stage that was not run reported None, which is worse: it looks
+    # like an answer.
+    ver = ctx.get("verify") or {}
+    by_metric = {tg.metric: tg for tg in design_targets}
+    # Severity decides the verdict here exactly as it does in `verify`, and
+    # it did not until 2026-08-12. Every unmet row was counted, so a target
+    # carried at `info` failed the corner. `info` exists to be reported
+    # without blocking, and a sweep that blocks on it reports a process
+    # window narrower than the design has. The corner that exposed this was
+    # judged on the mode-hop-free range from zero bias, which is set by
+    # where the mode comb happens to sit and is placed by thermal tuning at
+    # commissioning; it is carried at `info` for that reason.
+    #
+    # Each metric is judged once. The list was built by iterating the
+    # declared metrics without deduplicating them, so a metric named twice
+    # in `corners.metrics` appeared twice in the failure list.
+    outside_must, outside_should, judged = [], [], 0
+    for m in dict.fromkeys(metrics):
+        tg = by_metric.get(m)
+        if tg is None:
+            continue
+        judged += 1
+        if _evaluate_target(tg, ctx.get(m))["status"] == "pass":
+            continue
+        if tg.severity == "must":
+            outside_must.append(m)
+        elif tg.severity == "should":
+            outside_should.append(m)
+    outside = outside_must + outside_should
+    verdict = ver.get("verdict") or (
+        None if not judged else ("PASS" if not outside_must else "FAIL"))
+    row = {"corner": label, "combo": list(combo), "status": status,
+           "run_id": ctx.run_id, "verdict": verdict,
+           "metrics_judged": judged, "metrics_outside": outside,
+           "must_failures": ver.get("must_failures") or outside_must,
+           "should_failures": outside_should,
+           "metrics": {m: ctx.get(m) for m in metrics}}
+    return row
 
 
 def _read_dotted(obj: Any, dotted: str) -> Any:

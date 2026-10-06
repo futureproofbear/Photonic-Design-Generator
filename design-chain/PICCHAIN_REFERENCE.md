@@ -382,7 +382,7 @@ result is produced by it.
 | `stages/` | the nineteen chain stages | end to end against a published, measured device (see `examples/edbr_tfln_baseline/TOOLCHAIN_VALIDATION.md`) |
 
 ```bash
-./.venv/Scripts/python.exe -m pytest tests/ -q     # 729 tests
+./.venv/Scripts/python.exe -m pytest tests/ -q     # 731 tests
 ```
 
 ## Verification Beyond the Nominal Design
@@ -870,7 +870,7 @@ staircase deficit of any `taper` stage run and of any study using
 
 ## Annex: The Test Suite
 
-729 tests are distributed over 44 modules. The
+731 tests are distributed over 45 modules. The
 organising rule is that a test is
 anchored to a closed-form result, to a limit whose value is known without
 computation, or to a property measured back off the emitted artifact. No test
@@ -924,9 +924,10 @@ would attest to nothing.
 | [`test_output_port.py`](tests/test_output_port.py) | 8 | the output end of a laser: drawn to a declared device length, angled to its own facet, the tip carried to the cell edge, the heater landings clear of the electrodes, the ring opened on the output side |
 | [`test_deck_monitor_field.py`](tests/test_deck_monitor_field.py) | 3 | that a foundry deck's markers inside the declared monitor field are set aside, and the release judges the count outside it |
 | [`test_double_layer_coupler.py`](tests/test_double_layer_coupler.py) | 9 | the kit's double-layer edge coupler on the angled route, its profiles against the kit's own, its slab-strip port, and the facet placed on the outer chip boundary |
+| [`test_corners_workers.py`](tests/test_corners_workers.py) | 2 | that corners run side by side in a pool of worker processes |
 
 ```bash
-./.venv/Scripts/python.exe -m pytest tests/ -q     # 729 tests
+./.venv/Scripts/python.exe -m pytest tests/ -q     # 731 tests
 ```
 
 ### Solvers — 27

@@ -27,7 +27,9 @@ BASELINE = (pathlib.Path(__file__).resolve().parents[2]
 
 #: every command that mutates a design after loading it, and therefore must
 #: rebuild the library before handing it to a stage
-OVERRIDING_COMMANDS = ["run", "sweep", "corners", "golden", "search", "sensitivity"]
+# `corners` applies its overrides in `_corner_job`, which a worker pool can run
+# (2026-10-06)
+OVERRIDING_COMMANDS = ["run", "sweep", "_corner_job", "golden", "search", "sensitivity"]
 
 
 def test_the_library_follows_the_design_it_is_given(tmp_path):
