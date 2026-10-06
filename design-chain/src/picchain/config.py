@@ -528,10 +528,17 @@ class ChirpDrive(BaseModel):
     #: phases of the cavity's parasitic reflectors, which drift with the
     #: mechanical spacing of the joint and with temperature. Where set, the
     #: cavity stage re-sweeps the chirp with every declared reflector phase
-    #: moved by this many degrees either way, at four base phases, and reports
+    #: moved by this many degrees either way, over a grid of base phases, and reports
     #: the quadratic phase error of the difference at the worst. (added
-    #: 2026-10-06)
+    #: 2026-10-06; since the final review the curve is read at the trimmer
+    #: setting, on one bandwidth centred on the ramp centre, and the two
+    #: reflectors' base phases form a grid of the sizes below, each drifted in
+    #: either sense independently)
     calibration_drift_deg: float | None = None
+    #: base phases of the gain chip's facet at the joint
+    calibration_phases: int = 24
+    #: base phases of the output facet's return, relative to the joint's
+    calibration_output_phases: int = 4
 
 
 class TaperCfg(BaseModel):

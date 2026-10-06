@@ -81,6 +81,45 @@ def _phase_interp(f_grid: np.ndarray, phase: np.ndarray):
     return _p
 
 
+def _extra_at(extra, f, f_grid):
+    """An intracavity phase at frequency `f`, where `extra` is either a constant
+    or an array over `f_grid`."""
+    if np.ndim(extra) == 0:
+        return extra
+    return np.interp(f, f_grid, extra)
+
+
+def joint_correction(r_e, e_f, r_f):
+    """The reflection seen from the gain section through a weak reflector at the
+    joint, divided by the reflection of the external cavity alone.
+
+    `r_e` is the external cavity's complex round-trip reflection referred to the
+    joint, `r_f` the reflector's amplitude and `e_f` its phase factor. The
+    reflector is crossed with transmission 1 - r_f^2 and the Stokes relation
+    gives it the opposite sign seen from the external side, so the multiple
+    reflections sum to the Airy form
+
+        r_total = e_f r_f + (1 - r_f^2) r_e / (1 + e_f r_f r_e).
+    """
+    return (1.0 - r_f ** 2) / (1.0 + e_f * r_f * r_e) + e_f * r_f / r_e
+
+
+def apply_reflector_correction(base, c, alpha):
+    """The round-trip phase with a reflector folded in as the complex correction
+    `c` to the reflection the gain section sees.
+
+    `c` is built in the round-trip phase's own convention, in which a delay adds
+    a positive phase 2 pi f tau, so its angle adds directly. Its magnitude moves
+    the threshold gain, which the linewidth enhancement factor converts into the
+    further phase alpha ln|c|. Until the final review of 2026-10-06 the sum was
+    multiplied by the sign that maps the mirror's computed phase into this
+    convention; the corrections were already in it, so on a mirror whose sign is
+    negative they entered conjugated, and the weak-feedback pull had the wrong
+    sense against the Lang-Kobayashi result.
+    """
+    return base + np.angle(c) + alpha * np.log(np.abs(c))
+
+
 def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]:
     cav = design.cavity
     if not cav.enabled:
@@ -231,12 +270,18 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         _psi_f = math.radians(_fr.phase_deg)
         _phase_offsets["front"] = 0.0
 
-        def _fr_corr(f, shift):
+        def _fr_corr(f, shift, extra=0.0):
+            # The external round trip from the joint crosses the phase section
+            # and the trimmer, so the phase they apply at this drive point is in
+            # it. It was absent until the final review of 2026-10-06, and along
+            # the synchronous chirp the ripple then swept at the external delay
+            # with the wrong sense; it sweeps at the gain chip's.
             c_out = _fb_corr(f, shift) if _fb_corr is not None else 1.0
             r_e = (np.sqrt(np.clip(R_of(f - shift), 1e-12, 1.0)) * _eta * np.abs(c_out)
-                   * np.exp(1j * (sgn * phi_of(f - shift) + np.angle(c_out) + 2 * np.pi * f * _tau_e)))
-            ef = np.exp(1j * (_psi_f + _phase_offsets["front"])) * _r_f
-            return (1.0 - _r_f ** 2) / (1.0 + ef * r_e) + ef / r_e
+                   * np.exp(1j * (sgn * phi_of(f - shift) + np.angle(c_out) + 2 * np.pi * f * _tau_e
+                                  + extra)))
+            ef = np.exp(1j * (_psi_f + _phase_offsets["front"]))
+            return joint_correction(r_e, ef, _r_f)
 
         _fr_record = {"enabled": True, "reflection_chip": _rf_chip, "reflection_pic_facet": _rf_pic,
                       "amplitude_sum": _r_f, "coupling_round_trip_amplitude": _eta,
@@ -280,11 +325,9 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         # second term was absent until 2026-10-06; it is what raises the pull of
         # weak feedback by sqrt(1 + alpha^2).
         if _fb_corr is not None:
-            c = _fb_corr(f, shift)
-            base = base + sgn * (np.angle(c) + _alpha_lw * np.log(np.abs(c)))
+            base = apply_reflector_correction(base, _fb_corr(f, shift), _alpha_lw)
         if _fr_corr is not None:
-            c = _fr_corr(f, shift)
-            base = base + sgn * (np.angle(c) + _alpha_lw * np.log(np.abs(c)))
+            base = apply_reflector_correction(base, _fr_corr(f, shift, extra), _alpha_lw)
         return base
 
     f_lo, f_hi = f_grid[0] + 0.15 * (f_grid[-1] - f_grid[0]), f_grid[-1] - 0.15 * (f_grid[-1] - f_grid[0])
@@ -326,7 +369,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                 if _fb_corr is not None:
                     r *= float(abs(_fb_corr(f_m, shift)) ** 2)
                 if _fr_corr is not None:
-                    r *= float(abs(_fr_corr(f_m, shift)) ** 2)
+                    r *= float(abs(_fr_corr(f_m, shift, _extra_at(extra, f_m, f_scan))) ** 2)
                 if r >= lim:
                     out.append((k, f_m, r))
         return out
@@ -392,19 +435,22 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # run a second time with an intracavity phase electrode driven alongside the
     # mirror. What that architecture delivers is then measured on the same
     # machinery as the mirror-only case, rather than argued from the lever.
-    def _sweep(phi_extra=None) -> dict[str, Any]:
+    def _sweep(phi_extra=None, V_grid=None) -> dict[str, Any]:
         """Follow the lasing mode across the drive.
 
         `phi_extra` is called with the drive voltage and returns the further
         round-trip phase applied at that point, over the frequency grid.
+        `V_grid` replaces the full drive with a part of it, which the chirp
+        evaluation uses to follow the mode across one ramp alone.
         """
+        V_sweep_ = V_sweep if V_grid is None else np.asarray(V_grid, dtype=float)
         tracked_q = None
         tracked_f = None
         f_track: list[float] = []
         f_lase: list[float] = []
         hop_V = None
         hop_indices: list[int] = []
-        for i, V in enumerate(V_sweep):
+        for i, V in enumerate(V_sweep_):
             shift = S_Hz_per_V * V
             extra = 0.0 if phi_extra is None else phi_extra(V)
             ms = modes_at(shift, extra=extra)
@@ -426,7 +472,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             f_lase.append(best[1])
 
         f_arr = np.asarray(f_track, dtype=float)
-        V_arr = V_sweep[: len(f_arr)]
+        V_arr = V_sweep_[: len(f_arr)]
 
         # every continuous segment between hops, the last running to the drive limit
         bounds = [0] + hop_indices + [len(V_arr)]
@@ -1264,72 +1310,145 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         quad -= quad.mean()
         return float(np.degrees(np.max(np.abs(quad)))), float(np.sqrt(np.mean(df ** 2)))
     try:
-        if _sync_track is not None and design.chirp.enabled:
-            _V = np.asarray(_sync_track["V_used"], dtype=float)
-            _f = np.asarray(_sync_track["f_track"], dtype=float)
-            _seg = _sync_track.get("best_seg")
-            if _seg is not None and _seg[1] - _seg[0] >= 8:
-                _V, _f = _V[_seg[0]:_seg[1]], _f[_seg[0]:_seg[1]]
-                _B = float(design.chirp.bandwidth_GHz) * 1e9
-                _T = float(design.chirp.chirp_duration_us) * 1e-6
-                # the window of the sweep that spans one chirp bandwidth, from its start
-                _fx = _f - _f[0]
-                _m = np.abs(_fx) <= _B * 1.0000001
-                if _m.sum() >= 8 and abs(_fx[_m][-1]) >= 0.9 * _B:
-                    Vw, fw = _V[_m], _f[_m]
-                    t = (Vw - Vw[0]) / (Vw[-1] - Vw[0]) * _T          # linear ramp in time
-                    c1 = np.polyfit(t, fw, 1)                          # ideal linear chirp
-                    df = fw - np.polyval(c1, t)                        # frequency residual
-                    phi = 2.0 * np.pi * np.concatenate(([0.0], np.cumsum(0.5 * (df[1:] + df[:-1]) * np.diff(t))))
-                    q = np.polyfit(t, phi, 2)                          # quadratic + linear + const
-                    quad = q[0] * (t - t.mean()) ** 2
-                    quad -= quad.mean()
-                    _chirp_phase = {
-                        "bandwidth_spanned_GHz": float(abs(fw[-1] - fw[0])) / 1e9,
-                        "points": int(_m.sum()),
-                        "quadratic_phase_error_peak_deg": float(np.degrees(np.max(np.abs(quad)))),
-                        "total_phase_error_rms_deg": float(np.degrees(np.sqrt(np.mean((phi - np.polyval(q[1:], t)) ** 2)))),
-                        "frequency_residual_rms_MHz": float(np.sqrt(np.mean(df ** 2))) / 1e6,
-                        "ramp_duration_us": _T * 1e6,
-                    }
-                    # ---- the chirp after predistortion (added 2026-10-06) ----
-                    # The static curve is calibrated out, so the residual is the
-                    # difference between the curve at calibration and the curve
-                    # once the reflector phases have drifted. Evaluated at four
-                    # base phases of the reflectors and both drift signs; the
-                    # worst is reported.
-                    _drift = getattr(design.chirp, "calibration_drift_deg", None)
-                    if _drift and _phase_offsets and _sync_driver is not None:
-                        _d = math.radians(float(_drift))
-                        _worst, _cases = 0.0, []
-                        for _base in (0.0, 0.5 * math.pi, math.pi, 1.5 * math.pi):
-                            for _k in _phase_offsets:
-                                _phase_offsets[_k] = _base
-                            _ref = _sweep(_sync_driver)
-                            for _sgn in (1.0, -1.0):
-                                for _k in _phase_offsets:
-                                    _phase_offsets[_k] = _base + _sgn * _d
-                                _drf = _sweep(_sync_driver)
-                                _V0 = np.asarray(_ref["V_used"], float); _f0 = np.asarray(_ref["f_track"], float)
-                                _V1 = np.asarray(_drf["V_used"], float); _f1 = np.asarray(_drf["f_track"], float)
-                                _sel = (_V0 >= Vw[0]) & (_V0 <= Vw[-1])
-                                if _sel.sum() < 8:
-                                    continue
-                                _diff = np.interp(_V0[_sel], _V1, _f1) - _f0[_sel]
-                                _qd, _rd = _quad_peak_deg(_V0[_sel], _diff, _T)
-                                _cases.append({"base_deg": math.degrees(_base), "drift_deg": _sgn * float(_drift),
-                                               "quadratic_phase_error_deg": _qd, "frequency_change_rms_MHz": _rd / 1e6})
-                                _worst = max(_worst, _qd)
-                        for _k in _phase_offsets:
-                            _phase_offsets[_k] = 0.0
-                        _chirp_phase["calibrated"] = {
-                            "drift_deg": float(_drift), "cases": _cases,
-                            "quadratic_phase_error_worst_deg": _worst,
-                            "model": "predistorted at calibration; residual is the change of the static curve "
-                                     "under a drift of every reflector phase"}
-                        _chirp_phase["calibrated_quadratic_phase_error_deg"] = _worst
-                else:
-                    _chirp_phase = {"error": "the hop-free segment does not span one chirp bandwidth"}
+        if _sync_track is not None and _sync_driver is not None and design.chirp.enabled:
+            # THE CHIRP AS THE RADAR DRIVES IT, revised after the final review of
+            # 2026-10-06. It was read on the first chirp bandwidth of the longest
+            # hop-free segment of the synchronous sweep, with no trimmer phase
+            # applied. The device is operated at the trimmer setting graded
+            # above and its ramp is centred where the beat is read, so the chirp
+            # is now evaluated there: one bandwidth centred on the ramp centre,
+            # with the synchronous drive and the setting's phase applied. A hop
+            # inside that window is a failure of the chirp and is counted.
+            _B = float(design.chirp.bandwidth_GHz) * 1e9
+            _T = float(design.chirp.chirp_duration_us) * 1e-6
+            _set_deg = _jn.get("setting_phase_deg")
+            _theta = math.radians(float(_set_deg)) if _set_deg is not None else 0.0
+            _eta_c = float(eta_sync_Hz_per_V) if eta_sync_Hz_per_V == eta_sync_Hz_per_V else S_Hz_per_V
+            _half = 0.5 * _B / max(_eta_c, 1.0)
+            _Vlo = max(0.0, float(V_ramp_centre) - _half)
+            _Vhi = _Vlo + 2.0 * _half
+            if _Vhi > float(V_sweep[-1]):
+                _Vhi = float(V_sweep[-1]); _Vlo = max(0.0, _Vhi - 2.0 * _half)
+            # 33 drive points across one ramp. The reflector ripple has a period
+            # of tens of gigahertz against a 3 GHz chirp, so the curve is smooth
+            # at this spacing; on the revision G design 97 points and 33 gave the
+            # same calibrated figure to the precision quoted. A hop between two
+            # points is still detected, the tracked mode changing.
+            _Vg = np.linspace(_Vlo, _Vhi, 33)
+
+            def _drive_at(theta):
+                return lambda V, _t=theta: _sync_driver(V) + _t
+
+            def _ramp(theta):
+                tr = _sweep(_drive_at(theta), V_grid=_Vg)
+                return (np.asarray(tr["V_used"], float), np.asarray(tr["f_track"], float),
+                        len(tr["hop_indices"]))
+
+            Vw, fw, _hops0 = _ramp(_theta)
+            if len(Vw) >= 8:
+                t = (Vw - Vw[0]) / (Vw[-1] - Vw[0]) * _T          # linear ramp in time
+                c1 = np.polyfit(t, fw, 1)                          # ideal linear chirp
+                df = fw - np.polyval(c1, t)                        # frequency residual
+                phi = 2.0 * np.pi * np.concatenate(([0.0], np.cumsum(0.5 * (df[1:] + df[:-1]) * np.diff(t))))
+                q = np.polyfit(t, phi, 2)                          # quadratic + linear + const
+                quad = q[0] * (t - t.mean()) ** 2
+                quad -= quad.mean()
+                _chirp_phase = {
+                    "evaluated_at": "trimmer setting, synchronous drive, one bandwidth centred on the ramp centre",
+                    "trimmer_setting_deg": float(_set_deg) if _set_deg is not None else None,
+                    "window_V": [float(Vw[0]), float(Vw[-1])],
+                    "bandwidth_spanned_GHz": float(abs(fw[-1] - fw[0])) / 1e9,
+                    "hops_in_window": int(_hops0),
+                    "points": int(len(Vw)),
+                    "quadratic_phase_error_peak_deg": float(np.degrees(np.max(np.abs(quad)))),
+                    "total_phase_error_rms_deg": float(np.degrees(np.sqrt(np.mean((phi - np.polyval(q[1:], t)) ** 2)))),
+                    "frequency_residual_rms_MHz": float(np.sqrt(np.mean(df ** 2))) / 1e6,
+                    "ramp_duration_us": _T * 1e6,
+                }
+
+                # ---- the trimmer window inside which the ramp stays hop-free --
+                # A hop inside the chirp is not removed by calibration, so the
+                # trimmer has to be held inside this window between updates.
+                _st = (_jn.get("stations") or [])
+                _ok = []
+                for _d in _st:
+                    _, _, _h = _ramp(math.radians(_d["phase_deg"]))
+                    _ok.append(_h == 0)
+                if _ok and _set_deg is not None:
+                    _n = len(_ok)
+                    _i0 = int(round(float(_set_deg) / 360.0 * _n)) % _n
+                    if _ok[_i0]:
+                        _lo = _hi = 0
+                        while _lo < _n and _ok[(_i0 - _lo - 1) % _n]:
+                            _lo += 1
+                        while _hi < _n and _ok[(_i0 + _hi + 1) % _n]:
+                            _hi += 1
+                        _w = min(_n, _lo + _hi + 1)
+                        _chirp_phase["hop_free_trimmer_window"] = {
+                            "stations": _w, "width_deg": 360.0 * _w / _n,
+                            "below_setting_deg": 360.0 * _lo / _n, "above_setting_deg": 360.0 * _hi / _n}
+                    else:
+                        _chirp_phase["hop_free_trimmer_window"] = {"stations": 0, "width_deg": 0.0}
+                    _chirp_phase["hop_free_trimmer_window_deg"] = _chirp_phase["hop_free_trimmer_window"]["width_deg"]
+
+                # ---- the chirp after predistortion ----------------------------
+                # The static curve is calibrated out, so the residual is the
+                # change of the curve between calibration and use. That change
+                # is set by the reflector phases, which drift. The two
+                # reflectors' base phases are taken independently over a grid,
+                # each drifted by the budget in either sense independently, and
+                # the worst change over the grid is reported. Four base phases
+                # along the diagonal, as first written, read 2.74 degrees on a
+                # design whose worst on a 5 degree grid was 3.92.
+                _drift = getattr(design.chirp, "calibration_drift_deg", None)
+                if _drift and _phase_offsets:
+                    _d = math.radians(float(_drift))
+                    _keys = list(_phase_offsets)
+                    _nf = int(getattr(design.chirp, "calibration_phases", 24) or 24)
+                    _no = int(getattr(design.chirp, "calibration_output_phases", 4) or 4)
+                    _grid = {k: [2 * math.pi * i / (_nf if k == "front" or len(_keys) == 1 else _no)
+                                 for i in range(_nf if k == "front" or len(_keys) == 1 else _no)]
+                             for k in _keys}
+                    import itertools as _it
+                    _signs = list(_it.product((1.0, -1.0), repeat=len(_keys)))
+                    _worst, _cases, _hop_cases = 0.0, [], 0
+                    _static = []          # the uncalibrated figure at each base, for the reader
+                    for _bases in _it.product(*[_grid[k] for k in _keys]):
+                        for _k, _b in zip(_keys, _bases):
+                            _phase_offsets[_k] = _b
+                        V0, f0, h0 = _ramp(_theta)
+                        if len(V0) >= 8:
+                            _static.append(_quad_peak_deg(V0, f0, _T)[0])
+                        for _sg in _signs:
+                            for _k, _b, _s in zip(_keys, _bases, _sg):
+                                _phase_offsets[_k] = _b + _s * _d
+                            V1, f1, h1 = _ramp(_theta)
+                            n = min(len(V0), len(V1))
+                            if n < 8:
+                                continue
+                            _diff = f1[:n] - f0[:n]
+                            _qd, _rd = _quad_peak_deg(V0[:n], _diff, _T)
+                            _hop = bool(h0 or h1)
+                            _hop_cases += int(_hop)
+                            _cases.append({"base_deg": {k: math.degrees(b) for k, b in zip(_keys, _bases)},
+                                           "drift_sign": dict(zip(_keys, _sg)), "hop": _hop,
+                                           "quadratic_phase_error_deg": _qd, "frequency_change_rms_MHz": _rd / 1e6})
+                            _worst = max(_worst, _qd)
+                    for _k in _phase_offsets:
+                        _phase_offsets[_k] = 0.0
+                    _top = sorted(_cases, key=lambda c: -c["quadratic_phase_error_deg"])[:12]
+                    _chirp_phase["calibrated"] = {
+                        "drift_deg": float(_drift), "base_phases": {k: len(v) for k, v in _grid.items()},
+                        "cases_evaluated": len(_cases), "cases_with_a_hop": _hop_cases,
+                        "static_quadratic_phase_error_range_deg": ([float(min(_static)), float(max(_static))]
+                                                                   if _static else None),
+                        "worst_cases": _top,
+                        "quadratic_phase_error_worst_deg": _worst,
+                        "model": "predistorted at calibration; residual is the change of the static curve "
+                                 "at the trimmer setting under an independent drift of each reflector phase"}
+                    _chirp_phase["calibrated_quadratic_phase_error_deg"] = _worst
+            else:
+                _chirp_phase = {"error": "the ramp window holds fewer than eight drive points"}
     except Exception as _exc:
         _chirp_phase = {"error": f"{type(_exc).__name__}: {_exc}"}
 

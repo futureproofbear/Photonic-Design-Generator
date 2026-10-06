@@ -1150,7 +1150,10 @@ def test_an_external_reflector_beyond_the_mirror_enters_the_cavity_phase():
     from picchain.config import Cavity
     from picchain.stages import s04_cavity
     src = Path(s04_cavity.__file__).read_text(encoding="utf-8")
-    assert "c = _fb_corr(f, shift)" in src and "base = base + sgn * (np.angle(c)" in src
+    # added in the round-trip phase's own convention, without the mirror's
+    # sign (final review of 2026-10-06; tests/test_reflector_corrections.py)
+    assert "apply_reflector_correction(base, _fb_corr(f, shift), _alpha_lw)" in src
+    assert "sgn * (np.angle(c)" not in src
     assert "r *= float(abs(_fb_corr(f_m, shift)) ** 2)" in src
     assert '"output_feedback": _fb_summary()' in src
     assert Cavity().output_feedback is None
@@ -1167,10 +1170,15 @@ def test_the_reflector_model_carries_the_tuned_path_alpha_and_the_chip_facet():
     from picchain.stages import s04_cavity
     src = Path(s04_cavity.__file__).read_text(encoding="utf-8")
     assert "((f - shift) * _tau_xt + f * _tau_xu)" in src
-    assert "_alpha_lw * np.log(np.abs(c))" in src
-    assert "def _fr_corr(f, shift):" in src
+    assert "return base + np.angle(c) + alpha * np.log(np.abs(c))" in src
+    # the joint reflector's external path carries the intracavity drive phase
+    assert "def _fr_corr(f, shift, extra=0.0):" in src
+    assert "apply_reflector_correction(base, _fr_corr(f, shift, extra), _alpha_lw)" in src
     assert '"front_reflector": _fr_record' in src
     assert '_chirp_phase["calibrated_quadratic_phase_error_deg"] = _worst' in src
     assert OutputFeedbackCfg(path_um=1.0).tuned_path_um == 0.0
     assert FrontReflectorCfg().reflection is None
     assert Cavity().front_reflector is None and ChirpDrive().calibration_drift_deg is None
+    # graded at the trimmer setting over an independent grid of base phases
+    assert ChirpDrive().calibration_phases == 24 and ChirpDrive().calibration_output_phases == 4
+    assert '_set_deg = _jn.get("setting_phase_deg")' in src

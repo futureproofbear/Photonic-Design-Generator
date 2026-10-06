@@ -800,6 +800,44 @@ def corners(
 
 
 
+def _judge_corner(metrics: list, design_targets: list, get) -> tuple:
+    """The metrics of one corner outside their targets, as (must, should, judged)."""
+    from .stages.s07_verify import _evaluate as _evaluate_target
+    # Every row on a metric is judged. The map was keyed by metric and kept
+    # the last row declared, so a metric carried twice, once at `must` as a
+    # band and once at `info` as a tolerance about the nominal, was judged
+    # at `info` alone. On one design the `must` band on the coupling
+    # constant was breached at 15 of 81 corners and never reported.
+    by_metric: dict = {}
+    for tg in design_targets:
+        by_metric.setdefault(tg.metric, []).append(tg)
+    # Severity decides the verdict here exactly as it does in `verify`, and
+    # it did not until 2026-08-12. Every unmet row was counted, so a target
+    # carried at `info` failed the corner. `info` exists to be reported
+    # without blocking, and a sweep that blocks on it reports a process
+    # window narrower than the design has. The corner that exposed this was
+    # judged on the mode-hop-free range from zero bias, which is set by
+    # where the mode comb happens to sit and is placed by thermal tuning at
+    # commissioning; it is carried at `info` for that reason.
+    #
+    # Each metric is judged once. The list was built by iterating the
+    # declared metrics without deduplicating them, so a metric named twice
+    # in `corners.metrics` appeared twice in the failure list.
+    outside_must, outside_should, judged = [], [], 0
+    for m in dict.fromkeys(metrics):
+        rows = by_metric.get(m)
+        if not rows:
+            continue
+        judged += 1
+        failed = {tg.severity for tg in rows
+                  if _evaluate_target(tg, get(m))["status"] != "pass"}
+        if "must" in failed:
+            outside_must.append(m)
+        elif "should" in failed:
+            outside_should.append(m)
+    return outside_must, outside_should, judged
+
+
 def _corner_job(design_path: str, chosen: list, names: list, params: dict, combo: tuple,
                 n: int, tag: str, metrics: list) -> dict:
     """One corner of a sweep: the design displaced by `combo`, its stages run,
@@ -853,31 +891,7 @@ def _corner_job(design_path: str, chosen: list, names: list, params: dict, combo
     # from a stage that was not run reported None, which is worse: it looks
     # like an answer.
     ver = ctx.get("verify") or {}
-    by_metric = {tg.metric: tg for tg in design_targets}
-    # Severity decides the verdict here exactly as it does in `verify`, and
-    # it did not until 2026-08-12. Every unmet row was counted, so a target
-    # carried at `info` failed the corner. `info` exists to be reported
-    # without blocking, and a sweep that blocks on it reports a process
-    # window narrower than the design has. The corner that exposed this was
-    # judged on the mode-hop-free range from zero bias, which is set by
-    # where the mode comb happens to sit and is placed by thermal tuning at
-    # commissioning; it is carried at `info` for that reason.
-    #
-    # Each metric is judged once. The list was built by iterating the
-    # declared metrics without deduplicating them, so a metric named twice
-    # in `corners.metrics` appeared twice in the failure list.
-    outside_must, outside_should, judged = [], [], 0
-    for m in dict.fromkeys(metrics):
-        tg = by_metric.get(m)
-        if tg is None:
-            continue
-        judged += 1
-        if _evaluate_target(tg, ctx.get(m))["status"] == "pass":
-            continue
-        if tg.severity == "must":
-            outside_must.append(m)
-        elif tg.severity == "should":
-            outside_should.append(m)
+    outside_must, outside_should, judged = _judge_corner(metrics, design_targets, ctx.get)
     outside = outside_must + outside_should
     verdict = ver.get("verdict") or (
         None if not judged else ("PASS" if not outside_must else "FAIL"))
