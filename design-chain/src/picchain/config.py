@@ -438,12 +438,46 @@ class OutputFeedbackCfg(BaseModel):
     phase_deg: float = 0.0
     #: the power reflection returned into the guide; None takes the facet stage's
     reflection: float | None = None
+    #: The part of `path_um` that lies in the tuned grating beyond the
+    #: penetration depth, um. Its phase follows the mirror's tuning, so it
+    #: enters the external phase at the shifted frequency and cancels against
+    #: the mirror's own shift; only the rest of the path turns the phase as the
+    #: chirp sweeps. Zero treats the whole path as untuned. (added 2026-10-06,
+    #: after review: the whole 5590 um had been taken as untuned where 4662 um
+    #: of it lay under the mirror electrode, which overstated the phase swept
+    #: over a 3 GHz chirp sixfold.)
+    tuned_path_um: float = 0.0
+
+
+class FrontReflectorCfg(BaseModel):
+    """A reflector inside the cavity at the gain chip's joint.
+
+    The gain chip's front facet carries a residual reflectivity, and the
+    tantalate facet facing it another. Together they form a reflector between
+    the gain section and the external cavity, so the gain section sees the
+    compound reflection
+
+        r_tot = r_ext ( t^2 / (1 + r_f e^{i psi} r_ext) + r_f e^{i psi} / r_ext ),
+
+    where r_ext is the external cavity's reflection referred to the joint: the
+    mirror, the external delay and the coupling across the joint. The phase psi
+    is set by the joint's spacing modulo a wavelength and is a parameter to be
+    swept. `reflection` is taken as the chip's `rsoa.front_facet_R` where unset,
+    and `include_pic_facet` adds the tantalate input facet's return in amplitude,
+    the adverse case. (added 2026-10-06)
+    """
+    enabled: bool = True
+    reflection: float | None = None
+    include_pic_facet: bool = True
+    phase_deg: float = 0.0
 
 
 class Cavity(BaseModel):
     enabled: bool = True
     #: an external reflector beyond the mirror (see OutputFeedbackCfg)
     output_feedback: OutputFeedbackCfg | None = None
+    #: a reflector inside the cavity at the gain chip's joint (see FrontReflectorCfg)
+    front_reflector: FrontReflectorCfg | None = None
     #: passive PIC length between the chip facet and the start of the grating
     feed_length_um: float = 1000.0
     rsoa: RSOA = Field(default_factory=RSOA)
@@ -488,6 +522,16 @@ class ChirpDrive(BaseModel):
     ramp_centre_V: float | None = None
     waveform: Literal["triangle", "sawtooth"] = "triangle"
     drive_amplitude_Vpp: float | None = None
+    #: The chirp is predistorted: its static nonlinearity is measured once and
+    #: corrected in the drive waveform, so what remains is the change of the
+    #: static curve between calibration and use. That change is driven by the
+    #: phases of the cavity's parasitic reflectors, which drift with the
+    #: mechanical spacing of the joint and with temperature. Where set, the
+    #: cavity stage re-sweeps the chirp with every declared reflector phase
+    #: moved by this many degrees either way, at four base phases, and reports
+    #: the quadratic phase error of the difference at the worst. (added
+    #: 2026-10-06)
+    calibration_drift_deg: float | None = None
 
 
 class TaperCfg(BaseModel):

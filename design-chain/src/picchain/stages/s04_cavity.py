@@ -189,25 +189,61 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # phase without a wrapping error.
     _fb = getattr(cav, "output_feedback", None)
     _fb_record: dict = {"enabled": False}
+    # Phase offsets applied on top of each reflector's declared phase, moved
+    # only by the calibrated-chirp evaluation below; zero everywhere else.
+    _phase_offsets: dict = {}
     if _fb is not None and _fb.enabled:
         _r_x2 = (_fb.reflection if _fb.reflection is not None
                  else float(((ctx.get("facet") or {}).get("output") or {}).get("reflection_into_guide") or 0.0))
         _r_x = math.sqrt(max(_r_x2, 0.0))
         _tau_x = 2 * n_g_wg * _fb.path_um * 1e-6 / C0
+        _tau_xt = 2 * n_g_wg * min(float(getattr(_fb, "tuned_path_um", 0.0)), _fb.path_um) * 1e-6 / C0
+        _tau_xu = _tau_x - _tau_xt
         _psi0 = math.radians(_fb.phase_deg)
+        _phase_offsets["out"] = 0.0
 
         def _fb_corr(f, shift):
             r_abs = np.sqrt(np.clip(R_of(f - shift), 1e-12, 1.0))
             t2 = np.clip(1.0 - r_abs ** 2, 0.0, 1.0)
-            e = np.exp(1j * (2 * np.pi * f * _tau_x + _psi0))
+            # the tuned part of the path follows the mirror; the rest does not
+            e = np.exp(1j * (2 * np.pi * ((f - shift) * _tau_xt + f * _tau_xu) + _psi0 + _phase_offsets["out"]))
             return 1.0 + t2 * _r_x * e / (r_abs * (1.0 - r_abs * _r_x * e))
 
         _fb_record = {"enabled": True, "reflection": _r_x2, "path_um": float(_fb.path_um),
-                      "tau_x_ps": _tau_x * 1e12, "phase_deg": float(_fb.phase_deg),
+                      "tuned_path_um": float(getattr(_fb, "tuned_path_um", 0.0)),
+                      "tau_x_ps": _tau_x * 1e12, "tau_x_untuned_ps": _tau_xu * 1e12,
+                      "phase_deg": float(_fb.phase_deg),
                       "ripple_period_GHz": 1e-9 / _tau_x if _tau_x > 0 else None,
                       "feedback_strength_kappa": None}
     else:
         _fb_corr = None
+
+    # ---- a reflector inside the cavity at the gain chip's joint (2026-10-06) ---
+    _fr = getattr(cav, "front_reflector", None)
+    _fr_record: dict = {"enabled": False}
+    if _fr is not None and _fr.enabled:
+        _rf_chip = float(_fr.reflection if _fr.reflection is not None else getattr(rs, "front_facet_R", 0.0) or 0.0)
+        _fac = ctx.get("facet") or {}
+        _rf_pic = float(_fac.get("reflection_into_guide") or 0.0) if _fr.include_pic_facet else 0.0
+        _r_f = math.sqrt(max(_rf_chip, 0.0)) + math.sqrt(max(_rf_pic, 0.0))
+        _eta = float(_fac.get("total_coupling") or 1.0)        # power, one pass; amplitude over a round trip
+        _tau_e = tau_ext - tau_soa                             # the external delay, referred to the joint
+        _psi_f = math.radians(_fr.phase_deg)
+        _phase_offsets["front"] = 0.0
+
+        def _fr_corr(f, shift):
+            c_out = _fb_corr(f, shift) if _fb_corr is not None else 1.0
+            r_e = (np.sqrt(np.clip(R_of(f - shift), 1e-12, 1.0)) * _eta * np.abs(c_out)
+                   * np.exp(1j * (sgn * phi_of(f - shift) + np.angle(c_out) + 2 * np.pi * f * _tau_e)))
+            ef = np.exp(1j * (_psi_f + _phase_offsets["front"])) * _r_f
+            return (1.0 - _r_f ** 2) / (1.0 + ef * r_e) + ef / r_e
+
+        _fr_record = {"enabled": True, "reflection_chip": _rf_chip, "reflection_pic_facet": _rf_pic,
+                      "amplitude_sum": _r_f, "coupling_round_trip_amplitude": _eta,
+                      "phase_deg": float(_fr.phase_deg), "tau_external_ps": _tau_e * 1e12}
+    else:
+        _fr_corr = None
+    _alpha_lw = float(rs.linewidth_enhancement_alpha)
 
     def _fb_summary():
         if not _fb_record.get("enabled"):
@@ -237,9 +273,19 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         cavity whose only tunable element is the mirror.
         """
         base = 2 * np.pi * f * tau_ext + sgn * phi_of(f - shift) + extra
-        if _fb_corr is None:
-            return base
-        return base + sgn * np.angle(_fb_corr(f, shift))
+        # Each reflector enters as a complex correction c to the reflection the
+        # gain section sees. Its angle shifts the round-trip phase directly, and
+        # its magnitude shifts the threshold gain, which the linewidth
+        # enhancement factor converts into a further phase, alpha ln|c|. The
+        # second term was absent until 2026-10-06; it is what raises the pull of
+        # weak feedback by sqrt(1 + alpha^2).
+        if _fb_corr is not None:
+            c = _fb_corr(f, shift)
+            base = base + sgn * (np.angle(c) + _alpha_lw * np.log(np.abs(c)))
+        if _fr_corr is not None:
+            c = _fr_corr(f, shift)
+            base = base + sgn * (np.angle(c) + _alpha_lw * np.log(np.abs(c)))
+        return base
 
     f_lo, f_hi = f_grid[0] + 0.15 * (f_grid[-1] - f_grid[0]), f_grid[-1] - 0.15 * (f_grid[-1] - f_grid[0])
     f_scan = np.linspace(f_lo, f_hi, 20001)
@@ -279,6 +325,8 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                 r = float(R_of(f_m - shift))
                 if _fb_corr is not None:
                     r *= float(abs(_fb_corr(f_m, shift)) ** 2)
+                if _fr_corr is not None:
+                    r *= float(abs(_fr_corr(f_m, shift)) ** 2)
                 if r >= lim:
                     out.append((k, f_m, r))
         return out
@@ -521,6 +569,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     mhf_sync_Hz = float("nan")
     eta_sync_Hz_per_V = float("nan")
     _sync_track: dict | None = None
+    _sync_driver = None
     if ps and ps.enabled and fsr_Hz > 0 and S_Hz_per_V > 0:
         lam_m = C0 / nu
         dn_per_V = S_Hz_per_V * n_g_wg / nu
@@ -593,6 +642,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
             mhf_sync_Hz = sync["range_Hz"]
             eta_sync_Hz_per_V = sync["slope"]
             _sync_track = sync
+            _sync_driver = (lambda V, _p=pol: _phi_ps(V, _p))
             phase_payload.update({
                 "synchronous_drive_V": V_ph_req,
                 "electrode_polarity": int(pol),
@@ -1202,6 +1252,17 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
     # component of that phase over the chirp bandwidth is what is reported. The
     # transient of a real ramp is outside the rate equations and is not in this.
     _chirp_phase: dict[str, Any] = {}
+
+    def _quad_peak_deg(Vw, fw, T):
+        """The quadratic phase error, in degrees, of a frequency curve over a
+        ramp mapped linearly to time, after its best straight line is removed."""
+        t = (Vw - Vw[0]) / (Vw[-1] - Vw[0]) * T
+        df = fw - np.polyval(np.polyfit(t, fw, 1), t)
+        phi = 2.0 * np.pi * np.concatenate(([0.0], np.cumsum(0.5 * (df[1:] + df[:-1]) * np.diff(t))))
+        q = np.polyfit(t, phi, 2)
+        quad = q[0] * (t - t.mean()) ** 2
+        quad -= quad.mean()
+        return float(np.degrees(np.max(np.abs(quad)))), float(np.sqrt(np.mean(df ** 2)))
     try:
         if _sync_track is not None and design.chirp.enabled:
             _V = np.asarray(_sync_track["V_used"], dtype=float)
@@ -1231,6 +1292,42 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
                         "frequency_residual_rms_MHz": float(np.sqrt(np.mean(df ** 2))) / 1e6,
                         "ramp_duration_us": _T * 1e6,
                     }
+                    # ---- the chirp after predistortion (added 2026-10-06) ----
+                    # The static curve is calibrated out, so the residual is the
+                    # difference between the curve at calibration and the curve
+                    # once the reflector phases have drifted. Evaluated at four
+                    # base phases of the reflectors and both drift signs; the
+                    # worst is reported.
+                    _drift = getattr(design.chirp, "calibration_drift_deg", None)
+                    if _drift and _phase_offsets and _sync_driver is not None:
+                        _d = math.radians(float(_drift))
+                        _worst, _cases = 0.0, []
+                        for _base in (0.0, 0.5 * math.pi, math.pi, 1.5 * math.pi):
+                            for _k in _phase_offsets:
+                                _phase_offsets[_k] = _base
+                            _ref = _sweep(_sync_driver)
+                            for _sgn in (1.0, -1.0):
+                                for _k in _phase_offsets:
+                                    _phase_offsets[_k] = _base + _sgn * _d
+                                _drf = _sweep(_sync_driver)
+                                _V0 = np.asarray(_ref["V_used"], float); _f0 = np.asarray(_ref["f_track"], float)
+                                _V1 = np.asarray(_drf["V_used"], float); _f1 = np.asarray(_drf["f_track"], float)
+                                _sel = (_V0 >= Vw[0]) & (_V0 <= Vw[-1])
+                                if _sel.sum() < 8:
+                                    continue
+                                _diff = np.interp(_V0[_sel], _V1, _f1) - _f0[_sel]
+                                _qd, _rd = _quad_peak_deg(_V0[_sel], _diff, _T)
+                                _cases.append({"base_deg": math.degrees(_base), "drift_deg": _sgn * float(_drift),
+                                               "quadratic_phase_error_deg": _qd, "frequency_change_rms_MHz": _rd / 1e6})
+                                _worst = max(_worst, _qd)
+                        for _k in _phase_offsets:
+                            _phase_offsets[_k] = 0.0
+                        _chirp_phase["calibrated"] = {
+                            "drift_deg": float(_drift), "cases": _cases,
+                            "quadratic_phase_error_worst_deg": _worst,
+                            "model": "predistorted at calibration; residual is the change of the static curve "
+                                     "under a drift of every reflector phase"}
+                        _chirp_phase["calibrated_quadratic_phase_error_deg"] = _worst
                 else:
                     _chirp_phase = {"error": "the hop-free segment does not span one chirp bandwidth"}
     except Exception as _exc:
@@ -1269,6 +1366,7 @@ def run(design: Design, ctx: RunContext, lib: MaterialLibrary) -> dict[str, Any]
         "tau_phase_section_ps": tau_phase * 1e12,
         "tau_phase_section_gap_ps": tau_gap * 1e12,
         "output_feedback": _fb_summary(),
+        "front_reflector": _fr_record,
         "phase_section": phase_payload,
         # With a sufficient phase section the comb is driven in step with the
         # mirror, so no hand-over occurs and the whole swept excursion is

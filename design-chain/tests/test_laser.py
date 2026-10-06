@@ -1150,7 +1150,27 @@ def test_an_external_reflector_beyond_the_mirror_enters_the_cavity_phase():
     from picchain.config import Cavity
     from picchain.stages import s04_cavity
     src = Path(s04_cavity.__file__).read_text(encoding="utf-8")
-    assert "return base + sgn * np.angle(_fb_corr(f, shift))" in src
+    assert "c = _fb_corr(f, shift)" in src and "base = base + sgn * (np.angle(c)" in src
     assert "r *= float(abs(_fb_corr(f_m, shift)) ** 2)" in src
     assert '"output_feedback": _fb_summary()' in src
     assert Cavity().output_feedback is None
+
+
+def test_the_reflector_model_carries_the_tuned_path_alpha_and_the_chip_facet():
+    """Review of 2026-10-06: the external path inside the tuned grating follows
+    the mirror; the linewidth enhancement factor converts each reflector's
+    effect on the threshold into phase; the gain chip's front facet enters as an
+    intracavity reflector; and a predistorted chirp is graded on the change
+    of its static curve under a drift of every reflector phase."""
+    from pathlib import Path
+    from picchain.config import Cavity, ChirpDrive, OutputFeedbackCfg, FrontReflectorCfg
+    from picchain.stages import s04_cavity
+    src = Path(s04_cavity.__file__).read_text(encoding="utf-8")
+    assert "((f - shift) * _tau_xt + f * _tau_xu)" in src
+    assert "_alpha_lw * np.log(np.abs(c))" in src
+    assert "def _fr_corr(f, shift):" in src
+    assert '"front_reflector": _fr_record' in src
+    assert '_chirp_phase["calibrated_quadratic_phase_error_deg"] = _worst' in src
+    assert OutputFeedbackCfg(path_um=1.0).tuned_path_um == 0.0
+    assert FrontReflectorCfg().reflection is None
+    assert Cavity().front_reflector is None and ChirpDrive().calibration_drift_deg is None

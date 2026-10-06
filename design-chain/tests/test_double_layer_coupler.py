@@ -133,3 +133,13 @@ def test_the_floor_plan_encloses_the_rotated_windows(tmp_path):
         for p in polys[layer]:
             assert min(x for x, _ in p) >= min(fx) - 1e-9
             assert max(x for x, _ in p) <= max(fx) + 1e-9
+
+
+def test_the_strip_port_is_solved_on_a_converged_window_and_reports_its_margin():
+    """Padded by 6 um, a 0.5 um strip at 1588 nm still carried a fifth of its
+    field at the walls and read 1.27 dB where the converged figure is 2.10;
+    each port now reports how far its mode sits above the cladding."""
+    src = Path(s11_facet.__file__).read_text(encoding="utf-8")
+    assert "window_pad_x_um=20.0, window_pad_y_um=18.0" in src
+    assert '"guidance_margin": n_guide - _n_clad' in src
+    assert 'key=f"facet.{label}_port_weakly_guided"' in src

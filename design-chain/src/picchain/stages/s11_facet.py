@@ -31,8 +31,12 @@ from ..materials import MaterialLibrary
 
 def _strip_cross_section(design: Design, width_um: float, name: str):
     """A strip of the slab layer alone, fully etched about it: the port of a
-    double-layer edge coupler. The mode is weakly guided and wide, so the
-    window is padded by 6 um. (added 2026-10-06)"""
+    double-layer edge coupler. The mode is weakly guided, its field decaying
+    over micrometres, so the window is padded by 20 um laterally and 18 um
+    vertically. Padded by 6 and 5 um, as first drawn on 2026-10-06, a 0.5 um
+    strip at 1588 nm still carried a fifth of its peak field at the walls and
+    its coupling read 1.27 dB to the gain chip where the converged figure is
+    2.10. (added 2026-10-06)"""
     from ..geometry import edbr_cross_section
     from .. import process
     p = design.platform
@@ -44,7 +48,7 @@ def _strip_cross_section(design: Design, width_um: float, name: str):
         box_thickness_um=p.box_thickness_um, clad_thickness_um=p.clad_thickness_um,
         clad_material=p.clad_material, box_material=p.box_material,
         substrate_material=p.substrate_material, slab_offset_um=0.0,
-        include_substrate=False, window_pad_x_um=6.0, window_pad_y_um=5.0, name=name)
+        include_substrate=False, window_pad_x_um=20.0, window_pad_y_um=18.0, name=name)
 
 
 def _port(design: Design, ctx: RunContext, lib: MaterialLibrary, cfg, angle: float,
@@ -149,9 +153,16 @@ def _port(design: Design, ctx: RunContext, lib: MaterialLibrary, cfg, angle: flo
     refl_into_guide = r_face * eta_tilt
     refl_bare = r_bare * eta_tilt
 
+    # How far the port's mode sits above the cladding's index: the margin by
+    # which it is guided. A weakly guided strip's figures above are only as
+    # good as this margin, and a mode solved at the cladding index is a field
+    # filling the window and no mode at all. (added 2026-10-06)
+    _n_clad = float(lib[design.platform.clad_material].index(lam, "o", design.platform.use_index_override))
     payload = {
         "enabled": True,
         "port": label,
+        "cladding_index": _n_clad,
+        "guidance_margin": n_guide - _n_clad,
         "port_guide": "slab strip" if strip else "ridge tip",
         "mode_height_centre_um": _y_mode,
         "facet_width_um": float(width),
@@ -209,6 +220,12 @@ def _port(design: Design, ctx: RunContext, lib: MaterialLibrary, cfg, angle: flo
             f"a {cfg.tolerance_dB:.1f} dB alignment tolerance of {min(tol_x, tol_y):.2f} um "
             f"is demanded of the assembly at the {label} facet, which is tight for passive placement"
         )
+    if payload["guidance_margin"] == payload["guidance_margin"] and payload["guidance_margin"] < 2e-3:
+        ctx.warn(
+            f"the {label} port's mode sits {payload['guidance_margin']:.1e} above the cladding index, "
+            "so it is guided by a margin that a process excursion can remove; below zero it is not "
+            "guided and the figures above describe a field filling the window",
+            key=f"facet.{label}_port_weakly_guided")
     return payload
 
 
